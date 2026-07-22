@@ -232,6 +232,23 @@ the sync engine are written once and work across any pair of backends.
 | `dialogs.py` | prompts, menus, confirmations, progress bars |
 | `app.py` | curses UI, key bindings, orchestration |
 
+## Utility scripts
+
+`scripts/merge.sh` bundles a directory tree into a single text file and
+`scripts/split.sh` expands it again:
+
+```bash
+scripts/merge.sh bundle.txt some/dir     # bundle a tree (default: current dir)
+scripts/split.sh bundle.txt restored/    # expand it (default: current dir)
+```
+
+The bundle format inlines text files verbatim and base64-encodes binaries
+(and any text file whose content would collide with the section markers).
+Permissions, symlinks, empty directories and missing trailing newlines are
+preserved; every file carries a sha256 that `split.sh` verifies on expansion.
+`split.sh` refuses bundles containing absolute or `..` paths and never passes
+bundle-controlled strings to a shell.
+
 ## Development
 
 ```bash
