@@ -85,8 +85,12 @@ or **FTP**. You will be asked for host, username, port and credentials:
 - **SFTP** authenticates with an SSH key file, your SSH agent, or a password,
   and browses through the SFTP subsystem.
 - **SSH (shell)** authenticates the same way but does not use SFTP at all — it
-  drives `ls`/`cat`/`mkdir`/`rm`/`mv` over the SSH channel. Use it when a server
-  allows SSH login but has SFTP disabled. It assumes a POSIX-like remote shell.
+  drives `ls`/`mkdir`/`rm`/`mv` over the SSH channel. Use it when a server
+  allows SSH login but has SFTP disabled. File contents are transferred with a
+  fallback chain — `cat`, then `dd`, then the raw **scp protocol** — so viewing
+  and editing work even on restricted appliance shells that answer
+  `Command 'cat' not supported` (most embedded SSH servers still implement
+  scp). The method that works is remembered for the rest of the session.
 - **FTP** prefers the modern `MLSD` listing command and automatically falls
   back to parsing classic `LIST` output on older servers that don't support it
   (which otherwise answer `500 Unknown command`). Log in anonymously by leaving

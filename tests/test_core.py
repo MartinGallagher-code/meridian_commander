@@ -12,7 +12,13 @@ import time
 
 import pytest
 
-from martin_commander.filesystems import FTPFileSystem, LocalFileSystem
+from martin_commander.filesystems import (
+    FileSystemError,
+    FTPFileSystem,
+    LocalFileSystem,
+    SSHFileSystem,
+    _parse_scp_header,
+)
 from martin_commander.operations import copy_path, count_tree, move_path
 from martin_commander.panel import Panel
 from martin_commander.sync import build_sync_plan, execute_sync_plan
@@ -249,6 +255,135 @@ def test_ftp_list_parser_dos():
 
     f = parse("07-22-2025  09:15AM              1024 report.pdf")
     assert f is not None and not f.is_dir and f.name == "report.pdf" and f.size == 1024
+
+
+# -- SSH shell backend: read fallbacks (faked, no paramiko needed) ---------
+class _FakeChannel:
+    def __init__(self, status):
+        self._status = status
+
+    def recv_exit_status(self):
+        return self._status
+
+    def shutdown_write(self):
+        pass
+
+
+class _FakeStdout:
+    def __init__(self, data: bytes, status: int):
+        self._data = data
+        self.channel = _FakeChannel(status)
+
+    def read(self, n=-1):
+        if n is None or n < 0:
+            d, self._data = self._data, b""
+            return d
+        d, self._data = self._data[:n], self._data[n:]
+        return d
+
+
+class _FakeStderr:
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def read(self):
+        return self._data
+
+
+class _FakeStdin:
+    def __init__(self, fail: bool):
+        self._fail = fail
+        self.received = bytearray()
+        self.channel = _FakeChannel(1 if fail else 0)
+
+    def write(self, data):
+        if self._fail:
+            raise OSError("channel closed")
+        self.received.extend(data)
+
+
+class _FakeSSHClient:
+    """Maps command prefixes to canned (stdout, stderr, exit) responses."""
+
+    def __init__(self, responses):
+        self.responses = responses
+        self.calls = []
+
+    def exec_command(self, cmd, timeout=None):
+        self.calls.append(cmd)
+        for prefix, (out, err, status) in self.responses.items():
+            if cmd.startswith(prefix):
+                stdin = _FakeStdin(fail=status != 0)
+                stdout = _FakeStdout(out, status)
+                stdout.channel = _FakeChannel(status)
+                return stdin, stdout, _FakeStderr(err)
+        return (_FakeStdin(True), _FakeStdout(b"", 127),
+                _FakeStderr(b"not found"))
+
+
+def _fake_ssh_fs(responses) -> SSHFileSystem:
+    fs = SSHFileSystem.__new__(SSHFileSystem)
+    fs._client = _FakeSSHClient(responses)
+    fs._read_templates = list(SSHFileSystem.READ_TEMPLATES)
+    fs._write_templates = list(SSHFileSystem.WRITE_TEMPLATES)
+    return fs
+
+
+def test_ssh_read_uses_cat_when_available():
+    fs = _fake_ssh_fs({"cat ": (b"hello world", b"", 0)})
+    reader = fs.open_read("/tmp/f.txt")
+    assert reader.read() == b"hello world"
+    assert fs._read_templates[0].startswith("cat")
+
+
+def test_ssh_read_falls_back_to_dd_when_cat_missing():
+    # A restricted shell that answers cat with "Command 'cat' not supported".
+    fs = _fake_ssh_fs({
+        "cat ": (b"", b"-sh: Command 'cat' not supported\n", 127),
+        "dd if=": (b"file body", b"0+1 records in\n", 0),
+    })
+    reader = fs.open_read("/flash/config.txt")
+    assert reader.read() == b"file body"
+    # dd is promoted; the next read skips the dead cat straight away.
+    assert fs._read_templates[0].startswith("dd")
+    fs._client.calls.clear()
+    reader2 = fs.open_read("/flash/config.txt")
+    assert reader2.read() == b"file body"
+    assert fs._client.calls[0].startswith("dd")
+
+
+def test_ssh_read_empty_file_is_not_a_failure():
+    fs = _fake_ssh_fs({"cat ": (b"", b"", 0)})
+    reader = fs.open_read("/tmp/empty")
+    assert reader.read() == b""
+
+
+def test_ssh_read_partial_reads_keep_probe_byte():
+    fs = _fake_ssh_fs({"cat ": (b"abcdef", b"", 0)})
+    reader = fs.open_read("/tmp/f")
+    assert reader.read(2) == b"ab"
+    assert reader.read(2) == b"cd"
+    assert reader.read() == b"ef"
+
+
+def test_ssh_write_falls_back_to_dd():
+    fs = _fake_ssh_fs({
+        "cat > ": (b"", b"not supported", 127),
+        "dd of=": (b"", b"", 0),
+    })
+    writer = fs.open_write("/flash/new.txt")
+    writer.write(b"payload")
+    writer.close()  # cat> fails at close, dd replay succeeds
+    dd_calls = [c for c in fs._client.calls if c.startswith("dd of=")]
+    assert dd_calls, "dd fallback was not attempted"
+    assert fs._write_templates[0].startswith("dd")
+
+
+def test_scp_header_parsing():
+    assert _parse_scp_header("C0644 1234 config.txt\n") == 1234
+    assert _parse_scp_header("C0755 0 empty\n") == 0
+    with pytest.raises(FileSystemError):
+        _parse_scp_header("garbage\n")
 
 
 def test_panel_selection(fs, tmp_path):
