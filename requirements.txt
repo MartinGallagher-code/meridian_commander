@@ -1,0 +1,5 @@
+# Core Martin Commander has no required third-party dependencies -- it runs on
+# the Python standard library (curses, ftplib, ...).
+#
+# SFTP/SSH browsing is optional. Install paramiko to enable it:
+paramiko>=2.7
