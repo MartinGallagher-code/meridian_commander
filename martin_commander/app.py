@@ -231,9 +231,30 @@ class App:
             x += seg
 
     # -- main loop --------------------------------------------------------
+    def _tick_plugins(self) -> bool:
+        """Pump plug-ins that produce output while idle (e.g. terminals).
+
+        Returns True when any such plug-in is active, so the main loop knows
+        to poll with a timeout instead of blocking forever on getch().
+        """
+        ticking = False
+        for panel in (self.left, self.right):
+            plugin = panel.plugin
+            if plugin is not None and getattr(plugin, "wants_timer", False):
+                ticking = True
+                tick = getattr(plugin, "tick", None)
+                if tick is not None:
+                    try:
+                        tick()
+                    except Exception as exc:
+                        self._set_message(f"Plugin error: {exc}")
+        return ticking
+
     def run(self) -> None:
         curses.curs_set(0)
         while self.running:
+            ticking = self._tick_plugins()
+            self.stdscr.timeout(120 if ticking else -1)
             self.draw()
             try:
                 key = self.stdscr.getch()
@@ -241,7 +262,10 @@ class App:
                 if dialogs.confirm(self.stdscr, "Quit", "Exit Martin Commander?"):
                     break
                 continue
+            if key == -1:      # poll timeout: loop to pump plugin output
+                continue
             self.handle_key(key)
+        self.stdscr.timeout(-1)
         self._close_backends()
 
     def handle_key(self, key: int) -> None:
@@ -303,7 +327,9 @@ class App:
             panel.toggle_hidden()
             self._set_message("Hidden files "
                               + ("shown" if panel.show_hidden else "hidden"))
-        elif key in (ord("t"), ord("!"), 15):  # terminal here (15 = Ctrl-O)
+        elif key == ord("t"):  # terminal inside this pane
+            self._open_terminal_pane()
+        elif key == ord("!"):  # full-screen shell (for vim/htop and friends)
             self._open_terminal()
         elif key in (ord("p"), curses.KEY_F11):  # plug-in mode
             self._plugin_mode()
@@ -331,7 +357,7 @@ class App:
             self._delete()
         elif key in (curses.KEY_F9, ord("9"), ord("s")):
             self._sync()
-        elif key in (curses.KEY_F10, ord("0"), ord("q"), 27, 3):  # 3 = Ctrl-C
+        elif key in (curses.KEY_F10, ord("0"), ord("q"), 3):  # 3 = Ctrl-C
             if dialogs.confirm(self.stdscr, "Quit", "Exit Martin Commander?",
                                default_yes=True):
                 self.running = False
@@ -355,9 +381,31 @@ class App:
         self.active = self.left if self.active is self.left else self.right
         self._set_message("Panes swapped")
 
-    def _open_terminal(self) -> None:
-        """Suspend the TUI and drop the user into a shell in this directory.
+    def _open_terminal_pane(self) -> None:
+        """Open a pseudo-terminal *inside* the active pane.
 
+        The shell runs in the pane's rectangle and follows the pane's
+        location: a local pty for local panes, an interactive channel on the
+        pane's existing SSH connection for SFTP/SSH panes.  Ctrl-] closes it.
+        """
+        from .plugin_api import PluginContext
+        from .plugins.terminal import TerminalPlugin
+
+        panel = self.active
+        ctx = PluginContext(app=self, own_panel=panel, other_panel=self.other)
+        try:
+            panel.plugin = TerminalPlugin(ctx)
+        except Exception as exc:
+            panel.plugin = None
+            dialogs.message(self.stdscr, "Terminal", str(exc), error=True)
+            return
+        self._set_message("Terminal opened -- Ctrl-] closes it")
+
+    def _open_terminal(self) -> None:
+        """Suspend the TUI and drop the user into a full-screen shell.
+
+        The in-pane terminal (`t`) is line-oriented; this full-screen variant
+        exists for programs that need a real terminal (vim, htop, ...).
         For a local pane this is a shell with the working directory set to the
         pane's path.  For an SFTP pane it opens an interactive ``ssh`` session
         into the same remote directory.  FTP has no shell, so it is declined.
@@ -554,9 +602,9 @@ class App:
 
         labels = ["View", "Edit", "Copy to other pane", "Move to other pane",
                   "Rename", "Delete", "Tag / untag", "New directory",
-                  "Open terminal here", "Cancel"]
+                  "Terminal in this pane", "Full-screen shell", "Cancel"]
         actions = ["view", "edit", "copy", "move", "rename", "delete",
-                   "tag", "mkdir", "terminal", None]
+                   "tag", "mkdir", "terminal", "shell", None]
         choice = dialogs.menu(self.stdscr, header[:40], labels)
         if choice is None:
             return
@@ -578,6 +626,8 @@ class App:
         elif action == "mkdir":
             self._mkdir()
         elif action == "terminal":
+            self._open_terminal_pane()
+        elif action == "shell":
             self._open_terminal()
 
     def _rename(self) -> None:
@@ -905,7 +955,8 @@ class App:
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
             "  Ctrl-G         go to path   Ctrl-T  sort order\n"
             "  .              show/hide hidden files (this pane)\n"
-            "  t / !          open a terminal in the current directory\n"
+            "  t              terminal inside this pane (Ctrl-] closes)\n"
+            "  !              full-screen shell (for vim/htop etc.)\n"
             "  p / F11        plug-in mode: run a plug-in in this pane\n"
             "  C              configuration: edit config.ini / plug-ins\n"
             "\n"

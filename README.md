@@ -41,8 +41,12 @@ and ships with a built-in file viewer and editor.
   copy/move/delete.
 - **Per-pane hidden-file toggle** (`.`) — show or hide dotfiles independently in
   each pane.
-- **Drop into a terminal** (`t` or `!`) in the current directory — a local shell
-  for local panes, or an `ssh` session into the same directory for SFTP panes.
+- **Terminal inside the pane** (`t`) — the pane itself becomes a
+  pseudo-terminal running a shell in the pane's directory, while the other pane
+  keeps working normally. Works for **local panes** (a real pty) and for
+  **SFTP/SSH panes** (an interactive shell on the pane's existing SSH
+  connection). `Ctrl-]` closes it. For full-screen programs (vim, htop) use
+  `!`, which suspends the UI into a real terminal instead.
 - **Mouse support** — click to select, double-click to open, wheel to scroll,
   and **right-click for a context menu** of actions (view, edit, copy, move,
   rename, delete, tag, mkdir, terminal).
@@ -120,8 +124,9 @@ edit, and copy/move/sync to and from it.
 | `Ctrl-U` | swap panes | `F9` | synchronize panes |
 | `Ctrl-R` | reload panes | `F10` | quit |
 | `Ctrl-G` | go to path | `Ctrl-T` | change sort order |
-| `.` | show/hide hidden files | `t` / `!` | terminal in current dir |
-| `p` / F11 | plug-in mode (this pane) | `C` | configuration menu |
+| `.` | show/hide hidden files | `t` | terminal inside this pane |
+| `p` / F11 | plug-in mode (this pane) | `!` | full-screen shell |
+| `C` | configuration menu | `Ctrl-]` | close in-pane terminal |
 
 **F-key aliases** (for terminals that swallow function keys): press the digit
 `1`–`0` for `F1`–`F10`, or the mnemonic letter — `?`/`1` help, `o` open/connect,
@@ -133,8 +138,27 @@ a context menu of actions.
 
 In the **viewer**: `N` toggles line numbers, `W` toggles wrap, arrows/PgUp/PgDn
 scroll, `Q` quits.
-In the **editor**: `Ctrl-S` saves, `Ctrl-Q` quits, `Ctrl-K` deletes a line,
-`Ctrl-L` toggles line numbers.
+In the **editor**: `F2` / `Ctrl-S` / `Ctrl-O` save, `F10` / `Ctrl-Q` quit,
+`Ctrl-Y` / `Ctrl-K` delete a line, `Ctrl-L` toggles line numbers. Esc does
+not quit — only `q`-style keys and `F10` leave the app, so a stray Esc never
+throws you out.
+
+### Running inside VS Code's integrated terminal
+
+VS Code intercepts some control keys before they reach terminal programs:
+`Ctrl-K` is a chord prefix (`terminal.integrated.allowChords`), and keys bound
+to workbench commands in `terminal.integrated.commandsToSkipShell` (on some
+platforms `Ctrl-Q`) never arrive. Every editor command therefore has a
+VS Code-safe alias — use **`F2` to save, `F10` to quit, `Ctrl-Y` to delete a
+line** and you'll never notice the difference. If you prefer the control-key
+bindings, add this to your VS Code `settings.json`:
+
+```json
+{
+  "terminal.integrated.allowChords": false,
+  "terminal.integrated.commandsToSkipShell": ["-workbench.action.quit"]
+}
+```
 
 ## Plug-ins
 
@@ -147,6 +171,8 @@ switches panes while a plug-in is open.
 
 Built-in plug-ins:
 
+- **Terminal** — the in-pane pseudo-terminal (also on the `t` key); a shell in
+  the pane's directory, local or over the pane's SSH connection.
 - **Find in other pane** — recursively search the other pane's directory by
   glob pattern (works on remote panes too).
 - **JSON push** — the user enters input in the bottom line; the plug-in logs

@@ -205,7 +205,7 @@ class Editor:
             except curses.error:
                 pass
 
-        hint = " ^S save  ^Q quit  ^K del-line  ^L numbers  arrows/PgUp/PgDn "
+        hint = " F2/^S save  F10/^Q quit  ^Y/^K del-line  ^L numbers "
         status = self.message or hint
         win.attrset(curses.A_REVERSE)
         try:
@@ -221,6 +221,58 @@ class Editor:
             win.move(scr_y, scr_x)
         win.noutrefresh()
 
+    # -- key handling -------------------------------------------------------
+    def handle_key(self, key: int, page: int = 20) -> str | None:
+        """Apply one key press to the buffer.
+
+        Returns ``"quit"`` when the user asked to leave (the caller decides
+        about unsaved changes), otherwise ``None``.  Every command has an
+        alias that survives terminals which intercept control keys -- the
+        VS Code integrated terminal in particular treats Ctrl-K as a chord
+        prefix and reserves Ctrl-Q, so save/quit/delete-line are also on
+        F2 / F10 / Ctrl-Y (and Ctrl-O saves, nano-style).
+        """
+        if key in (17, curses.KEY_F10):          # Ctrl-Q / F10: quit
+            return "quit"
+        elif key in (19, 15, curses.KEY_F2):     # Ctrl-S / Ctrl-O / F2: save
+            self.save()
+        elif key in (11, 25):                    # Ctrl-K / Ctrl-Y: delete line
+            self._delete_line()
+        elif key == 12:                          # Ctrl-L: toggle line numbers
+            self.show_line_numbers = not self.show_line_numbers
+        elif key == curses.KEY_UP:
+            self.move(-1, 0)
+        elif key == curses.KEY_DOWN:
+            self.move(1, 0)
+        elif key == curses.KEY_LEFT:
+            self.move(0, -1)
+        elif key == curses.KEY_RIGHT:
+            self.move(0, 1)
+        elif key == curses.KEY_HOME:
+            self.home()
+        elif key == curses.KEY_END:
+            self.end()
+        elif key == curses.KEY_NPAGE:
+            self.move(page, 0)
+        elif key == curses.KEY_PPAGE:
+            self.move(-page, 0)
+        elif key in (curses.KEY_BACKSPACE, 127, 8):
+            self.backspace()
+        elif key == curses.KEY_DC:
+            self.delete()
+        elif key in (10, 13, curses.KEY_ENTER):
+            self.newline()
+        elif key == 9:  # Tab
+            self.insert_char("    ")
+        elif 32 <= key < 127:
+            self.insert_char(chr(key))
+        elif key > 127:
+            try:
+                self.insert_char(chr(key))
+            except ValueError:
+                pass
+        return None
+
     # -- main loop --------------------------------------------------------
     def run(self, stdscr) -> None:
         curses.curs_set(1)
@@ -233,47 +285,10 @@ class Editor:
                 curses.doupdate()
                 key = win.getch()
                 self.message = ""
-                if key in (17,):  # Ctrl-Q
+                if self.handle_key(key, page=height - 3) == "quit":
                     if self.dirty and not self._confirm_discard(win):
                         continue
                     break
-                elif key in (19,):  # Ctrl-S
-                    self.save()
-                elif key in (11,):  # Ctrl-K delete line
-                    self._delete_line()
-                elif key in (12,):  # Ctrl-L toggle line numbers
-                    self.show_line_numbers = not self.show_line_numbers
-                elif key in (curses.KEY_UP,):
-                    self.move(-1, 0)
-                elif key in (curses.KEY_DOWN,):
-                    self.move(1, 0)
-                elif key in (curses.KEY_LEFT,):
-                    self.move(0, -1)
-                elif key in (curses.KEY_RIGHT,):
-                    self.move(0, 1)
-                elif key == curses.KEY_HOME:
-                    self.home()
-                elif key == curses.KEY_END:
-                    self.end()
-                elif key == curses.KEY_NPAGE:
-                    self.move(height - 3, 0)
-                elif key == curses.KEY_PPAGE:
-                    self.move(-(height - 3), 0)
-                elif key in (curses.KEY_BACKSPACE, 127, 8):
-                    self.backspace()
-                elif key in (curses.KEY_DC,):
-                    self.delete()
-                elif key in (10, 13, curses.KEY_ENTER):
-                    self.newline()
-                elif key == 9:  # Tab
-                    self.insert_char("    ")
-                elif 32 <= key < 127:
-                    self.insert_char(chr(key))
-                elif key > 127:
-                    try:
-                        self.insert_char(chr(key))
-                    except ValueError:
-                        pass
         finally:
             curses.curs_set(0)
 

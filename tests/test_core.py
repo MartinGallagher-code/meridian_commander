@@ -386,6 +386,156 @@ def test_scp_header_parsing():
         _parse_scp_header("garbage\n")
 
 
+# -- editor key handling ------------------------------------------------------
+def test_editor_typing_and_save(fs, tmp_path):
+    import curses
+
+    from martin_commander.editor import Editor
+
+    path = str(tmp_path / "note.txt")
+    ed = Editor(fs, path)
+    for ch in "hello":
+        ed.handle_key(ord(ch))
+    ed.handle_key(10)  # Enter
+    for ch in "world":
+        ed.handle_key(ord(ch))
+    assert ed.dirty
+    # F2 saves (VS Code-safe alias for Ctrl-S).
+    assert ed.handle_key(curses.KEY_F2) is None
+    assert not ed.dirty
+    assert open(path).read() == "hello\nworld"
+
+
+def test_editor_save_aliases(fs, tmp_path):
+    import curses
+
+    from martin_commander.editor import Editor
+
+    path = str(tmp_path / "a.txt")
+    for key in (19, 15, curses.KEY_F2):  # Ctrl-S, Ctrl-O, F2
+        ed = Editor(fs, path)
+        ed.handle_key(ord("x"))
+        ed.handle_key(key)
+        assert not ed.dirty, f"key {key} did not save"
+
+
+def test_editor_quit_aliases_and_no_esc(fs, tmp_path):
+    import curses
+
+    from martin_commander.editor import Editor
+
+    ed = Editor(fs, str(tmp_path / "b.txt"))
+    assert ed.handle_key(17) == "quit"                # Ctrl-Q
+    assert ed.handle_key(curses.KEY_F10) == "quit"    # F10
+    # Esc is NOT a quit key (and must not insert anything either).
+    before = list(ed.lines)
+    assert ed.handle_key(27) is None
+    assert ed.lines == before
+
+
+def test_editor_delete_line_aliases(fs, tmp_path):
+    from martin_commander.editor import Editor
+
+    path = str(tmp_path / "c.txt")
+    write(path, "one\ntwo\nthree")
+    ed = Editor(fs, path)
+    ed.handle_key(11)   # Ctrl-K deletes "one"
+    assert ed.lines[0] == "two"
+    ed.handle_key(25)   # Ctrl-Y (VS Code-safe alias) deletes "two"
+    assert ed.lines[0] == "three"
+
+
+# -- in-pane terminal ---------------------------------------------------------
+def test_term_emulator_basics():
+    from martin_commander.plugins.terminal import TermEmulator
+
+    t = TermEmulator()
+    t.feed(b"hello\r\nworld")
+    assert t.lines == ["hello"]
+    assert t.cur == "world"
+
+    # \r + overwrite (how shells redraw a prompt line)
+    t.feed(b"\rWORLD")
+    assert t.cur == "WORLD"
+
+    # backspace + erase to end of line (CSI K)
+    t.feed(b"\b\b\x1b[K")
+    assert t.cur == "WOR"
+
+    # SGR colours and OSC titles are stripped
+    t.feed(b"\x1b[1;32mgreen\x1b[0m")
+    assert t.cur == "WORgreen"
+    t.feed(b"\x1b]0;window title\x07!")
+    assert t.cur == "WORgreen!"
+
+
+def test_term_emulator_clear_and_tabs():
+    from martin_commander.plugins.terminal import TermEmulator
+
+    t = TermEmulator()
+    t.feed(b"junk\r\nmore\x1b[2J")
+    assert t.lines == [] and t.cur == ""
+    t.feed(b"a\tb")
+    assert t.cur == "a       b"
+
+
+def test_term_emulator_visible_window():
+    from martin_commander.plugins.terminal import TermEmulator
+
+    t = TermEmulator()
+    for i in range(30):
+        t.feed(f"line{i}\n".encode())
+    vis = t.visible(5)
+    assert vis[-1] == ""          # current (empty) line
+    assert vis[0] == "line26"
+    back = t.visible(5, scroll=10)
+    assert back[-1] == "line20"
+
+
+def test_terminal_plugin_local_shell_roundtrip(fs, tmp_path):
+    import time
+    from types import SimpleNamespace
+
+    from martin_commander.plugins.terminal import TerminalPlugin
+
+    workdir = tmp_path / "termwork"
+    workdir.mkdir()
+    panel = Panel(fs, str(workdir))
+    ctx = SimpleNamespace(own_panel=panel, other_panel=panel,
+                          own_fs=fs, own_path=str(workdir))
+    plug = TerminalPlugin(ctx)
+    try:
+        # Type a command and press Enter.
+        for ch in "echo MARKER_$((6*7))":
+            plug.handle_key(ord(ch))
+        plug.handle_key(10)
+        deadline = time.time() + 10
+        joined = ""
+        while time.time() < deadline:
+            plug.tick()
+            joined = "\n".join(plug.term.lines + [plug.term.cur])
+            if "MARKER_42" in joined:
+                break
+            time.sleep(0.05)
+        assert "MARKER_42" in joined
+        # The shell started in the pane's directory.
+        for ch in "pwd":
+            plug.handle_key(ord(ch))
+        plug.handle_key(10)
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            plug.tick()
+            joined = "\n".join(plug.term.lines + [plug.term.cur])
+            if str(workdir) in joined:
+                break
+            time.sleep(0.05)
+        assert str(workdir) in joined
+        # Ctrl-] closes the plugin.
+        assert plug.handle_key(29) is False
+    finally:
+        plug.on_exit()
+
+
 # -- pane plugins -----------------------------------------------------------
 def test_plugin_discovery_finds_builtins():
     from martin_commander.plugins import discover

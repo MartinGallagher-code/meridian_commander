@@ -108,7 +108,7 @@ class Viewer:
             height, width = stdscr.getmaxyx()
             body_h = height - 2
             key = win.getch()
-            if key in (ord("q"), ord("Q"), 27, curses.KEY_F3):
+            if key in (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10):
                 break
             elif key in (curses.KEY_DOWN, ord("j")):
                 self._scroll(1, body_h)
