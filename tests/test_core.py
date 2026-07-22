@@ -1,0 +1,177 @@
+"""Tests for the filesystem-agnostic core: copy, move and sync.
+
+These exercise the real code paths using the local filesystem backend and
+temporary directories, which is enough to validate the transfer and sync logic
+that also drives remote transfers (the backend interface is identical).
+"""
+
+from __future__ import annotations
+
+import os
+import time
+
+import pytest
+
+from martin_commander.filesystems import LocalFileSystem
+from martin_commander.operations import copy_path, count_tree, move_path
+from martin_commander.panel import Panel
+from martin_commander.sync import build_sync_plan, execute_sync_plan
+
+
+@pytest.fixture
+def fs():
+    return LocalFileSystem()
+
+
+def write(path: str, content: str, mtime: float | None = None) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write(content)
+    if mtime is not None:
+        os.utime(path, (mtime, mtime))
+
+
+def read(path: str) -> str:
+    with open(path) as f:
+        return f.read()
+
+
+def test_copy_file(fs, tmp_path):
+    src = tmp_path / "a.txt"
+    src.write_text("hello world")
+    dst = tmp_path / "sub" / "b.txt"
+    copy_path(fs, str(src), fs, str(dst))
+    assert dst.read_text() == "hello world"
+    assert src.exists()  # copy leaves the source
+
+
+def test_copy_directory_tree(fs, tmp_path):
+    root = tmp_path / "src"
+    write(str(root / "one.txt"), "1")
+    write(str(root / "nested" / "two.txt"), "2")
+    write(str(root / "nested" / "deep" / "three.txt"), "3")
+
+    dst = tmp_path / "dst"
+    copy_path(fs, str(root), fs, str(dst))
+
+    assert read(str(dst / "one.txt")) == "1"
+    assert read(str(dst / "nested" / "two.txt")) == "2"
+    assert read(str(dst / "nested" / "deep" / "three.txt")) == "3"
+
+
+def test_count_tree(fs, tmp_path):
+    root = tmp_path / "src"
+    write(str(root / "a"), "12345")      # 5 bytes
+    write(str(root / "sub" / "b"), "678")  # 3 bytes
+    files, total = count_tree(fs, str(root))
+    assert files == 2
+    assert total == 8
+
+
+def test_move_same_fs_renames(fs, tmp_path):
+    src = tmp_path / "a.txt"
+    src.write_text("data")
+    dst = tmp_path / "moved" / "a.txt"
+    move_path(fs, str(src), fs, str(dst))
+    assert dst.read_text() == "data"
+    assert not src.exists()
+
+
+def test_move_directory(fs, tmp_path):
+    root = tmp_path / "src"
+    write(str(root / "x.txt"), "x")
+    write(str(root / "y" / "z.txt"), "z")
+    dst = tmp_path / "dst"
+    move_path(fs, str(root), fs, str(dst))
+    assert read(str(dst / "x.txt")) == "x"
+    assert read(str(dst / "y" / "z.txt")) == "z"
+    assert not root.exists()
+
+
+def test_sync_new_files_both_directions(fs, tmp_path):
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    write(str(left / "only_left.txt"), "L")
+    write(str(right / "only_right.txt"), "R")
+
+    plan = build_sync_plan(fs, str(left), fs, str(right))
+    execute_sync_plan(plan, fs, fs)
+
+    # After sync both files exist on both sides.
+    assert read(str(left / "only_left.txt")) == "L"
+    assert read(str(right / "only_left.txt")) == "L"
+    assert read(str(left / "only_right.txt")) == "R"
+    assert read(str(right / "only_right.txt")) == "R"
+
+
+def test_sync_newer_wins(fs, tmp_path):
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    now = time.time()
+    # Same relative file; left is newer and should overwrite right.
+    write(str(left / "shared.txt"), "new", mtime=now)
+    write(str(right / "shared.txt"), "old", mtime=now - 1000)
+
+    plan = build_sync_plan(fs, str(left), fs, str(right))
+    assert len(plan.actions) == 1
+    assert plan.actions[0].direction == "->"
+    execute_sync_plan(plan, fs, fs)
+
+    assert read(str(right / "shared.txt")) == "new"
+    assert read(str(left / "shared.txt")) == "new"
+
+
+def test_sync_older_side_updated_from_newer(fs, tmp_path):
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    now = time.time()
+    write(str(left / "shared.txt"), "stale", mtime=now - 1000)
+    write(str(right / "shared.txt"), "fresh", mtime=now)
+
+    plan = build_sync_plan(fs, str(left), fs, str(right))
+    assert plan.actions[0].direction == "<-"
+    execute_sync_plan(plan, fs, fs)
+    assert read(str(left / "shared.txt")) == "fresh"
+
+
+def test_sync_in_sync_is_noop(fs, tmp_path):
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    now = time.time()
+    write(str(left / "same.txt"), "identical", mtime=now)
+    write(str(right / "same.txt"), "identical", mtime=now)
+    plan = build_sync_plan(fs, str(left), fs, str(right))
+    assert not plan
+
+
+def test_sync_nested_directories(fs, tmp_path):
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    write(str(left / "a" / "b" / "c.txt"), "deep")
+    plan = build_sync_plan(fs, str(left), fs, str(right))
+    execute_sync_plan(plan, fs, fs)
+    assert read(str(right / "a" / "b" / "c.txt")) == "deep"
+
+
+def test_panel_lists_and_navigates(fs, tmp_path):
+    write(str(tmp_path / "dir" / "file.txt"), "hi")
+    os.makedirs(str(tmp_path / "dir" / "child"), exist_ok=True)
+    panel = Panel(fs, str(tmp_path / "dir"))
+    names = [e.name for e in panel.entries]
+    # Parent entry plus the directory (sorted first) and the file.
+    assert ".." in names
+    assert "child" in names
+    assert "file.txt" in names
+    # Directories sort before files.
+    non_parent = [n for n in names if n != ".."]
+    assert non_parent.index("child") < non_parent.index("file.txt")
+
+
+def test_panel_selection(fs, tmp_path):
+    write(str(tmp_path / "d" / "one"), "1")
+    write(str(tmp_path / "d" / "two"), "2")
+    panel = Panel(fs, str(tmp_path / "d"))
+    panel.select_all()
+    assert "one" in panel.selected and "two" in panel.selected
+    panel.clear_selection()
+    assert not panel.selected
