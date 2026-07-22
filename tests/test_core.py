@@ -386,6 +386,114 @@ def test_scp_header_parsing():
         _parse_scp_header("garbage\n")
 
 
+# -- pane plugins -----------------------------------------------------------
+def test_plugin_discovery_finds_builtins():
+    from martin_commander.plugins import discover
+
+    classes, errors = discover()
+    names = [c.name for c in classes]
+    assert "Find in other pane" in names
+    assert "JSON push" in names
+    assert "Run remote script" in names
+    assert not errors
+
+
+def test_plugin_discovery_user_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    pdir = tmp_path / "martin-commander" / "plugins"
+    pdir.mkdir(parents=True)
+    (pdir / "my_plug.py").write_text(
+        "from martin_commander.plugin_api import InputOutputPlugin\n"
+        "class Mine(InputOutputPlugin):\n"
+        "    name = 'My user plug-in'\n"
+        "    description = 'test'\n"
+        "    def process(self, line):\n"
+        "        return [line]\n"
+    )
+    from martin_commander.plugins import discover
+
+    classes, errors = discover()
+    assert "My user plug-in" in [c.name for c in classes]
+    assert not errors
+
+
+def test_config_defaults_and_plugin_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    from martin_commander import config as config_mod
+
+    path = config_mod.ensure_config()
+    assert path.endswith("config.ini")
+    assert "plugin:run_remote_script" in open(path).read()
+
+    # Values from the file override defaults; empty values keep defaults;
+    # int defaults are coerced.
+    (tmp_path / "martin-commander" / "config.ini").write_text(
+        "[plugin:demo]\nhost = h.example.com\nport = 2222\nusername =\n")
+    merged = config_mod.plugin_settings(
+        "demo", {"host": "", "port": 22, "username": "fallback"})
+    assert merged["host"] == "h.example.com"
+    assert merged["port"] == 2222
+    assert merged["username"] == "fallback"
+
+
+def test_io_plugin_input_and_process():
+    from martin_commander.plugin_api import InputOutputPlugin
+
+    class Echo(InputOutputPlugin):
+        name = "Echo"
+        description = "test"
+
+        def process(self, line):
+            return [line.upper()]
+
+    plug = Echo(ctx=None)
+    for ch in "abc":
+        assert plug.handle_key(ord(ch)) is True
+    plug.handle_key(10)  # Enter
+    assert "ABC" in plug.output
+    assert plug.history == ["abc"]
+    # Tab is passed back to the app; Esc closes the plugin.
+    assert plug.handle_key(9) is None
+    assert plug.handle_key(27) is False
+
+
+def test_io_plugin_catches_process_errors():
+    from martin_commander.plugin_api import InputOutputPlugin
+
+    class Boom(InputOutputPlugin):
+        name = "Boom"
+        description = "test"
+
+        def process(self, line):
+            raise RuntimeError("kapow")
+
+    plug = Boom(ctx=None)
+    for ch in "hi":
+        plug.handle_key(ord(ch))
+    plug.handle_key(10)
+    assert any("kapow" in l for l in plug.output)
+
+
+def test_find_files_plugin_searches_other_pane(fs, tmp_path):
+    from types import SimpleNamespace
+
+    from martin_commander.plugins.find_files import FindFiles
+
+    write(str(tmp_path / "data" / "notes.txt"), "n")
+    write(str(tmp_path / "data" / "sub" / "todo.txt"), "t")
+    write(str(tmp_path / "data" / "image.png"), "p")
+
+    other = Panel(fs, str(tmp_path / "data"))
+    ctx = SimpleNamespace(other_fs=fs, other_path=str(tmp_path / "data"),
+                          other_panel=other)
+    plug = FindFiles(ctx)
+    plug.process("*.txt")
+    joined = "\n".join(plug.output)
+    assert "notes.txt" in joined
+    assert "sub/todo.txt" in joined
+    assert "image.png" not in joined
+
+
 def test_panel_selection(fs, tmp_path):
     write(str(tmp_path / "d" / "one"), "1")
     write(str(tmp_path / "d" / "two"), "2")

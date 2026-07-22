@@ -26,6 +26,7 @@ class Panel:
     sort_reverse: bool = False
     show_hidden: bool = True    # whether dotfiles are listed
     error: str | None = None
+    plugin: object | None = None  # active pane plugin, or None for the listing
 
     # ".." pseudo-entry so the user can always step up a directory.
     PARENT = ".."

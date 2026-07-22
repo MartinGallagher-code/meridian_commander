@@ -96,10 +96,20 @@ class App:
             (self.right, 0, left_w, panel_h, right_w),
         ]
 
-        self._draw_panel(self.left, 0, 0, panel_h, left_w,
-                         active=self.active is self.left)
-        self._draw_panel(self.right, 0, left_w, panel_h, right_w,
-                         active=self.active is self.right)
+        for panel, py, px, ph, pw in self._panel_boxes:
+            if panel.plugin is not None:
+                try:
+                    panel.plugin.draw(stdscr, py, px, ph, pw)
+                except Exception as exc:
+                    # A broken draw() must not take down the whole UI.
+                    try:
+                        stdscr.addstr(py + 1, px + 1,
+                                      f"plugin draw error: {exc}"[: pw - 2])
+                    except curses.error:
+                        pass
+            else:
+                self._draw_panel(panel, py, px, ph, pw,
+                                 active=self.active is panel)
 
         # Status line.
         stdscr.attrset(curses.A_NORMAL)
@@ -238,6 +248,22 @@ class App:
         panel = self.active
         body_h = self.stdscr.getmaxyx()[0] - 5
 
+        # A plugin owning the active pane gets first crack at every key.
+        if panel.plugin is not None and key != curses.KEY_RESIZE:
+            try:
+                res = panel.plugin.handle_key(key)
+            except Exception as exc:
+                self._set_message(f"Plugin error: {exc}")
+                res = True
+            if res is False:
+                panel.plugin = None
+                panel.refresh()
+                self._set_message("Plugin closed")
+                return
+            if res is not None:
+                return
+            # res is None: fall through so the app can handle the key (Tab).
+
         if key in (curses.KEY_UP, ord("k")):
             panel.move(-1)
         elif key in (curses.KEY_DOWN, ord("j")):
@@ -279,6 +305,10 @@ class App:
                               + ("shown" if panel.show_hidden else "hidden"))
         elif key in (ord("t"), ord("!"), 15):  # terminal here (15 = Ctrl-O)
             self._open_terminal()
+        elif key in (ord("p"), curses.KEY_F11):  # plug-in mode
+            self._plugin_mode()
+        elif key == ord("C"):  # configuration menu
+            self._config_menu()
         elif key == curses.KEY_MOUSE:
             self._handle_mouse()
         # F-keys, with digit (1..0 -> F1..F10) and mnemonic-letter alternates
@@ -301,7 +331,7 @@ class App:
             self._delete()
         elif key in (curses.KEY_F9, ord("9"), ord("s")):
             self._sync()
-        elif key in (curses.KEY_F10, ord("0"), ord("q"), 27):
+        elif key in (curses.KEY_F10, ord("0"), ord("q"), 27, 3):  # 3 = Ctrl-C
             if dialogs.confirm(self.stdscr, "Quit", "Exit Martin Commander?",
                                default_yes=True):
                 self.running = False
@@ -369,6 +399,99 @@ class App:
         panel.refresh()
         self._set_message("Returned from shell")
 
+    # -- plug-ins -----------------------------------------------------------
+    def _plugin_mode(self) -> None:
+        """Offer the list of discovered plug-ins and open one in this pane."""
+        from .plugin_api import PluginContext
+        from .plugins import discover
+
+        panel = self.active
+        classes, errors = discover()
+        if not classes:
+            text = "No plug-ins found."
+            if errors:
+                text += "\nLoad errors:\n" + "\n".join(errors[:5])
+            dialogs.message(self.stdscr, "Plug-ins", text)
+            return
+
+        labels = [f"{cls.name} -- {cls.description}"[:56] for cls in classes]
+        labels.append("Cancel")
+        choice = dialogs.menu(self.stdscr, "Open plug-in", labels)
+        if choice is None or choice == len(classes):
+            return
+        cls = classes[choice]
+
+        ctx = PluginContext(app=self, own_panel=panel, other_panel=self.other)
+        try:
+            panel.plugin = cls(ctx)
+        except Exception as exc:
+            dialogs.message(self.stdscr, "Plug-in error",
+                            f"{cls.name} failed to start:\n{exc}", error=True)
+            panel.plugin = None
+            return
+        self._set_message(
+            f"Plug-in '{cls.name}' opened -- Esc closes it, Tab switches panes")
+        if errors:
+            self._set_message(f"Plug-in '{cls.name}' opened "
+                              f"({len(errors)} plug-in(s) failed to load)")
+
+    # -- configuration ------------------------------------------------------
+    def _config_menu(self) -> None:
+        """Edit the app configuration or plug-in files from inside the app."""
+        from . import config as config_mod
+        from .plugins import plugin_dirs, user_plugin_dir
+
+        choice = dialogs.menu(self.stdscr, "Configuration", [
+            "Edit configuration (config.ini)",
+            "Edit a plug-in file",
+            "Open user plug-in folder in this pane",
+            "Cancel",
+        ])
+        if choice is None or choice == 3:
+            return
+
+        local = LocalFileSystem()
+        if choice == 0:
+            path = config_mod.ensure_config()
+            self._edit_local_file(local, path)
+            self._set_message("Configuration saved -- reopen plug-ins to apply")
+        elif choice == 1:
+            files: list[str] = []
+            for pdir in plugin_dirs():
+                if not os.path.isdir(pdir):
+                    continue
+                for fn in sorted(os.listdir(pdir)):
+                    if fn.endswith(".py") and not fn.startswith("_"):
+                        files.append(os.path.join(pdir, fn))
+            if not files:
+                dialogs.message(self.stdscr, "Plug-ins", "No plug-in files found.")
+                return
+            labels = [f"{os.path.basename(f)}  ({os.path.dirname(f)})"[:56]
+                      for f in files]
+            pick = dialogs.menu(self.stdscr, "Edit plug-in", labels + ["Cancel"])
+            if pick is None or pick == len(files):
+                return
+            self._edit_local_file(local, files[pick])
+            self._set_message("Plug-in saved -- reopen it to apply changes")
+        elif choice == 2:
+            udir = user_plugin_dir()
+            os.makedirs(udir, exist_ok=True)
+            panel = self.active
+            if not isinstance(panel.fs, LocalFileSystem):
+                panel.fs = local
+                self._backends.append(local)
+            panel.chdir(udir)
+            self._set_message(
+                "User plug-in folder -- drop .py files here to add plug-ins")
+
+    def _edit_local_file(self, fs: LocalFileSystem, path: str) -> None:
+        try:
+            editor = Editor(fs, path)
+            editor.run(self.stdscr)
+        except Exception as exc:
+            dialogs.message(self.stdscr, "Edit error", str(exc), error=True)
+        curses.curs_set(0)
+
     # -- mouse ------------------------------------------------------------
     def _handle_mouse(self) -> None:
         try:
@@ -390,6 +513,18 @@ class App:
         # Mouse wheel scrolls the pane under the pointer.
         wheel_up = getattr(curses, "BUTTON4_PRESSED", 0)
         wheel_down = getattr(curses, "BUTTON5_PRESSED", 0)
+
+        # A pane owned by a plugin: focus it, and let the wheel scroll its
+        # output; clicks otherwise stay with the plugin's own key handling.
+        if panel.plugin is not None:
+            try:
+                if wheel_up and bstate & wheel_up:
+                    panel.plugin.handle_key(curses.KEY_PPAGE)
+                elif wheel_down and bstate & wheel_down:
+                    panel.plugin.handle_key(curses.KEY_NPAGE)
+            except Exception:
+                pass
+            return
         if wheel_up and bstate & wheel_up:
             panel.move(-3)
             return
@@ -771,6 +906,8 @@ class App:
             "  Ctrl-G         go to path   Ctrl-T  sort order\n"
             "  .              show/hide hidden files (this pane)\n"
             "  t / !          open a terminal in the current directory\n"
+            "  p / F11        plug-in mode: run a plug-in in this pane\n"
+            "  C              configuration: edit config.ini / plug-ins\n"
             "\n"
             "  Function keys -- each also has digit and letter aliases,\n"
             "  for terminals that swallow the F-keys:\n"
@@ -789,6 +926,13 @@ class App:
         dialogs.message(self.stdscr, "Help", text)
 
     def _close_backends(self) -> None:
+        for panel in (self.left, self.right):
+            if panel.plugin is not None:
+                try:
+                    panel.plugin.on_exit()
+                except Exception:
+                    pass
+                panel.plugin = None
         for fs in self._backends:
             try:
                 fs.close()
@@ -805,6 +949,10 @@ def _main(stdscr, args) -> None:
         except curses.error:
             pass
     stdscr.keypad(True)
+    # Raw mode: without it the tty's XON/XOFF flow control eats Ctrl-S (the
+    # editor's save key!) and Ctrl-Q, and Ctrl-S can freeze the display.
+    # Ctrl-C consequently arrives as key 3, handled as quit in handle_key.
+    curses.raw()
     # Enable mouse reporting (clicks, wheel, right-click menus). Harmless on
     # terminals that do not support it -- the mask simply stays empty.
     try:

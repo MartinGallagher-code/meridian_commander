@@ -48,6 +48,12 @@ and ships with a built-in file viewer and editor.
   rename, delete, tag, mkdir, terminal).
 - **Works even when F-keys are hijacked** — every function key has a digit alias
   (`1`–`0` → `F1`–`F10`) and the common actions have mnemonic letters.
+- **Pane plug-ins** (`p`) — put a pane into plug-in mode: pick from discovered
+  plug-ins and it takes over the pane, with access to the opposite pane's
+  contents. Writing one takes a dozen lines (see *Plug-ins* below); built-ins
+  include remote JSON push and run-remote-script over SSH.
+- **In-app configuration** (`C`) — edit `config.ini` and plug-in files in the
+  built-in editor without leaving the app.
 - **No required dependencies** for local + FTP use — it runs on the Python
   standard library. SFTP uses the optional [`paramiko`](https://www.paramiko.org/)
   package.
@@ -115,6 +121,7 @@ edit, and copy/move/sync to and from it.
 | `Ctrl-R` | reload panes | `F10` | quit |
 | `Ctrl-G` | go to path | `Ctrl-T` | change sort order |
 | `.` | show/hide hidden files | `t` / `!` | terminal in current dir |
+| `p` / F11 | plug-in mode (this pane) | `C` | configuration menu |
 
 **F-key aliases** (for terminals that swallow function keys): press the digit
 `1`–`0` for `F1`–`F10`, or the mnemonic letter — `?`/`1` help, `o` open/connect,
@@ -128,6 +135,66 @@ In the **viewer**: `N` toggles line numbers, `W` toggles wrap, arrows/PgUp/PgDn
 scroll, `Q` quits.
 In the **editor**: `Ctrl-S` saves, `Ctrl-Q` quits, `Ctrl-K` deletes a line,
 `Ctrl-L` toggles line numbers.
+
+## Plug-ins
+
+Press **`p`** (or F11) to put the active pane into **plug-in mode**: a menu
+lists the discovered plug-ins and the chosen one takes over that pane. The
+plug-in can see the **opposite pane** — its filesystem (local or remote), its
+directory and entries — so it can do work on whatever you have open next to it.
+`Esc` closes the plug-in and returns the pane to its file listing; `Tab` still
+switches panes while a plug-in is open.
+
+Built-in plug-ins:
+
+- **Find in other pane** — recursively search the other pane's directory by
+  glob pattern (works on remote panes too).
+- **JSON push** — the user enters input in the bottom line; the plug-in logs
+  into a remote server over SSH, delivers the input as JSON to a TCP listener
+  on that server (via an SSH channel, so the listener can stay on loopback),
+  waits for the reply and shows it in the output area.
+- **Run remote script** — on each input, logs into an SSH server, copies a
+  configured local script into a configured remote directory, runs it with the
+  input as arguments, and shows its output.
+
+### Writing a plug-in
+
+Drop a `.py` file into `~/.config/martin-commander/plugins/` (or into
+`martin_commander/plugins/` inside the framework — both are scanned, plus any
+extra directories listed in the config file). A complete plug-in is:
+
+```python
+from martin_commander.plugin_api import InputOutputPlugin
+
+class Shout(InputOutputPlugin):
+    name = "Shout"
+    description = "Uppercase whatever you type"
+    prompt = "say> "
+
+    def process(self, line):
+        return [line.upper()]
+```
+
+`InputOutputPlugin` provides the classic two-part layout: a scrolling output
+area on top and an input line at the bottom; `process()` is called on Enter,
+and `self.print(...)` emits output at any time. The plug-in context is at
+`self.ctx` — `ctx.other_fs`, `ctx.other_path`, `ctx.other_entries()`,
+`ctx.refresh_other()` give access to the opposite pane. For full control of
+drawing and keys, subclass `PanePlugin` instead.
+
+## Configuration
+
+Press **`C`** for the configuration menu:
+
+- **Edit configuration** opens `~/.config/martin-commander/config.ini` in the
+  built-in editor (created with commented defaults on first use). Plug-ins read
+  their settings from `[plugin:<name>]` sections; `[plugins] dirs` adds extra
+  plug-in directories.
+- **Edit a plug-in file** lists every discovered plug-in file (built-in and
+  user) and opens the chosen one in the editor.
+- **Open user plug-in folder in this pane** jumps the pane to
+  `~/.config/martin-commander/plugins/` so you can manage plug-ins like any
+  other files.
 
 ## How synchronization works
 
@@ -157,6 +224,9 @@ the sync engine are written once and work across any pair of backends.
 | `filesystems.py` | `FileSystem` interface + Local / SFTP / SSH / FTP backends |
 | `operations.py` | streaming copy, recursive copy, move |
 | `sync.py` | bidirectional sync plan + execution |
+| `plugin_api.py` | pane plug-in API (`PanePlugin`, `InputOutputPlugin`, context) |
+| `plugins/` | plug-in discovery + built-in plug-ins |
+| `config.py` | `config.ini` handling (per-plug-in sections, plug-in dirs) |
 | `panel.py` | one pane's listing, cursor, selection, sorting |
 | `viewer.py` / `editor.py` | file viewer and editor |
 | `dialogs.py` | prompts, menus, confirmations, progress bars |
