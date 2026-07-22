@@ -106,6 +106,9 @@ In the **editor**: `Ctrl-S` saves, `Ctrl-Q` quits, `Ctrl-K` deletes a line,
 - a file present on both sides is compared by modification time, and the
   **newer** copy overwrites the older one (times within 2 seconds are treated as
   equal to avoid needless copies);
+- the copied file is stamped with the **source file's modification time**, so
+  both sides stay identical in age — a second sync finds nothing to do instead
+  of copying the file back the other way;
 - nothing is ever deleted.
 
 You see the full list of planned copies and the total byte count before

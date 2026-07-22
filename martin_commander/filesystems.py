@@ -134,6 +134,14 @@ class FileSystem(abc.ABC):
     def open_write(self, path: str):
         """Return a binary file-like object supporting ``write(bytes)``."""
 
+    def utime(self, path: str, mtime: float) -> None:
+        """Set ``path``'s modification (and access) time to ``mtime``.
+
+        Used to give a copied file the same timestamp as its source.  This is
+        best-effort: backends that cannot set times (or servers that reject the
+        request) leave the default no-op in place rather than failing the copy.
+        """
+
     # -- mutations --------------------------------------------------------
     @abc.abstractmethod
     def mkdir(self, path: str) -> None:
@@ -254,6 +262,9 @@ class LocalFileSystem(FileSystem):
 
     def open_write(self, path: str):
         return open(path, "wb")
+
+    def utime(self, path: str, mtime: float) -> None:
+        os.utime(path, (mtime, mtime))
 
     def mkdir(self, path: str) -> None:
         os.mkdir(path)
@@ -384,6 +395,10 @@ class SFTPFileSystem(FileSystem):
     def open_write(self, path: str):
         return self._sftp.open(path, "wb")
 
+    def utime(self, path: str, mtime: float) -> None:
+        # paramiko takes an (atime, mtime) tuple of POSIX timestamps.
+        self._sftp.utime(path, (mtime, mtime))
+
     def mkdir(self, path: str) -> None:
         self._sftp.mkdir(path)
 
@@ -499,6 +514,17 @@ class FTPFileSystem(FileSystem):
 
     def open_write(self, path: str):
         return _FTPWriter(self._ftp, path)
+
+    def utime(self, path: str, mtime: float) -> None:
+        # MFMT (RFC 3659) sets the modify time; the argument is UTC.
+        # Not every server implements it, so failures are swallowed.
+        import time as _time
+
+        stamp = _time.strftime("%Y%m%d%H%M%S", _time.gmtime(mtime))
+        try:
+            self._ftp.sendcmd(f"MFMT {stamp} {path}")
+        except Exception:
+            pass
 
     def mkdir(self, path: str) -> None:
         self._ftp.mkd(path)

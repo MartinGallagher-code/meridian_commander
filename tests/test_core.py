@@ -134,6 +134,46 @@ def test_sync_older_side_updated_from_newer(fs, tmp_path):
     assert read(str(left / "shared.txt")) == "fresh"
 
 
+def test_sync_preserves_mtime(fs, tmp_path):
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    src_mtime = time.time() - 5000
+    write(str(left / "only_left.txt"), "L", mtime=src_mtime)
+
+    plan = build_sync_plan(fs, str(left), fs, str(right))
+    execute_sync_plan(plan, fs, fs)
+
+    copied = right / "only_left.txt"
+    assert copied.exists()
+    # The copied file must carry the source's timestamp, not "now".
+    assert abs(copied.stat().st_mtime - src_mtime) < 1.0
+
+
+def test_sync_is_idempotent(fs, tmp_path):
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    old = time.time() - 3000
+    write(str(left / "a.txt"), "A", mtime=old)
+    write(str(right / "b.txt"), "B", mtime=old)
+
+    plan = build_sync_plan(fs, str(left), fs, str(right))
+    execute_sync_plan(plan, fs, fs)
+
+    # A second run finds nothing to do because timestamps were preserved.
+    plan2 = build_sync_plan(fs, str(left), fs, str(right))
+    assert not plan2, [a.render() for a in plan2.actions]
+
+
+def test_copy_preserve_mtime_flag(fs, tmp_path):
+    src = tmp_path / "a.txt"
+    src.write_text("data")
+    old = time.time() - 8000
+    os.utime(str(src), (old, old))
+    dst = tmp_path / "out" / "a.txt"
+    copy_path(fs, str(src), fs, str(dst), preserve_mtime=True)
+    assert abs(dst.stat().st_mtime - old) < 1.0
+
+
 def test_sync_in_sync_is_noop(fs, tmp_path):
     left = tmp_path / "left"
     right = tmp_path / "right"
