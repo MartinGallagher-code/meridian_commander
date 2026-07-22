@@ -828,12 +828,23 @@ class SSHFileSystem(FileSystem):
 
     Unlike :class:`SFTPFileSystem`, this backend never uses the SFTP subsystem.
     It runs ordinary POSIX commands over ``exec_command`` -- ``ls`` to list,
-    ``cat`` to read and write, ``mkdir``/``rm``/``mv`` to mutate -- so it works
-    against servers that permit SSH login but have SFTP disabled.  It assumes a
-    POSIX-like remote shell with the usual coreutils.
+    ``mkdir``/``rm``/``mv`` to mutate -- so it works against servers that permit
+    SSH login but have SFTP disabled.
+
+    File contents are transferred with a fallback chain, because restricted
+    appliance shells frequently lack coreutils: ``cat`` is tried first, then
+    ``dd``, and finally the raw **scp wire protocol** (``scp -f``/``scp -t``),
+    which most embedded SSH servers implement even when the shell offers almost
+    no commands.  Whichever method succeeds is remembered and tried first for
+    subsequent transfers on this connection.
     """
 
     scheme = "ssh"
+
+    #: Read/write strategies, in preference order.  "scp" is the wire-protocol
+    #: fallback; the other entries are shell command templates.
+    READ_TEMPLATES = ("cat {p}", "dd if={p}", "scp")
+    WRITE_TEMPLATES = ("cat > {p}", "dd of={p}", "scp")
 
     def __init__(
         self,
@@ -846,6 +857,8 @@ class SSHFileSystem(FileSystem):
         self.host = host
         self.port = port
         self.username = username
+        self._read_templates = list(self.READ_TEMPLATES)
+        self._write_templates = list(self.WRITE_TEMPLATES)
         self._client = _open_ssh_client(host, username, password, port,
                                         key_filename)
         self._home = self._run("pwd").strip() or "/"
@@ -916,17 +929,98 @@ class SSHFileSystem(FileSystem):
             return False
 
     # -- streaming I/O ----------------------------------------------------
+    def _promote(self, templates: list[str], tmpl: str) -> None:
+        """Move the strategy that just worked to the front of the list."""
+        if tmpl in templates and templates[0] != tmpl:
+            templates.remove(tmpl)
+            templates.insert(0, tmpl)
+
     def open_read(self, path: str):
-        stdin, stdout, stderr = self._client.exec_command(
-            f"cat {self._q(path)}", timeout=None
+        """Open ``path`` for reading, trying cat, then dd, then scp.
+
+        Unlike a naive ``cat``, this checks the command's exit status, so a
+        restricted shell answering "Command 'cat' not supported" produces a
+        clean fallback (and ultimately a clear error) instead of the error text
+        being shown as if it were the file's contents.
+        """
+        errors: list[str] = []
+        for tmpl in list(self._read_templates):
+            try:
+                if tmpl == "scp":
+                    reader = self._scp_read(path)
+                    self._promote(self._read_templates, tmpl)
+                    return reader
+                cmd = tmpl.format(p=self._q(path))
+                _in, stdout, stderr = self._client.exec_command(cmd, timeout=None)
+                # Probe: first byte of output, or a clean zero exit (empty file),
+                # proves the command exists and the file is readable.
+                first = stdout.read(1)
+                if first:
+                    self._promote(self._read_templates, tmpl)
+                    return _SSHReader(stdout, first)
+                if stdout.channel.recv_exit_status() == 0:
+                    self._promote(self._read_templates, tmpl)
+                    return _SSHReader(stdout, b"")
+                err = stderr.read().decode("utf-8", "replace").strip()
+                errors.append(err.splitlines()[0] if err
+                              else f"{tmpl.split()[0]}: failed")
+            except FileSystemError as exc:
+                errors.append(str(exc))
+            except Exception as exc:  # pragma: no cover - network dependent
+                errors.append(f"{type(exc).__name__}: {exc}")
+        detail = "; ".join(dict.fromkeys(errors)) or "no transfer method worked"
+        raise FileSystemError(
+            f"Cannot read file ({detail}). The remote shell lacks cat/dd and "
+            f"scp failed -- if the server offers SFTP, use the SFTP mode instead."
         )
-        return _SSHReader(stdout)
 
     def open_write(self, path: str):
-        stdin, stdout, stderr = self._client.exec_command(
-            f"cat > {self._q(path)}", timeout=None
-        )
-        return _SSHWriter(stdin, stdout)
+        return _SSHWriter(self, path)
+
+    # -- scp wire protocol -------------------------------------------------
+    # Used when the restricted remote shell has no usable file commands. The
+    # protocol is tiny: after "scp -f file" the server sends a header line
+    # "C<mode> <size> <name>\n" followed by <size> raw bytes; each step is
+    # acknowledged with a zero byte. "scp -t file" is the mirror image.
+    def _scp_read(self, path: str):
+        chan = self._client.get_transport().open_session()
+        try:
+            chan.exec_command(f"scp -f {self._q(path)}")
+            chan.sendall(b"\x00")
+            line = _scp_read_line(chan)
+            if line.startswith("T"):
+                # Timestamp preamble (sent when -p is in effect); ack and skip.
+                chan.sendall(b"\x00")
+                line = _scp_read_line(chan)
+            if not line.startswith("C"):
+                raise FileSystemError(f"scp: {line.strip() or 'unexpected response'}")
+            size = _parse_scp_header(line)
+            chan.sendall(b"\x00")
+            return _SCPReader(chan, size)
+        except Exception:
+            try:
+                chan.close()
+            except Exception:
+                pass
+            raise
+
+    def _scp_write(self, path: str, data: bytes) -> None:
+        chan = self._client.get_transport().open_session()
+        try:
+            chan.exec_command(f"scp -t {self._q(path)}")
+            _scp_expect_ok(chan)
+            name = self.basename(path) or "file"
+            chan.sendall(f"C0644 {len(data)} {name}\n".encode())
+            _scp_expect_ok(chan)
+            if data:
+                chan.sendall(data)
+            chan.sendall(b"\x00")
+            _scp_expect_ok(chan)
+        finally:
+            try:
+                chan.close()
+            except Exception:
+                pass
 
     # -- mutations --------------------------------------------------------
     def utime(self, path: str, mtime: float) -> None:
@@ -964,17 +1058,97 @@ class SSHFileSystem(FileSystem):
         self._client.close()
 
 
-class _SSHReader:
-    """Wrap a paramiko exec stdout channel as a blocking ``read(n)`` stream."""
+def _parse_scp_header(line: str) -> int:
+    """Extract the size field from an scp ``C<mode> <size> <name>`` header."""
+    import re
 
-    def __init__(self, stdout) -> None:
+    m = re.match(r"^C[0-7]{3,4}\s+(\d+)\s+", line)
+    if not m:
+        raise FileSystemError(f"scp: malformed header: {line.strip()!r}")
+    return int(m.group(1))
+
+
+def _scp_read_line(chan) -> str:
+    """Read one protocol line, raising on scp error frames (\\x01/\\x02)."""
+    buf = b""
+    while not buf.endswith(b"\n"):
+        c = chan.recv(1)
+        if not c:
+            raise FileSystemError("scp: connection closed")
+        buf += c
+    if buf[:1] in (b"\x01", b"\x02"):
+        raise FileSystemError(f"scp: {buf[1:].decode('utf-8', 'replace').strip()}")
+    return buf.decode("utf-8", "replace")
+
+
+def _scp_expect_ok(chan) -> None:
+    """Consume one scp acknowledgement byte, raising on an error frame."""
+    b = chan.recv(1)
+    if b == b"\x00":
+        return
+    if b in (b"\x01", b"\x02"):
+        msg = b""
+        while not msg.endswith(b"\n"):
+            c = chan.recv(1)
+            if not c:
+                break
+            msg += c
+        raise FileSystemError(f"scp: {msg.decode('utf-8', 'replace').strip()}")
+    raise FileSystemError("scp: connection closed")
+
+
+class _SCPReader:
+    """Read a file's bytes from an ``scp -f`` channel as a ``read(n)`` stream."""
+
+    def __init__(self, chan, size: int) -> None:
+        self._chan = chan
+        self._remaining = size
+
+    def read(self, n: int = -1) -> bytes:
+        if self._remaining <= 0:
+            return b""
+        want = self._remaining if (n is None or n < 0) else min(n, self._remaining)
+        data = b""
+        while len(data) < want:
+            chunk = self._chan.recv(want - len(data))
+            if not chunk:
+                break
+            data += chunk
+        self._remaining -= len(data)
+        if self._remaining <= 0:
+            # Consume the trailing status byte and acknowledge it.
+            try:
+                self._chan.recv(1)
+                self._chan.sendall(b"\x00")
+            except Exception:
+                pass
+        return data
+
+    def close(self) -> None:
+        try:
+            self._chan.close()
+        except Exception:
+            pass
+
+
+class _SSHReader:
+    """Wrap a paramiko exec stdout channel as a blocking ``read(n)`` stream.
+
+    ``first`` carries the probe byte :meth:`SSHFileSystem.open_read` consumed
+    while checking that the command actually works.
+    """
+
+    def __init__(self, stdout, first: bytes = b"") -> None:
         self._stdout = stdout
+        self._buf = first
 
     def read(self, n: int = -1) -> bytes:
         if n is None or n < 0:
-            return self._stdout.read()
+            data = self._buf + self._stdout.read()
+            self._buf = b""
+            return data
+        data, self._buf = self._buf[:n], self._buf[n:]
         # Channel.read honours the requested size; loop until we have n or EOF.
-        data = b""
         while len(data) < n:
             chunk = self._stdout.read(n - len(data))
             if not chunk:
@@ -990,26 +1164,125 @@ class _SSHReader:
 
 
 class _SSHWriter:
-    """Wrap a paramiko exec stdin channel as a blocking ``write(bytes)`` stream."""
+    """A ``write(bytes)`` stream with fallbacks for shells lacking ``cat``.
 
-    def __init__(self, stdin, stdout) -> None:
-        self._stdin = stdin
-        self._stdout = stdout
+    Bytes are streamed to the current shell command while also being kept in a
+    replay buffer (up to a cap).  If the command turns out not to exist -- which
+    only becomes certain when the channel dies or reports a non-zero exit at
+    close -- the write is retried with the next strategy and finally with the
+    scp wire protocol.  The successful strategy is promoted for next time.
+    """
+
+    #: Replay-buffer cap. Beyond this we can no longer retry a failed command;
+    #: comfortably above the editor's 8 MiB file limit.
+    _CAP = 32 * 1024 * 1024
+
+    def __init__(self, fs: "SSHFileSystem", path: str) -> None:
+        self._fs = fs
+        self._path = path
+        self._order = list(fs._write_templates)
+        self._buf = bytearray()
+        self._buf_ok = True
+        self._dead = False
+        self._closed = False
+        self._start_next()
+
+    def _start_next(self) -> None:
+        self._tmpl = self._order.pop(0)
+        self._dead = False
+        if self._tmpl == "scp":
+            # scp needs the size up front, so it sends everything at close.
+            self._stdin = None
+            self._stdout = None
+            return
+        cmd = self._tmpl.format(p=self._fs._q(self._path))
+        self._stdin, self._stdout, _err = self._fs._client.exec_command(
+            cmd, timeout=None
+        )
 
     def write(self, data: bytes) -> int:
-        self._stdin.write(data)
+        data = bytes(data)
+        if self._buf_ok:
+            if len(self._buf) + len(data) <= self._CAP:
+                self._buf.extend(data)
+            else:
+                self._buf = bytearray()
+                self._buf_ok = False
+        if self._tmpl == "scp":
+            if not self._buf_ok:
+                raise FileSystemError(
+                    "scp transfer needs the whole file buffered; file exceeds "
+                    f"{self._CAP // (1024 * 1024)} MiB."
+                )
+            return len(data)
+        if not self._dead:
+            try:
+                self._stdin.write(data)
+            except Exception:
+                # Command probably does not exist; keep buffering for the
+                # retry at close (unless the buffer already overflowed).
+                self._dead = True
+                if not self._buf_ok:
+                    raise
         return len(data)
 
     def close(self) -> None:
-        # Signal EOF to the remote 'cat', then wait for it to finish writing.
-        try:
-            self._stdin.channel.shutdown_write()
-        except Exception:
-            pass
-        try:
-            self._stdout.channel.recv_exit_status()
-        except Exception:
-            pass
+        if self._closed:
+            return
+        self._closed = True
+
+        if self._tmpl == "scp":
+            self._fs._scp_write(self._path, bytes(self._buf))
+            self._fs._promote(self._fs._write_templates, "scp")
+            return
+
+        status = 1
+        if not self._dead:
+            try:
+                self._stdin.channel.shutdown_write()
+            except Exception:
+                pass
+            try:
+                status = self._stdout.channel.recv_exit_status()
+            except Exception:
+                status = 1
+        if status == 0:
+            self._fs._promote(self._fs._write_templates, self._tmpl)
+            return
+
+        if not self._buf_ok:
+            raise FileSystemError(
+                f"write with '{self._tmpl.split()[0]}' failed and the file is "
+                f"too large to retry with another method."
+            )
+
+        # Replay the buffered bytes through the remaining strategies.
+        data = bytes(self._buf)
+        errors: list[str] = [f"{self._tmpl.split()[0]}: exit {status}"]
+        while self._order:
+            self._start_next()
+            if self._tmpl == "scp":
+                try:
+                    self._fs._scp_write(self._path, data)
+                    self._fs._promote(self._fs._write_templates, "scp")
+                    return
+                except Exception as exc:
+                    errors.append(str(exc))
+                    break
+            try:
+                if data:
+                    self._stdin.write(data)
+                self._stdin.channel.shutdown_write()
+                if self._stdout.channel.recv_exit_status() == 0:
+                    self._fs._promote(self._fs._write_templates, self._tmpl)
+                    return
+                errors.append(f"{self._tmpl.split()[0]}: failed")
+            except Exception as exc:
+                errors.append(f"{self._tmpl.split()[0]}: {exc}")
+        raise FileSystemError(
+            "Cannot write file (" + "; ".join(dict.fromkeys(errors)) + "). "
+            "If the server offers SFTP, use the SFTP mode instead."
+        )
 
 
 def local_fs() -> LocalFileSystem:

@@ -12,7 +12,13 @@ import time
 
 import pytest
 
-from martin_commander.filesystems import FTPFileSystem, LocalFileSystem
+from martin_commander.filesystems import (
+    FileSystemError,
+    FTPFileSystem,
+    LocalFileSystem,
+    SSHFileSystem,
+    _parse_scp_header,
+)
 from martin_commander.operations import copy_path, count_tree, move_path
 from martin_commander.panel import Panel
 from martin_commander.sync import build_sync_plan, execute_sync_plan
@@ -249,6 +255,243 @@ def test_ftp_list_parser_dos():
 
     f = parse("07-22-2025  09:15AM              1024 report.pdf")
     assert f is not None and not f.is_dir and f.name == "report.pdf" and f.size == 1024
+
+
+# -- SSH shell backend: read fallbacks (faked, no paramiko needed) ---------
+class _FakeChannel:
+    def __init__(self, status):
+        self._status = status
+
+    def recv_exit_status(self):
+        return self._status
+
+    def shutdown_write(self):
+        pass
+
+
+class _FakeStdout:
+    def __init__(self, data: bytes, status: int):
+        self._data = data
+        self.channel = _FakeChannel(status)
+
+    def read(self, n=-1):
+        if n is None or n < 0:
+            d, self._data = self._data, b""
+            return d
+        d, self._data = self._data[:n], self._data[n:]
+        return d
+
+
+class _FakeStderr:
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def read(self):
+        return self._data
+
+
+class _FakeStdin:
+    def __init__(self, fail: bool):
+        self._fail = fail
+        self.received = bytearray()
+        self.channel = _FakeChannel(1 if fail else 0)
+
+    def write(self, data):
+        if self._fail:
+            raise OSError("channel closed")
+        self.received.extend(data)
+
+
+class _FakeSSHClient:
+    """Maps command prefixes to canned (stdout, stderr, exit) responses."""
+
+    def __init__(self, responses):
+        self.responses = responses
+        self.calls = []
+
+    def exec_command(self, cmd, timeout=None):
+        self.calls.append(cmd)
+        for prefix, (out, err, status) in self.responses.items():
+            if cmd.startswith(prefix):
+                stdin = _FakeStdin(fail=status != 0)
+                stdout = _FakeStdout(out, status)
+                stdout.channel = _FakeChannel(status)
+                return stdin, stdout, _FakeStderr(err)
+        return (_FakeStdin(True), _FakeStdout(b"", 127),
+                _FakeStderr(b"not found"))
+
+
+def _fake_ssh_fs(responses) -> SSHFileSystem:
+    fs = SSHFileSystem.__new__(SSHFileSystem)
+    fs._client = _FakeSSHClient(responses)
+    fs._read_templates = list(SSHFileSystem.READ_TEMPLATES)
+    fs._write_templates = list(SSHFileSystem.WRITE_TEMPLATES)
+    return fs
+
+
+def test_ssh_read_uses_cat_when_available():
+    fs = _fake_ssh_fs({"cat ": (b"hello world", b"", 0)})
+    reader = fs.open_read("/tmp/f.txt")
+    assert reader.read() == b"hello world"
+    assert fs._read_templates[0].startswith("cat")
+
+
+def test_ssh_read_falls_back_to_dd_when_cat_missing():
+    # A restricted shell that answers cat with "Command 'cat' not supported".
+    fs = _fake_ssh_fs({
+        "cat ": (b"", b"-sh: Command 'cat' not supported\n", 127),
+        "dd if=": (b"file body", b"0+1 records in\n", 0),
+    })
+    reader = fs.open_read("/flash/config.txt")
+    assert reader.read() == b"file body"
+    # dd is promoted; the next read skips the dead cat straight away.
+    assert fs._read_templates[0].startswith("dd")
+    fs._client.calls.clear()
+    reader2 = fs.open_read("/flash/config.txt")
+    assert reader2.read() == b"file body"
+    assert fs._client.calls[0].startswith("dd")
+
+
+def test_ssh_read_empty_file_is_not_a_failure():
+    fs = _fake_ssh_fs({"cat ": (b"", b"", 0)})
+    reader = fs.open_read("/tmp/empty")
+    assert reader.read() == b""
+
+
+def test_ssh_read_partial_reads_keep_probe_byte():
+    fs = _fake_ssh_fs({"cat ": (b"abcdef", b"", 0)})
+    reader = fs.open_read("/tmp/f")
+    assert reader.read(2) == b"ab"
+    assert reader.read(2) == b"cd"
+    assert reader.read() == b"ef"
+
+
+def test_ssh_write_falls_back_to_dd():
+    fs = _fake_ssh_fs({
+        "cat > ": (b"", b"not supported", 127),
+        "dd of=": (b"", b"", 0),
+    })
+    writer = fs.open_write("/flash/new.txt")
+    writer.write(b"payload")
+    writer.close()  # cat> fails at close, dd replay succeeds
+    dd_calls = [c for c in fs._client.calls if c.startswith("dd of=")]
+    assert dd_calls, "dd fallback was not attempted"
+    assert fs._write_templates[0].startswith("dd")
+
+
+def test_scp_header_parsing():
+    assert _parse_scp_header("C0644 1234 config.txt\n") == 1234
+    assert _parse_scp_header("C0755 0 empty\n") == 0
+    with pytest.raises(FileSystemError):
+        _parse_scp_header("garbage\n")
+
+
+# -- pane plugins -----------------------------------------------------------
+def test_plugin_discovery_finds_builtins():
+    from martin_commander.plugins import discover
+
+    classes, errors = discover()
+    names = [c.name for c in classes]
+    assert "Find in other pane" in names
+    assert "JSON push" in names
+    assert "Run remote script" in names
+    assert not errors
+
+
+def test_plugin_discovery_user_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    pdir = tmp_path / "martin-commander" / "plugins"
+    pdir.mkdir(parents=True)
+    (pdir / "my_plug.py").write_text(
+        "from martin_commander.plugin_api import InputOutputPlugin\n"
+        "class Mine(InputOutputPlugin):\n"
+        "    name = 'My user plug-in'\n"
+        "    description = 'test'\n"
+        "    def process(self, line):\n"
+        "        return [line]\n"
+    )
+    from martin_commander.plugins import discover
+
+    classes, errors = discover()
+    assert "My user plug-in" in [c.name for c in classes]
+    assert not errors
+
+
+def test_config_defaults_and_plugin_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    from martin_commander import config as config_mod
+
+    path = config_mod.ensure_config()
+    assert path.endswith("config.ini")
+    assert "plugin:run_remote_script" in open(path).read()
+
+    # Values from the file override defaults; empty values keep defaults;
+    # int defaults are coerced.
+    (tmp_path / "martin-commander" / "config.ini").write_text(
+        "[plugin:demo]\nhost = h.example.com\nport = 2222\nusername =\n")
+    merged = config_mod.plugin_settings(
+        "demo", {"host": "", "port": 22, "username": "fallback"})
+    assert merged["host"] == "h.example.com"
+    assert merged["port"] == 2222
+    assert merged["username"] == "fallback"
+
+
+def test_io_plugin_input_and_process():
+    from martin_commander.plugin_api import InputOutputPlugin
+
+    class Echo(InputOutputPlugin):
+        name = "Echo"
+        description = "test"
+
+        def process(self, line):
+            return [line.upper()]
+
+    plug = Echo(ctx=None)
+    for ch in "abc":
+        assert plug.handle_key(ord(ch)) is True
+    plug.handle_key(10)  # Enter
+    assert "ABC" in plug.output
+    assert plug.history == ["abc"]
+    # Tab is passed back to the app; Esc closes the plugin.
+    assert plug.handle_key(9) is None
+    assert plug.handle_key(27) is False
+
+
+def test_io_plugin_catches_process_errors():
+    from martin_commander.plugin_api import InputOutputPlugin
+
+    class Boom(InputOutputPlugin):
+        name = "Boom"
+        description = "test"
+
+        def process(self, line):
+            raise RuntimeError("kapow")
+
+    plug = Boom(ctx=None)
+    for ch in "hi":
+        plug.handle_key(ord(ch))
+    plug.handle_key(10)
+    assert any("kapow" in l for l in plug.output)
+
+
+def test_find_files_plugin_searches_other_pane(fs, tmp_path):
+    from types import SimpleNamespace
+
+    from martin_commander.plugins.find_files import FindFiles
+
+    write(str(tmp_path / "data" / "notes.txt"), "n")
+    write(str(tmp_path / "data" / "sub" / "todo.txt"), "t")
+    write(str(tmp_path / "data" / "image.png"), "p")
+
+    other = Panel(fs, str(tmp_path / "data"))
+    ctx = SimpleNamespace(other_fs=fs, other_path=str(tmp_path / "data"),
+                          other_panel=other)
+    plug = FindFiles(ctx)
+    plug.process("*.txt")
+    joined = "\n".join(plug.output)
+    assert "notes.txt" in joined
+    assert "sub/todo.txt" in joined
+    assert "image.png" not in joined
 
 
 def test_panel_selection(fs, tmp_path):

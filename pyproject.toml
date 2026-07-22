@@ -35,4 +35,4 @@ mmc = "martin_commander.app:main"
 Homepage = "https://github.com/MartinGallagher-code/martin_commander"
 
 [tool.setuptools]
-packages = ["martin_commander"]
+packages = ["martin_commander", "martin_commander.plugins"]
