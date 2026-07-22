@@ -17,8 +17,11 @@ colour codes are stripped).  That covers prompts, line editing and ordinary
 command output well.  Full-screen programs (vim, htop, ...) want a real
 terminal -- run those with `!` (full-screen shell) instead.
 
-Keys: everything is sent to the shell.  ``Ctrl-]`` closes the terminal pane
-(telnet-style escape), and PgUp/PgDn scroll the local scrollback.
+Keys: everything is sent to the shell, including Tab (completion).
+``Ctrl-]`` switches focus to the other pane while the terminal keeps
+running -- Tab back (or click) to return to it.  ``F10`` closes the
+terminal, as does exiting the shell (``exit`` / Ctrl-D).  PgUp/PgDn
+scroll the local scrollback.
 """
 
 from __future__ import annotations
@@ -147,7 +150,8 @@ class TerminalPlugin(PanePlugin):
     description = "Shell inside this pane (local pty, or SSH for remote panes)"
     wants_timer = True     # the app polls tick() so output flows while idle
 
-    CLOSE_KEY = 29         # Ctrl-]
+    SWITCH_KEY = 29        # Ctrl-]: focus the other pane, keep the shell alive
+    CLOSE_KEY = curses.KEY_F10
 
     def on_start(self) -> None:
         self.term = TermEmulator()
@@ -260,7 +264,10 @@ class TerminalPlugin(PanePlugin):
         if self.done:
             self.on_exit()
             return False
-        if key == self.CLOSE_KEY:  # Ctrl-]
+        if key == self.SWITCH_KEY:  # Ctrl-]: hand focus to the other pane
+            self.ctx.focus_other()
+            return True
+        if key == self.CLOSE_KEY:   # F10: close the terminal
             self.on_exit()
             return False
         if key == curses.KEY_PPAGE:
@@ -321,7 +328,7 @@ class TerminalPlugin(PanePlugin):
 
         fs = self.ctx.own_fs
         where = f"{fs.label()}:{self.ctx.own_path}"
-        title = f" [terminal] {where}  (Ctrl-] close) "
+        title = f" [terminal] {where}  Ctrl-]:switch pane  F10:close "
         self.put(stdscr, y, x, w, title, curses.A_REVERSE)
 
         visible = self.term.visible(rows, self.scroll)

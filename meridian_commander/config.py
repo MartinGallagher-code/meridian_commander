@@ -1,9 +1,9 @@
-"""Martin Commander's configuration file.
+"""Meridian Commander's configuration file.
 
 Everything lives in one INI file, created with commented defaults on first
 use::
 
-    ~/.config/martin-commander/config.ini     ($XDG_CONFIG_HOME honoured)
+    ~/.config/meridian-commander/config.ini     ($XDG_CONFIG_HOME honoured)
 
 The ``[plugins]`` section configures plug-in discovery, and each plug-in reads
 its own ``[plugin:<name>]`` section (e.g. ``[plugin:json_push]``).  The file
@@ -17,12 +17,12 @@ import configparser
 import os
 
 DEFAULT_CONFIG = """\
-; Martin Commander configuration.
+; Meridian Commander configuration.
 ; Edit from within the app: press C and choose "Edit configuration".
 
 [plugins]
 ; Extra directories to search for plug-ins, colon-separated.
-; Built-in plug-ins and ~/.config/martin-commander/plugins/ are always used.
+; Built-in plug-ins and ~/.config/meridian-commander/plugins/ are always used.
 dirs =
 
 [plugin:json_push]
@@ -56,7 +56,7 @@ timeout = 30
 
 def config_dir() -> str:
     base = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
-    return os.path.join(base, "martin-commander")
+    return os.path.join(base, "meridian-commander")
 
 
 def config_path() -> str:

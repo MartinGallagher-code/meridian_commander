@@ -17,10 +17,10 @@ read until the listener closes the stream (or the timeout passes).
 
 Configuration
 -------------
-Set the connection details in ``~/.config/martin-commander/config.ini`` under
-``[plugin:json_push]`` (press ``C`` inside Martin Commander and choose "Edit
+Set the connection details in ``~/.config/meridian-commander/config.ini`` under
+``[plugin:json_push]`` (press ``C`` inside Meridian Commander and choose "Edit
 configuration").  To keep one variant per target system, copy this file to
-``~/.config/martin-commander/plugins/`` under a new name, change the class
+``~/.config/meridian-commander/plugins/`` under a new name, change the class
 ``name`` and ``config_section``, and add a matching ``[plugin:<section>]``
 block to the configuration file.
 """

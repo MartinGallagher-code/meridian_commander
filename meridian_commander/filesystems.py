@@ -14,8 +14,8 @@ Backends
 The abstraction is deliberately small: directory listing, stat, streaming
 read/write, and the handful of mutating operations (mkdir, remove, rename).
 Higher level behaviour -- recursive copy, move, sync -- is built on top of
-these primitives in :mod:`martin_commander.operations` and
-:mod:`martin_commander.sync`.
+these primitives in :mod:`meridian_commander.operations` and
+:mod:`meridian_commander.sync`.
 """
 
 from __future__ import annotations
@@ -190,7 +190,7 @@ class FileSystem(abc.ABC):
 # Local filesystem
 # ---------------------------------------------------------------------------
 class LocalFileSystem(FileSystem):
-    """The machine Martin Commander is running on."""
+    """The machine Meridian Commander is running on."""
 
     scheme = "local"
 

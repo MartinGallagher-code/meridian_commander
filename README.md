@@ -1,4 +1,6 @@
-# Martin Commander
+# Meridian Commander
+
+*The meridian is noon — the other end of the clock from midnight.*
 
 A two-pane terminal file manager in the spirit of **Midnight Commander**,
 written in pure Python. It browses local **and networked** locations, copies and
@@ -45,7 +47,9 @@ and ships with a built-in file viewer and editor.
   pseudo-terminal running a shell in the pane's directory, while the other pane
   keeps working normally. Works for **local panes** (a real pty) and for
   **SFTP/SSH panes** (an interactive shell on the pane's existing SSH
-  connection). `Ctrl-]` closes it. For full-screen programs (vim, htop) use
+  connection). `Ctrl-]` switches to the other pane while the shell keeps
+  running (Tab back to return); `F10` or exiting the shell closes it. For
+  full-screen programs (vim, htop) use
   `!`, which suspends the UI into a real terminal instead.
 - **Mouse support** — click to select, double-click to open, wheel to scroll,
   and **right-click for a context menu** of actions (view, edit, copy, move,
@@ -65,26 +69,29 @@ and ships with a built-in file viewer and editor.
 ## Install
 
 ```bash
-# from a checkout
-pip install .
+pip install meridian-commander            # once published to PyPI
 
-# with SFTP/SSH support
-pip install ".[sftp]"
+# with SFTP/SSH support (remote panes, in-pane remote terminal, SSH plug-ins)
+pip install "meridian-commander[ssh]"
+
+# or from a checkout
+pip install ".[ssh]"
 ```
 
-This installs the `martin-commander` (and short alias `mmc`) commands.
+This installs the `meridian-commander` command and its short alias
+`meridian`.
 
 You can also run it straight from the source tree without installing:
 
 ```bash
-python -m martin_commander
+python -m meridian_commander
 ```
 
 ## Usage
 
 ```bash
-martin-commander                 # both panes start in your home directory
-martin-commander /etc /var/log   # left pane in /etc, right pane in /var/log
+meridian-commander                 # both panes start in your home directory
+meridian-commander /etc /var/log   # left pane in /etc, right pane in /var/log
 ```
 
 ### Connecting to a remote location
@@ -126,7 +133,7 @@ edit, and copy/move/sync to and from it.
 | `Ctrl-G` | go to path | `Ctrl-T` | change sort order |
 | `.` | show/hide hidden files | `t` | terminal inside this pane |
 | `p` / F11 | plug-in mode (this pane) | `!` | full-screen shell |
-| `C` | configuration menu | `Ctrl-]` | close in-pane terminal |
+| `C` | configuration menu | `Ctrl-]` | terminal: switch to other pane |
 
 **F-key aliases** (for terminals that swallow function keys): press the digit
 `1`–`0` for `F1`–`F10`, or the mnemonic letter — `?`/`1` help, `o` open/connect,
@@ -185,12 +192,12 @@ Built-in plug-ins:
 
 ### Writing a plug-in
 
-Drop a `.py` file into `~/.config/martin-commander/plugins/` (or into
-`martin_commander/plugins/` inside the framework — both are scanned, plus any
+Drop a `.py` file into `~/.config/meridian-commander/plugins/` (or into
+`meridian_commander/plugins/` inside the framework — both are scanned, plus any
 extra directories listed in the config file). A complete plug-in is:
 
 ```python
-from martin_commander.plugin_api import InputOutputPlugin
+from meridian_commander.plugin_api import InputOutputPlugin
 
 class Shout(InputOutputPlugin):
     name = "Shout"
@@ -212,14 +219,14 @@ drawing and keys, subclass `PanePlugin` instead.
 
 Press **`C`** for the configuration menu:
 
-- **Edit configuration** opens `~/.config/martin-commander/config.ini` in the
+- **Edit configuration** opens `~/.config/meridian-commander/config.ini` in the
   built-in editor (created with commented defaults on first use). Plug-ins read
   their settings from `[plugin:<name>]` sections; `[plugins] dirs` adds extra
   plug-in directories.
 - **Edit a plug-in file** lists every discovered plug-in file (built-in and
   user) and opens the chosen one in the editor.
 - **Open user plug-in folder in this pane** jumps the pane to
-  `~/.config/martin-commander/plugins/` so you can manage plug-ins like any
+  `~/.config/meridian-commander/plugins/` so you can manage plug-ins like any
   other files.
 
 ## How synchronization works

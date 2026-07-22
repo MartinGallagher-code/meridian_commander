@@ -8,11 +8,11 @@ what lets a plugin "do work" on whatever the user has open next to it.
 
 Writing a plugin
 ----------------
-Create a ``.py`` file in ``~/.config/martin-commander/plugins/`` (or add it to
-``martin_commander/plugins/`` in the source tree) containing a subclass of
+Create a ``.py`` file in ``~/.config/meridian-commander/plugins/`` (or add it to
+``meridian_commander/plugins/`` in the source tree) containing a subclass of
 :class:`InputOutputPlugin` and implement ``process()``::
 
-    from martin_commander.plugin_api import InputOutputPlugin
+    from meridian_commander.plugin_api import InputOutputPlugin
 
     class Shout(InputOutputPlugin):
         name = "Shout"
@@ -22,7 +22,7 @@ Create a ``.py`` file in ``~/.config/martin-commander/plugins/`` (or add it to
         def process(self, line):
             return [line.upper()]
 
-That is a complete plugin: Martin Commander discovers it, lists it in the
+That is a complete plugin: Meridian Commander discovers it, lists it in the
 plugin menu (``p`` or F11), and gives it the classic two-part layout -- a
 scrolling **output area** on top and an **input line** at the bottom.  Each
 time the user presses Enter, ``process()`` is called with the input; whatever
@@ -89,6 +89,17 @@ class PluginContext:
         """Show ``text`` in the application's status line."""
         try:
             self.app._set_message(text)
+        except Exception:
+            pass
+
+    def focus_other(self) -> None:
+        """Move keyboard focus to the opposite pane (the plugin keeps running).
+
+        Lets a plugin that consumes Tab (like the terminal, where Tab must
+        reach the shell for completion) still offer a switch-pane key.
+        """
+        try:
+            self.app.active = self.other_panel
         except Exception:
             pass
 
