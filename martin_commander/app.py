@@ -35,6 +35,7 @@ from .filesystems import (
     FTPFileSystem,
     LocalFileSystem,
     SFTPFileSystem,
+    SSHFileSystem,
 )
 from .operations import (
     OperationCancelled,
@@ -338,7 +339,7 @@ class App:
             shell = os.environ.get("SHELL", "/bin/sh")
             cmd = [shell]
             cwd = panel.path
-        elif isinstance(fs, SFTPFileSystem):
+        elif isinstance(fs, (SFTPFileSystem, SSHFileSystem)):
             remote = f"cd {shlex.quote(panel.path)} && exec ${{SHELL:-/bin/sh}}"
             cmd = ["ssh", "-t", "-p", str(fs.port),
                    f"{fs.username}@{fs.host}", remote]
@@ -490,6 +491,12 @@ class App:
                 fs: FileSystem = LocalFileSystem()
             elif info["scheme"] == "sftp":
                 fs = SFTPFileSystem(
+                    host=info["host"], username=info["username"],
+                    password=info.get("password"), port=info["port"],
+                    key_filename=info.get("key_filename"),
+                )
+            elif info["scheme"] == "ssh":
+                fs = SSHFileSystem(
                     host=info["host"], username=info["username"],
                     password=info.get("password"), port=info["port"],
                     key_filename=info.get("key_filename"),
@@ -775,9 +782,9 @@ class App:
             "  Mouse: click to select, double-click to open, wheel to\n"
             "  scroll, right-click for a context menu of actions.\n"
             "\n"
-            "F2 connects to SFTP or FTP; copy/move/sync work across\n"
-            "local and remote panes alike. F9 makes both panes hold\n"
-            "the newest version of every file."
+            "F2 connects to SFTP, SSH (shell) or FTP; copy/move/sync\n"
+            "work across local and remote panes alike. F9 makes both\n"
+            "panes hold the newest version of every file."
         )
         dialogs.message(self.stdscr, "Help", text)
 

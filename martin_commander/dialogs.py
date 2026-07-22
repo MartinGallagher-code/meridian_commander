@@ -157,12 +157,14 @@ def connect_dialog(stdscr) -> dict | None:
     Returns a dict describing the connection, or None if cancelled.
     """
     kind = menu(stdscr, "Open location",
-                ["Local disk", "SFTP (SSH)", "FTP", "Cancel"])
-    if kind is None or kind == 3:
+                ["Local disk", "SFTP (SSH file transfer)",
+                 "SSH (shell -- for servers with SFTP disabled)",
+                 "FTP", "Cancel"])
+    if kind is None or kind == 4:
         return None
     if kind == 0:
         return {"scheme": "local"}
-    scheme = "sftp" if kind == 1 else "ftp"
+    scheme = {1: "sftp", 2: "ssh", 3: "ftp"}[kind]
 
     host = prompt(stdscr, f"{scheme.upper()} connection", "Host:")
     if not host:
@@ -184,14 +186,15 @@ def connect_dialog(stdscr) -> dict | None:
 
     result = {"scheme": scheme, "host": host, "username": user, "port": port}
 
-    if scheme == "sftp":
-        keyfile = prompt(stdscr, "SFTP connection",
+    if scheme in ("sftp", "ssh"):
+        title = f"{scheme.upper()} connection"
+        keyfile = prompt(stdscr, title,
                          "Key file (blank = agent/password):", default="")
         if keyfile is None:
             return None
         result["key_filename"] = keyfile or None
         if not keyfile:
-            pw = prompt(stdscr, "SFTP connection",
+            pw = prompt(stdscr, title,
                         "Password (blank = key/agent):", is_password=True)
             if pw is None:
                 return None

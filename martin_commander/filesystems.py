@@ -291,6 +291,41 @@ class LocalFileSystem(FileSystem):
 # ---------------------------------------------------------------------------
 # SFTP filesystem (paramiko)
 # ---------------------------------------------------------------------------
+def _open_ssh_client(
+    host: str,
+    username: str,
+    password: str | None,
+    port: int,
+    key_filename: str | None,
+):
+    """Open and authenticate a paramiko SSHClient, shared by the SFTP and SSH
+    backends.  Raises :class:`FileSystemError` on any failure."""
+    try:
+        import paramiko
+    except ImportError as exc:  # pragma: no cover - environment dependent
+        raise FileSystemError(
+            "SSH/SFTP support requires the 'paramiko' package "
+            "(pip install paramiko)."
+        ) from exc
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(
+            hostname=host,
+            port=port,
+            username=username,
+            password=password or None,
+            key_filename=key_filename or None,
+            look_for_keys=key_filename is None and password is None,
+            allow_agent=True,
+            timeout=20,
+        )
+    except Exception as exc:
+        raise FileSystemError(f"Could not connect to {host}: {exc}") from exc
+    return client
+
+
 class SFTPFileSystem(FileSystem):
     """An SSH/SFTP server, browsed through paramiko.
 
@@ -308,33 +343,20 @@ class SFTPFileSystem(FileSystem):
         port: int = 22,
         key_filename: str | None = None,
     ) -> None:
-        try:
-            import paramiko  # imported lazily so the app runs without it
-        except ImportError as exc:  # pragma: no cover - environment dependent
-            raise FileSystemError(
-                "SFTP support requires the 'paramiko' package "
-                "(pip install paramiko)."
-            ) from exc
-
         self.host = host
         self.port = port
         self.username = username
-        self._client = paramiko.SSHClient()
-        self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        self._client = _open_ssh_client(host, username, password, port,
+                                        key_filename)
         try:
-            self._client.connect(
-                hostname=host,
-                port=port,
-                username=username,
-                password=password or None,
-                key_filename=key_filename or None,
-                look_for_keys=key_filename is None and password is None,
-                allow_agent=True,
-                timeout=20,
-            )
             self._sftp = self._client.open_sftp()
         except Exception as exc:
-            raise FileSystemError(f"Could not connect to {host}: {exc}") from exc
+            self._client.close()
+            raise FileSystemError(
+                f"Connected to {host} but could not open the SFTP subsystem: "
+                f"{exc}. If SFTP is disabled on the server, try the SSH (shell) "
+                f"mode instead."
+            ) from exc
         try:
             self._home = self._sftp.normalize(".")
         except Exception:
@@ -423,15 +445,78 @@ class SFTPFileSystem(FileSystem):
 
 
 # ---------------------------------------------------------------------------
+# Shared ``ls -l`` parsing (used by the FTP LIST fallback and the SSH backend)
+# ---------------------------------------------------------------------------
+def _parse_ls_date(value: str) -> float | None:
+    """Parse the three-token date from ``ls -l`` output into a timestamp."""
+    import time as _time
+
+    parts = value.split()
+    if len(parts) != 3:
+        return None
+    month, day, last = parts
+    try:
+        if ":" in last:  # current year, e.g. "Jul 20 12:00"
+            year = _time.localtime().tm_year
+            tm = _time.strptime(f"{month} {day} {year} {last}", "%b %d %Y %H:%M")
+            mtime = _time.mktime(tm)
+            # A date more than a day in the future was really last year.
+            if mtime > _time.time() + 86400:
+                tm = _time.strptime(f"{month} {day} {year - 1} {last}",
+                                    "%b %d %Y %H:%M")
+                mtime = _time.mktime(tm)
+            return mtime
+        tm = _time.strptime(f"{month} {day} {last}", "%b %d %Y")
+        return _time.mktime(tm)
+    except ValueError:
+        return None
+
+
+def _parse_unix_ls_line(line: str) -> "DirEntry | None":
+    """Parse one ``ls -l`` line into a :class:`DirEntry`, or None if it is junk.
+
+    Handles regular files, directories and symlinks (including the trailing
+    ``-> target``), tolerating an ACL/xattr marker (``+``/``@``/``.``) after the
+    permission bits.
+    """
+    import re
+
+    line = line.rstrip("\r\n")
+    if not line.strip():
+        return None
+    m = re.match(
+        r"^([\-dlbcps])[rwxsStT\-]{9}[\+@\.]?\s+\d+\s+\S+\s+\S+\s+"
+        r"(\d+)\s+(\w{3}\s+\d+\s+[\d:]+)\s+(.+)$",
+        line,
+    )
+    if not m:
+        return None
+    type_ch, size_s, date_s, name = m.groups()
+    is_link = type_ch == "l"
+    is_dir = type_ch == "d"
+    if is_link:
+        name = name.split(" -> ", 1)[0]
+    return DirEntry(
+        name=name.strip(),
+        is_dir=is_dir,
+        is_symlink=is_link,
+        size=int(size_s),
+        mtime=_parse_ls_date(date_s),
+    )
+
+
+# ---------------------------------------------------------------------------
 # FTP filesystem (stdlib ftplib, MLSD based)
 # ---------------------------------------------------------------------------
 class FTPFileSystem(FileSystem):
     """An FTP server.
 
-    Listing relies on the ``MLSD`` command (RFC 3659) so that we get machine
-    readable ``type``/``size``/``modify`` facts instead of trying to parse the
-    free-form ``LIST`` output.  Practically every FTP server from the last two
-    decades supports it.
+    Listing prefers the ``MLSD`` command (RFC 3659), which returns machine
+    readable ``type``/``size``/``modify`` facts.  Many servers support it, but
+    plenty of older or minimal ones do not and answer ``MLSD`` with
+    ``500 Unknown command``.  For those we transparently fall back to parsing
+    the classic ``LIST`` (``ls -l`` style, and MS-DOS/IIS style) output, and use
+    ``MDTM`` to recover a precise modification time per file where possible.
     """
 
     scheme = "ftp"
@@ -455,6 +540,16 @@ class FTPFileSystem(FileSystem):
             self._ftp.set_pasv(True)
         except Exception as exc:
             raise FileSystemError(f"Could not connect to {host}: {exc}") from exc
+
+        # Decide once whether the server supports MLSD. FEAT is advisory; if the
+        # server has no FEAT either we optimistically try MLSD and fall back the
+        # first time it is refused.
+        self._use_mlsd = True
+        try:
+            feat = self._ftp.sendcmd("FEAT")
+            self._use_mlsd = "MLSD" in feat.upper()
+        except Exception:
+            pass
 
     def label(self) -> str:
         return f"ftp://{self.username}@{self.host}"
@@ -481,6 +576,20 @@ class FTPFileSystem(FileSystem):
             return None
 
     def listdir(self, path: str) -> list[DirEntry]:
+        from ftplib import error_perm
+
+        if self._use_mlsd:
+            try:
+                return self._listdir_mlsd(path)
+            except error_perm as exc:
+                # 500/502 = command not implemented -> switch to LIST for good.
+                if str(exc)[:3] in ("500", "502"):
+                    self._use_mlsd = False
+                else:
+                    raise
+        return self._listdir_list(path)
+
+    def _listdir_mlsd(self, path: str) -> list[DirEntry]:
         entries: list[DirEntry] = []
         for name, facts in self._ftp.mlsd(path):
             if name in (".", ".."):
@@ -497,6 +606,63 @@ class FTPFileSystem(FileSystem):
                 )
             )
         return entries
+
+    def _listdir_list(self, path: str) -> list[DirEntry]:
+        """Fallback listing by parsing ``LIST`` output for servers without MLSD."""
+        lines: list[str] = []
+        # Some servers need the connection positioned in the directory first.
+        try:
+            self._ftp.cwd(path)
+            self._ftp.retrlines("LIST", lines.append)
+        except Exception:
+            lines = []
+            self._ftp.retrlines(f"LIST {path}", lines.append)
+
+        entries: list[DirEntry] = []
+        for line in lines:
+            entry = self._parse_list_line(line)
+            if entry is None or entry.name in (".", ".."):
+                continue
+            entries.append(entry)
+        return entries
+
+    @staticmethod
+    def _parse_list_line(line: str) -> "DirEntry | None":
+        import re
+        import time as _time
+
+        line = line.rstrip("\r\n")
+        if not line.strip():
+            return None
+
+        # MS-DOS / IIS style:  "07-22-25  09:15AM   <DIR>   name"
+        #                      "07-22-25  09:15AM        842 name"
+        m = re.match(
+            r"^(\d{2}-\d{2}-\d{2,4})\s+(\d{2}:\d{2}(?:[AP]M)?)\s+"
+            r"(<DIR>|\d+)\s+(.+)$",
+            line,
+        )
+        if m:
+            date_s, time_s, size_s, name = m.groups()
+            is_dir = size_s == "<DIR>"
+            mtime = None
+            for fmt in ("%m-%d-%y %I:%M%p", "%m-%d-%Y %I:%M%p",
+                        "%m-%d-%y %H:%M", "%m-%d-%Y %H:%M"):
+                try:
+                    mtime = _time.mktime(_time.strptime(f"{date_s} {time_s}", fmt))
+                    break
+                except ValueError:
+                    continue
+            return DirEntry(
+                name=name.strip(),
+                is_dir=is_dir,
+                is_symlink=False,
+                size=0 if is_dir else int(size_s),
+                mtime=mtime,
+            )
+
+        # Otherwise assume Unix "ls -l" style.
+        return _parse_unix_ls_line(line)
 
     def stat(self, path: str) -> DirEntry:
         path = self.normpath(path)
@@ -652,6 +818,198 @@ class _QueueFile:
     def read(self, _n: int = -1) -> bytes:
         chunk = self._queue.get()
         return chunk if chunk is not None else b""
+
+
+# ---------------------------------------------------------------------------
+# SSH (shell) filesystem
+# ---------------------------------------------------------------------------
+class SSHFileSystem(FileSystem):
+    """A remote host browsed purely over an SSH shell channel.
+
+    Unlike :class:`SFTPFileSystem`, this backend never uses the SFTP subsystem.
+    It runs ordinary POSIX commands over ``exec_command`` -- ``ls`` to list,
+    ``cat`` to read and write, ``mkdir``/``rm``/``mv`` to mutate -- so it works
+    against servers that permit SSH login but have SFTP disabled.  It assumes a
+    POSIX-like remote shell with the usual coreutils.
+    """
+
+    scheme = "ssh"
+
+    def __init__(
+        self,
+        host: str,
+        username: str,
+        password: str | None = None,
+        port: int = 22,
+        key_filename: str | None = None,
+    ) -> None:
+        self.host = host
+        self.port = port
+        self.username = username
+        self._client = _open_ssh_client(host, username, password, port,
+                                        key_filename)
+        self._home = self._run("pwd").strip() or "/"
+
+    def label(self) -> str:
+        return f"ssh://{self.username}@{self.host}"
+
+    def home(self) -> str:
+        return self._home
+
+    # -- command execution ------------------------------------------------
+    def _run(self, command: str) -> str:
+        """Run a command, returning stdout; raise FileSystemError on failure."""
+        stdin, stdout, stderr = self._client.exec_command(command, timeout=30)
+        out = stdout.read().decode("utf-8", errors="replace")
+        status = stdout.channel.recv_exit_status()
+        if status != 0:
+            err = stderr.read().decode("utf-8", errors="replace").strip()
+            raise FileSystemError(err or f"command failed ({status}): {command}")
+        return out
+
+    @staticmethod
+    def _q(path: str) -> str:
+        import shlex
+
+        return shlex.quote(path)
+
+    # -- queries ----------------------------------------------------------
+    def listdir(self, path: str) -> list[DirEntry]:
+        # -l long format, -A include dotfiles (but not . and ..), -Q would quote
+        # but is GNU-only, so we rely on the parser tolerating spaces in names.
+        out = self._run(f"ls -lA {self._q(path)}")
+        entries: list[DirEntry] = []
+        for line in out.splitlines():
+            if line.startswith("total ") or not line.strip():
+                continue
+            entry = _parse_unix_ls_line(line)
+            if entry is not None and entry.name not in (".", ".."):
+                entries.append(entry)
+        return entries
+
+    def stat(self, path: str) -> DirEntry:
+        path = self.normpath(path)
+        if path in ("", "/"):
+            return DirEntry(name="/", is_dir=True)
+        # -d lists the item itself rather than a directory's contents.
+        out = self._run(f"ls -ldA {self._q(path)}")
+        for line in out.splitlines():
+            entry = _parse_unix_ls_line(line)
+            if entry is not None:
+                # ls -d prints the path as given; normalise to the basename.
+                entry.name = self.basename(path)
+                return entry
+        raise FileSystemError(f"No such path: {path}")
+
+    def is_dir(self, path: str) -> bool:
+        try:
+            self._run(f"test -d {self._q(path)}")
+            return True
+        except Exception:
+            return False
+
+    def exists(self, path: str) -> bool:
+        try:
+            self._run(f"test -e {self._q(path)}")
+            return True
+        except Exception:
+            return False
+
+    # -- streaming I/O ----------------------------------------------------
+    def open_read(self, path: str):
+        stdin, stdout, stderr = self._client.exec_command(
+            f"cat {self._q(path)}", timeout=None
+        )
+        return _SSHReader(stdout)
+
+    def open_write(self, path: str):
+        stdin, stdout, stderr = self._client.exec_command(
+            f"cat > {self._q(path)}", timeout=None
+        )
+        return _SSHWriter(stdin, stdout)
+
+    # -- mutations --------------------------------------------------------
+    def utime(self, path: str, mtime: float) -> None:
+        import time as _time
+
+        stamp = _time.strftime("%Y%m%d%H%M.%S", _time.localtime(mtime))
+        try:
+            # GNU form first (epoch), then the portable POSIX -t form.
+            self._run(f"touch -d @{int(mtime)} {self._q(path)}")
+        except Exception:
+            try:
+                self._run(f"touch -t {stamp} {self._q(path)}")
+            except Exception:
+                pass
+
+    def mkdir(self, path: str) -> None:
+        self._run(f"mkdir {self._q(path)}")
+
+    def makedirs(self, path: str) -> None:
+        self._run(f"mkdir -p {self._q(path)}")
+
+    def remove(self, path: str) -> None:
+        self._run(f"rm -f {self._q(path)}")
+
+    def rmdir(self, path: str) -> None:
+        self._run(f"rmdir {self._q(path)}")
+
+    def delete_tree(self, path: str) -> None:
+        self._run(f"rm -rf {self._q(path)}")
+
+    def rename(self, src: str, dst: str) -> None:
+        self._run(f"mv {self._q(src)} {self._q(dst)}")
+
+    def close(self) -> None:
+        self._client.close()
+
+
+class _SSHReader:
+    """Wrap a paramiko exec stdout channel as a blocking ``read(n)`` stream."""
+
+    def __init__(self, stdout) -> None:
+        self._stdout = stdout
+
+    def read(self, n: int = -1) -> bytes:
+        if n is None or n < 0:
+            return self._stdout.read()
+        # Channel.read honours the requested size; loop until we have n or EOF.
+        data = b""
+        while len(data) < n:
+            chunk = self._stdout.read(n - len(data))
+            if not chunk:
+                break
+            data += chunk
+        return data
+
+    def close(self) -> None:
+        try:
+            self._stdout.channel.recv_exit_status()
+        except Exception:
+            pass
+
+
+class _SSHWriter:
+    """Wrap a paramiko exec stdin channel as a blocking ``write(bytes)`` stream."""
+
+    def __init__(self, stdin, stdout) -> None:
+        self._stdin = stdin
+        self._stdout = stdout
+
+    def write(self, data: bytes) -> int:
+        self._stdin.write(data)
+        return len(data)
+
+    def close(self) -> None:
+        # Signal EOF to the remote 'cat', then wait for it to finish writing.
+        try:
+            self._stdin.channel.shutdown_write()
+        except Exception:
+            pass
+        try:
+            self._stdout.channel.recv_exit_status()
+        except Exception:
+            pass
 
 
 def local_fs() -> LocalFileSystem:

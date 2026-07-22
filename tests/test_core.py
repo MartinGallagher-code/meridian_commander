@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from martin_commander.filesystems import LocalFileSystem
+from martin_commander.filesystems import FTPFileSystem, LocalFileSystem
 from martin_commander.operations import copy_path, count_tree, move_path
 from martin_commander.panel import Panel
 from martin_commander.sync import build_sync_plan, execute_sync_plan
@@ -220,6 +220,35 @@ def test_panel_hidden_toggle(fs, tmp_path):
     assert "visible.txt" in names
     panel.toggle_hidden()
     assert ".secret" in [e.name for e in panel.entries]
+
+
+def test_ftp_list_parser_unix():
+    # Servers that answer MLSD with "500 Unknown command" fall back to LIST;
+    # verify the ls -l parser handles the common shapes.
+    parse = FTPFileSystem._parse_list_line
+
+    d = parse("drwxr-xr-x   2 owner group     4096 Jul 20 12:00 my dir")
+    assert d is not None and d.is_dir and d.name == "my dir" and d.size == 4096
+
+    f = parse("-rw-r--r--   1 owner group      842 Jul 22  2024 file.txt")
+    assert f is not None and not f.is_dir and f.name == "file.txt" and f.size == 842
+
+    link = parse("lrwxrwxrwx   1 o g    7 Jul 22 12:00 link -> /tmp/target")
+    assert link is not None and link.is_symlink and link.name == "link"
+
+    # ACL marker, and junk lines are ignored.
+    assert parse("-rw-r--r--+  1 o g  100 Jan 05 09:15 acl") is not None
+    assert parse("total 48") is None
+    assert parse("") is None
+
+
+def test_ftp_list_parser_dos():
+    parse = FTPFileSystem._parse_list_line
+    d = parse("07-22-25  09:15AM       <DIR>          images")
+    assert d is not None and d.is_dir and d.name == "images"
+
+    f = parse("07-22-2025  09:15AM              1024 report.pdf")
+    assert f is not None and not f.is_dir and f.name == "report.pdf" and f.size == 1024
 
 
 def test_panel_selection(fs, tmp_path):
