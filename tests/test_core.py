@@ -207,6 +207,21 @@ def test_panel_lists_and_navigates(fs, tmp_path):
     assert non_parent.index("child") < non_parent.index("file.txt")
 
 
+def test_panel_hidden_toggle(fs, tmp_path):
+    d = tmp_path / "d"
+    write(str(d / "visible.txt"), "v")
+    write(str(d / ".secret"), "s")
+    panel = Panel(fs, str(d))
+    # Shown by default.
+    assert ".secret" in [e.name for e in panel.entries]
+    panel.toggle_hidden()
+    names = [e.name for e in panel.entries]
+    assert ".secret" not in names
+    assert "visible.txt" in names
+    panel.toggle_hidden()
+    assert ".secret" in [e.name for e in panel.entries]
+
+
 def test_panel_selection(fs, tmp_path):
     write(str(tmp_path / "d" / "one"), "1")
     write(str(tmp_path / "d" / "two"), "2")

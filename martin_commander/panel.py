@@ -24,6 +24,7 @@ class Panel:
     selected: set[str] = field(default_factory=set)  # tagged entry names
     sort_key: str = "name"     # name | size | mtime | ext
     sort_reverse: bool = False
+    show_hidden: bool = True    # whether dotfiles are listed
     error: str | None = None
 
     # ".." pseudo-entry so the user can always step up a directory.
@@ -42,6 +43,8 @@ class Panel:
         except Exception as exc:
             entries = []
             self.error = str(exc)
+        if not self.show_hidden:
+            entries = [e for e in entries if not e.name.startswith(".")]
         self.entries = self._sorted(entries)
         # Drop selections for entries that no longer exist.
         names = {e.name for e in self.entries}
@@ -184,6 +187,12 @@ class Panel:
 
     def clear_selection(self) -> None:
         self.selected.clear()
+
+    def toggle_hidden(self) -> None:
+        """Show or hide dotfiles in this pane, keeping the cursor in place."""
+        keep = self.current_name()
+        self.show_hidden = not self.show_hidden
+        self.refresh(keep_name=keep)
 
     # -- sorting ----------------------------------------------------------
     def set_sort(self, key: str) -> None:

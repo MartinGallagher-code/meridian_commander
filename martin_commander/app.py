@@ -23,6 +23,9 @@ Key bindings (also shown in the F1 help screen)::
 from __future__ import annotations
 
 import curses
+import os
+import shlex
+import subprocess
 
 from . import dialogs
 from .editor import Editor
@@ -57,8 +60,10 @@ class App:
         self.left = Panel(left_fs, left_fs.normpath(left_path or left_fs.home()))
         self.right = Panel(right_fs, right_fs.normpath(right_path or right_fs.home()))
         self.active = self.left
-        self.message = "F1 Help   Tab switch pane   F9 Sync   F10 Quit"
+        self.message = "F1/? Help   Tab switch   F9/s Sync   F10/q Quit   right-click: menu"
         self.running = True
+        # (panel, y, x, h, w) rectangles, refreshed on every draw for the mouse.
+        self._panel_boxes: list[tuple] = []
 
     # -- helpers ----------------------------------------------------------
     @property
@@ -82,6 +87,13 @@ class App:
         panel_h = height - 2
         left_w = width // 2
         right_w = width - left_w
+
+        # Remember each pane's screen rectangle so the mouse handler can map a
+        # click back to a pane and a row.
+        self._panel_boxes = [
+            (self.left, 0, 0, panel_h, left_w),
+            (self.right, 0, left_w, panel_h, right_w),
+        ]
 
         self._draw_panel(self.left, 0, 0, panel_h, left_w,
                          active=self.active is self.left)
@@ -260,25 +272,35 @@ class App:
             self._go_to_path()
         elif key == 20:  # Ctrl-T sort
             self._sort_menu()
-        elif key in (curses.KEY_F1, ord("?")):
+        elif key == ord("."):  # toggle hidden files in the active pane
+            panel.toggle_hidden()
+            self._set_message("Hidden files "
+                              + ("shown" if panel.show_hidden else "hidden"))
+        elif key in (ord("t"), ord("!"), 15):  # terminal here (15 = Ctrl-O)
+            self._open_terminal()
+        elif key == curses.KEY_MOUSE:
+            self._handle_mouse()
+        # F-keys, with digit (1..0 -> F1..F10) and mnemonic-letter alternates
+        # so the app is fully usable on terminals that swallow the F-keys.
+        elif key in (curses.KEY_F1, ord("1"), ord("?")):
             self._help()
-        elif key == curses.KEY_F2:
+        elif key in (curses.KEY_F2, ord("2"), ord("o")):
             self._open_location()
-        elif key == curses.KEY_F3:
+        elif key in (curses.KEY_F3, ord("3"), ord("v")):
             self._view()
-        elif key == curses.KEY_F4:
+        elif key in (curses.KEY_F4, ord("4"), ord("e")):
             self._edit()
-        elif key == curses.KEY_F5:
+        elif key in (curses.KEY_F5, ord("5"), ord("c")):
             self._copy()
-        elif key == curses.KEY_F6:
+        elif key in (curses.KEY_F6, ord("6"), ord("m")):
             self._move()
-        elif key == curses.KEY_F7:
+        elif key in (curses.KEY_F7, ord("7")):
             self._mkdir()
-        elif key in (curses.KEY_F8, curses.KEY_DC):
+        elif key in (curses.KEY_F8, curses.KEY_DC, ord("8"), ord("d")):
             self._delete()
-        elif key == curses.KEY_F9:
+        elif key in (curses.KEY_F9, ord("9"), ord("s")):
             self._sync()
-        elif key in (curses.KEY_F10, 27):
+        elif key in (curses.KEY_F10, ord("0"), ord("q"), 27):
             if dialogs.confirm(self.stdscr, "Quit", "Exit Martin Commander?",
                                default_yes=True):
                 self.running = False
@@ -301,6 +323,144 @@ class App:
         # Keep the highlighted (active) pane pointing at the same panel object.
         self.active = self.left if self.active is self.left else self.right
         self._set_message("Panes swapped")
+
+    def _open_terminal(self) -> None:
+        """Suspend the TUI and drop the user into a shell in this directory.
+
+        For a local pane this is a shell with the working directory set to the
+        pane's path.  For an SFTP pane it opens an interactive ``ssh`` session
+        into the same remote directory.  FTP has no shell, so it is declined.
+        """
+        panel = self.active
+        fs = panel.fs
+        cwd = None
+        if isinstance(fs, LocalFileSystem):
+            shell = os.environ.get("SHELL", "/bin/sh")
+            cmd = [shell]
+            cwd = panel.path
+        elif isinstance(fs, SFTPFileSystem):
+            remote = f"cd {shlex.quote(panel.path)} && exec ${{SHELL:-/bin/sh}}"
+            cmd = ["ssh", "-t", "-p", str(fs.port),
+                   f"{fs.username}@{fs.host}", remote]
+        else:
+            dialogs.message(self.stdscr, "Terminal",
+                            "A terminal is only available for local or SFTP panes.")
+            return
+
+        # Hand the real terminal back to the shell, then restore curses after.
+        curses.def_prog_mode()
+        curses.endwin()
+        try:
+            os.write(1, (f"\n[Martin Commander] Shell in {fs.label()}:{panel.path}\n"
+                         "Type 'exit' to return to Martin Commander.\n\n").encode())
+            subprocess.call(cmd, cwd=cwd)
+        except Exception as exc:
+            os.write(2, f"\nCould not start terminal: {exc}\n".encode())
+            try:
+                input("Press Enter to return...")
+            except EOFError:
+                pass
+        finally:
+            curses.reset_prog_mode()
+            self.stdscr.clearok(True)
+            curses.curs_set(0)
+            self.stdscr.refresh()
+        panel.refresh()
+        self._set_message("Returned from shell")
+
+    # -- mouse ------------------------------------------------------------
+    def _handle_mouse(self) -> None:
+        try:
+            _id, mx, my, _z, bstate = curses.getmouse()
+        except curses.error:
+            return
+
+        target = None
+        for panel, y, x, h, w in self._panel_boxes:
+            if x <= mx < x + w and y <= my < y + h:
+                target = (panel, y, x, h, w)
+                break
+        if target is None:
+            return
+        panel, y, x, h, w = target
+        body_h = h - 3
+        self.active = panel  # clicking a pane focuses it
+
+        # Mouse wheel scrolls the pane under the pointer.
+        wheel_up = getattr(curses, "BUTTON4_PRESSED", 0)
+        wheel_down = getattr(curses, "BUTTON5_PRESSED", 0)
+        if wheel_up and bstate & wheel_up:
+            panel.move(-3)
+            return
+        if wheel_down and bstate & wheel_down:
+            panel.move(3)
+            return
+
+        row = my - (y + 2)
+        index = panel.top + row if 0 <= row < body_h else None
+        on_entry = index is not None and index < len(panel.entries)
+
+        if on_entry:
+            panel.move_to(index)
+            if bstate & curses.BUTTON1_DOUBLE_CLICKED:
+                self._activate_entry()
+            elif bstate & (curses.BUTTON3_CLICKED | curses.BUTTON3_PRESSED):
+                self._context_menu()
+        elif bstate & (curses.BUTTON3_CLICKED | curses.BUTTON3_PRESSED):
+            # Right-click on the header/empty area: still offer the menu.
+            self._context_menu()
+
+    def _context_menu(self) -> None:
+        panel = self.active
+        entry = panel.current()
+        name = entry.name if entry and entry.name != Panel.PARENT else None
+        header = name or panel.fs.basename(panel.path) or panel.path
+
+        labels = ["View", "Edit", "Copy to other pane", "Move to other pane",
+                  "Rename", "Delete", "Tag / untag", "New directory",
+                  "Open terminal here", "Cancel"]
+        actions = ["view", "edit", "copy", "move", "rename", "delete",
+                   "tag", "mkdir", "terminal", None]
+        choice = dialogs.menu(self.stdscr, header[:40], labels)
+        if choice is None:
+            return
+        action = actions[choice]
+        if action == "view":
+            self._view()
+        elif action == "edit":
+            self._edit()
+        elif action == "copy":
+            self._copy()
+        elif action == "move":
+            self._move()
+        elif action == "rename":
+            self._rename()
+        elif action == "delete":
+            self._delete()
+        elif action == "tag":
+            panel.toggle_select()
+        elif action == "mkdir":
+            self._mkdir()
+        elif action == "terminal":
+            self._open_terminal()
+
+    def _rename(self) -> None:
+        panel = self.active
+        entry = panel.current()
+        if entry is None or entry.name == Panel.PARENT:
+            return
+        new_name = dialogs.prompt(self.stdscr, "Rename", "New name:",
+                                  default=entry.name)
+        if not new_name or new_name == entry.name:
+            return
+        src = panel.fs.join(panel.path, entry.name)
+        dst = panel.fs.join(panel.path, new_name)
+        try:
+            panel.fs.rename(src, dst)
+            panel.refresh(keep_name=new_name)
+            self._set_message(f"Renamed to {new_name}")
+        except Exception as exc:
+            dialogs.message(self.stdscr, "Rename error", str(exc), error=True)
 
     def _go_to_path(self) -> None:
         panel = self.active
@@ -602,10 +762,18 @@ class App:
             "  Insert / Space tag file    +/-  tag all / untag all\n"
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
             "  Ctrl-G         go to path   Ctrl-T  sort order\n"
+            "  .              show/hide hidden files (this pane)\n"
+            "  t / !          open a terminal in the current directory\n"
             "\n"
-            "  F1 Help    F2 Open/Connect   F3 View   F4 Edit\n"
-            "  F5 Copy    F6 Move           F7 Mkdir  F8 Delete\n"
-            "  F9 Sync    F10 Quit\n"
+            "  Function keys -- each also has digit and letter aliases,\n"
+            "  for terminals that swallow the F-keys:\n"
+            "  F1/1/?  Help      F2/2/o  Open/Connect   F3/3/v  View\n"
+            "  F4/4/e  Edit      F5/5/c  Copy           F6/6/m  Move\n"
+            "  F7/7    Mkdir     F8/8/d  Delete          F9/9/s  Sync\n"
+            "  F10/0/q Quit\n"
+            "\n"
+            "  Mouse: click to select, double-click to open, wheel to\n"
+            "  scroll, right-click for a context menu of actions.\n"
             "\n"
             "F2 connects to SFTP or FTP; copy/move/sync work across\n"
             "local and remote panes alike. F9 makes both panes hold\n"
@@ -630,6 +798,13 @@ def _main(stdscr, args) -> None:
         except curses.error:
             pass
     stdscr.keypad(True)
+    # Enable mouse reporting (clicks, wheel, right-click menus). Harmless on
+    # terminals that do not support it -- the mask simply stays empty.
+    try:
+        curses.mousemask(curses.ALL_MOUSE_EVENTS)
+        curses.mouseinterval(200)  # ms window for double-click detection
+    except curses.error:
+        pass
     app = App(stdscr, left_path=args.left, right_path=args.right)
     app.run()
 

@@ -36,6 +36,15 @@ and ships with a built-in file viewer and editor.
   line handling, save with `Ctrl-S`), also with toggleable line numbers.
 - **Tag multiple files** (`Insert`/`Space`, `+` all, `-` none) for batch
   copy/move/delete.
+- **Per-pane hidden-file toggle** (`.`) — show or hide dotfiles independently in
+  each pane.
+- **Drop into a terminal** (`t` or `!`) in the current directory — a local shell
+  for local panes, or an `ssh` session into the same directory for SFTP panes.
+- **Mouse support** — click to select, double-click to open, wheel to scroll,
+  and **right-click for a context menu** of actions (view, edit, copy, move,
+  rename, delete, tag, mkdir, terminal).
+- **Works even when F-keys are hijacked** — every function key has a digit alias
+  (`1`–`0` → `F1`–`F10`) and the common actions have mnemonic letters.
 - **No required dependencies** for local + FTP use — it runs on the Python
   standard library. SFTP uses the optional [`paramiko`](https://www.paramiko.org/)
   package.
@@ -92,6 +101,15 @@ edit, and copy/move/sync to and from it.
 | `Ctrl-U` | swap panes | `F9` | synchronize panes |
 | `Ctrl-R` | reload panes | `F10` | quit |
 | `Ctrl-G` | go to path | `Ctrl-T` | change sort order |
+| `.` | show/hide hidden files | `t` / `!` | terminal in current dir |
+
+**F-key aliases** (for terminals that swallow function keys): press the digit
+`1`–`0` for `F1`–`F10`, or the mnemonic letter — `?`/`1` help, `o` open/connect,
+`v` view, `e` edit, `c` copy, `m` move, `d` delete, `s` sync, `q` quit.
+
+**Mouse**: click to select and focus a pane, double-click to open a
+file/directory, scroll wheel to move through the listing, and **right-click** for
+a context menu of actions.
 
 In the **viewer**: `N` toggles line numbers, `W` toggles wrap, arrows/PgUp/PgDn
 scroll, `Q` quits.
