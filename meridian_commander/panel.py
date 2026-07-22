@@ -1,6 +1,6 @@
 """A single directory panel: listing, cursor, selection and scrolling.
 
-A panel owns a :class:`~martin_commander.filesystems.FileSystem` and a current
+A panel owns a :class:`~meridian_commander.filesystems.FileSystem` and a current
 directory within it.  It knows nothing about curses -- the application draws it
 -- but it holds all the state a pane needs: the sorted entries, where the
 highlight bar is, which items are tagged for a batch operation, and the scroll

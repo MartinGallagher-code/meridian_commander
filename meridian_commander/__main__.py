@@ -1,4 +1,4 @@
-"""Entry point for ``python -m martin_commander``."""
+"""Entry point for ``python -m meridian_commander``."""
 
 from __future__ import annotations
 

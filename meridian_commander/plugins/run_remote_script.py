@@ -9,8 +9,8 @@ On every submitted input line the plugin:
    arguments;
 4. displays the script's stdout/stderr in the output area.
 
-Configure it in ``~/.config/martin-commander/config.ini`` under
-``[plugin:run_remote_script]`` (press ``C`` inside Martin Commander and choose
+Configure it in ``~/.config/meridian-commander/config.ini`` under
+``[plugin:run_remote_script]`` (press ``C`` inside Meridian Commander and choose
 "Edit configuration")::
 
     [plugin:run_remote_script]
@@ -21,7 +21,7 @@ Configure it in ``~/.config/martin-commander/config.ini`` under
     interpreter = sh
 
 To make a variant for another server or script, copy this file into
-``~/.config/martin-commander/plugins/`` under a new name, change the class
+``~/.config/meridian-commander/plugins/`` under a new name, change the class
 ``name`` and ``config_section``, and add a matching ``[plugin:<section>]``
 block to the configuration file.
 """

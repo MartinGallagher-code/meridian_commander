@@ -1,6 +1,6 @@
-"""The Martin Commander application: a two-pane terminal file manager.
+"""The Meridian Commander application: a two-pane terminal file manager.
 
-This module wires the pieces together -- two :class:`~martin_commander.panel.Panel`
+This module wires the pieces together -- two :class:`~meridian_commander.panel.Panel`
 objects, the filesystem backends, the viewer/editor, dialogs and the file
 operations -- into a curses event loop styled after Midnight Commander.
 
@@ -259,7 +259,7 @@ class App:
             try:
                 key = self.stdscr.getch()
             except KeyboardInterrupt:
-                if dialogs.confirm(self.stdscr, "Quit", "Exit Martin Commander?"):
+                if dialogs.confirm(self.stdscr, "Quit", "Exit Meridian Commander?"):
                     break
                 continue
             if key == -1:      # poll timeout: loop to pump plugin output
@@ -358,7 +358,7 @@ class App:
         elif key in (curses.KEY_F9, ord("9"), ord("s")):
             self._sync()
         elif key in (curses.KEY_F10, ord("0"), ord("q"), 3):  # 3 = Ctrl-C
-            if dialogs.confirm(self.stdscr, "Quit", "Exit Martin Commander?",
+            if dialogs.confirm(self.stdscr, "Quit", "Exit Meridian Commander?",
                                default_yes=True):
                 self.running = False
         elif key == curses.KEY_RESIZE:
@@ -386,7 +386,8 @@ class App:
 
         The shell runs in the pane's rectangle and follows the pane's
         location: a local pty for local panes, an interactive channel on the
-        pane's existing SSH connection for SFTP/SSH panes.  Ctrl-] closes it.
+        pane's existing SSH connection for SFTP/SSH panes.  Ctrl-] switches
+        focus to the other pane (the shell keeps running); F10 closes it.
         """
         from .plugin_api import PluginContext
         from .plugins.terminal import TerminalPlugin
@@ -399,7 +400,7 @@ class App:
             panel.plugin = None
             dialogs.message(self.stdscr, "Terminal", str(exc), error=True)
             return
-        self._set_message("Terminal opened -- Ctrl-] closes it")
+        self._set_message("Terminal opened -- Ctrl-] switches pane, F10 closes")
 
     def _open_terminal(self) -> None:
         """Suspend the TUI and drop the user into a full-screen shell.
@@ -430,8 +431,8 @@ class App:
         curses.def_prog_mode()
         curses.endwin()
         try:
-            os.write(1, (f"\n[Martin Commander] Shell in {fs.label()}:{panel.path}\n"
-                         "Type 'exit' to return to Martin Commander.\n\n").encode())
+            os.write(1, (f"\n[Meridian Commander] Shell in {fs.label()}:{panel.path}\n"
+                         "Type 'exit' to return to Meridian Commander.\n\n").encode())
             subprocess.call(cmd, cwd=cwd)
         except Exception as exc:
             os.write(2, f"\nCould not start terminal: {exc}\n".encode())
@@ -944,7 +945,7 @@ class App:
 
     def _help(self) -> None:
         text = (
-            "Martin Commander -- two-pane terminal file manager\n"
+            "Meridian Commander -- two-pane terminal file manager\n"
             "\n"
             "  Tab            switch active pane\n"
             "  Up/Down j/k    move cursor      PgUp/PgDn  page\n"
@@ -955,7 +956,7 @@ class App:
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
             "  Ctrl-G         go to path   Ctrl-T  sort order\n"
             "  .              show/hide hidden files (this pane)\n"
-            "  t              terminal inside this pane (Ctrl-] closes)\n"
+            "  t              terminal in this pane (Ctrl-] switch, F10 close)\n"
             "  !              full-screen shell (for vim/htop etc.)\n"
             "  p / F11        plug-in mode: run a plug-in in this pane\n"
             "  C              configuration: edit config.ini / plug-ins\n"
@@ -1019,14 +1020,18 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="martin-commander",
+        prog="meridian-commander",
         description="A two-pane terminal file manager (Midnight Commander style) "
                     "with local + SFTP/FTP browsing, copy/move/sync, viewer and editor.",
     )
+    from . import __version__
+
     parser.add_argument("left", nargs="?", default=None,
                         help="starting directory for the left pane")
     parser.add_argument("right", nargs="?", default=None,
                         help="starting directory for the right pane")
+    parser.add_argument("-V", "--version", action="version",
+                        version=f"%(prog)s {__version__}")
     args = parser.parse_args(argv)
 
     try:

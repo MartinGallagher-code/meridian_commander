@@ -12,16 +12,16 @@ import time
 
 import pytest
 
-from martin_commander.filesystems import (
+from meridian_commander.filesystems import (
     FileSystemError,
     FTPFileSystem,
     LocalFileSystem,
     SSHFileSystem,
     _parse_scp_header,
 )
-from martin_commander.operations import copy_path, count_tree, move_path
-from martin_commander.panel import Panel
-from martin_commander.sync import build_sync_plan, execute_sync_plan
+from meridian_commander.operations import copy_path, count_tree, move_path
+from meridian_commander.panel import Panel
+from meridian_commander.sync import build_sync_plan, execute_sync_plan
 
 
 @pytest.fixture
@@ -390,7 +390,7 @@ def test_scp_header_parsing():
 def test_editor_typing_and_save(fs, tmp_path):
     import curses
 
-    from martin_commander.editor import Editor
+    from meridian_commander.editor import Editor
 
     path = str(tmp_path / "note.txt")
     ed = Editor(fs, path)
@@ -409,7 +409,7 @@ def test_editor_typing_and_save(fs, tmp_path):
 def test_editor_save_aliases(fs, tmp_path):
     import curses
 
-    from martin_commander.editor import Editor
+    from meridian_commander.editor import Editor
 
     path = str(tmp_path / "a.txt")
     for key in (19, 15, curses.KEY_F2):  # Ctrl-S, Ctrl-O, F2
@@ -422,7 +422,7 @@ def test_editor_save_aliases(fs, tmp_path):
 def test_editor_quit_aliases_and_no_esc(fs, tmp_path):
     import curses
 
-    from martin_commander.editor import Editor
+    from meridian_commander.editor import Editor
 
     ed = Editor(fs, str(tmp_path / "b.txt"))
     assert ed.handle_key(17) == "quit"                # Ctrl-Q
@@ -434,7 +434,7 @@ def test_editor_quit_aliases_and_no_esc(fs, tmp_path):
 
 
 def test_editor_delete_line_aliases(fs, tmp_path):
-    from martin_commander.editor import Editor
+    from meridian_commander.editor import Editor
 
     path = str(tmp_path / "c.txt")
     write(path, "one\ntwo\nthree")
@@ -447,7 +447,7 @@ def test_editor_delete_line_aliases(fs, tmp_path):
 
 # -- in-pane terminal ---------------------------------------------------------
 def test_term_emulator_basics():
-    from martin_commander.plugins.terminal import TermEmulator
+    from meridian_commander.plugins.terminal import TermEmulator
 
     t = TermEmulator()
     t.feed(b"hello\r\nworld")
@@ -470,7 +470,7 @@ def test_term_emulator_basics():
 
 
 def test_term_emulator_clear_and_tabs():
-    from martin_commander.plugins.terminal import TermEmulator
+    from meridian_commander.plugins.terminal import TermEmulator
 
     t = TermEmulator()
     t.feed(b"junk\r\nmore\x1b[2J")
@@ -480,7 +480,7 @@ def test_term_emulator_clear_and_tabs():
 
 
 def test_term_emulator_visible_window():
-    from martin_commander.plugins.terminal import TermEmulator
+    from meridian_commander.plugins.terminal import TermEmulator
 
     t = TermEmulator()
     for i in range(30):
@@ -496,13 +496,15 @@ def test_terminal_plugin_local_shell_roundtrip(fs, tmp_path):
     import time
     from types import SimpleNamespace
 
-    from martin_commander.plugins.terminal import TerminalPlugin
+    from meridian_commander.plugins.terminal import TerminalPlugin
 
     workdir = tmp_path / "termwork"
     workdir.mkdir()
     panel = Panel(fs, str(workdir))
+    switched = []
     ctx = SimpleNamespace(own_panel=panel, other_panel=panel,
-                          own_fs=fs, own_path=str(workdir))
+                          own_fs=fs, own_path=str(workdir),
+                          focus_other=lambda: switched.append(True))
     plug = TerminalPlugin(ctx)
     try:
         # Type a command and press Enter.
@@ -530,15 +532,21 @@ def test_terminal_plugin_local_shell_roundtrip(fs, tmp_path):
                 break
             time.sleep(0.05)
         assert str(workdir) in joined
-        # Ctrl-] closes the plugin.
-        assert plug.handle_key(29) is False
+        # Ctrl-] switches focus to the other pane; the shell keeps running.
+        assert plug.handle_key(29) is True
+        assert switched == [True]
+        assert not plug.done
+        # F10 closes the terminal.
+        import curses
+
+        assert plug.handle_key(curses.KEY_F10) is False
     finally:
         plug.on_exit()
 
 
 # -- pane plugins -----------------------------------------------------------
 def test_plugin_discovery_finds_builtins():
-    from martin_commander.plugins import discover
+    from meridian_commander.plugins import discover
 
     classes, errors = discover()
     names = [c.name for c in classes]
@@ -550,17 +558,17 @@ def test_plugin_discovery_finds_builtins():
 
 def test_plugin_discovery_user_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    pdir = tmp_path / "martin-commander" / "plugins"
+    pdir = tmp_path / "meridian-commander" / "plugins"
     pdir.mkdir(parents=True)
     (pdir / "my_plug.py").write_text(
-        "from martin_commander.plugin_api import InputOutputPlugin\n"
+        "from meridian_commander.plugin_api import InputOutputPlugin\n"
         "class Mine(InputOutputPlugin):\n"
         "    name = 'My user plug-in'\n"
         "    description = 'test'\n"
         "    def process(self, line):\n"
         "        return [line]\n"
     )
-    from martin_commander.plugins import discover
+    from meridian_commander.plugins import discover
 
     classes, errors = discover()
     assert "My user plug-in" in [c.name for c in classes]
@@ -569,7 +577,7 @@ def test_plugin_discovery_user_dir(tmp_path, monkeypatch):
 
 def test_config_defaults_and_plugin_settings(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    from martin_commander import config as config_mod
+    from meridian_commander import config as config_mod
 
     path = config_mod.ensure_config()
     assert path.endswith("config.ini")
@@ -577,7 +585,7 @@ def test_config_defaults_and_plugin_settings(tmp_path, monkeypatch):
 
     # Values from the file override defaults; empty values keep defaults;
     # int defaults are coerced.
-    (tmp_path / "martin-commander" / "config.ini").write_text(
+    (tmp_path / "meridian-commander" / "config.ini").write_text(
         "[plugin:demo]\nhost = h.example.com\nport = 2222\nusername =\n")
     merged = config_mod.plugin_settings(
         "demo", {"host": "", "port": 22, "username": "fallback"})
@@ -587,7 +595,7 @@ def test_config_defaults_and_plugin_settings(tmp_path, monkeypatch):
 
 
 def test_io_plugin_input_and_process():
-    from martin_commander.plugin_api import InputOutputPlugin
+    from meridian_commander.plugin_api import InputOutputPlugin
 
     class Echo(InputOutputPlugin):
         name = "Echo"
@@ -608,7 +616,7 @@ def test_io_plugin_input_and_process():
 
 
 def test_io_plugin_catches_process_errors():
-    from martin_commander.plugin_api import InputOutputPlugin
+    from meridian_commander.plugin_api import InputOutputPlugin
 
     class Boom(InputOutputPlugin):
         name = "Boom"
@@ -627,7 +635,7 @@ def test_io_plugin_catches_process_errors():
 def test_find_files_plugin_searches_other_pane(fs, tmp_path):
     from types import SimpleNamespace
 
-    from martin_commander.plugins.find_files import FindFiles
+    from meridian_commander.plugins.find_files import FindFiles
 
     write(str(tmp_path / "data" / "notes.txt"), "n")
     write(str(tmp_path / "data" / "sub" / "todo.txt"), "t")

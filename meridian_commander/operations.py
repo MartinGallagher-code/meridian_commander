@@ -1,6 +1,6 @@
 """File transfer operations that work across any pair of filesystems.
 
-Because every location implements the :class:`~martin_commander.filesystems.FileSystem`
+Because every location implements the :class:`~meridian_commander.filesystems.FileSystem`
 interface, a single streaming copy routine handles local->local, local->remote,
 remote->local and even remote->remote transfers.  Moves and recursive directory
 copies are layered on top.

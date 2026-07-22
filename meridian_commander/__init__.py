@@ -1,4 +1,4 @@
-"""Martin Commander -- a Midnight Commander style terminal file manager.
+"""Meridian Commander -- a Midnight Commander style terminal file manager.
 
 Two panes, local and networked (SFTP/FTP) browsing, cross-location copy/move,
 bidirectional directory synchronization, a file viewer and a file editor.
@@ -6,7 +6,7 @@ bidirectional directory synchronization, a file viewer and a file editor.
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 from .app import main
 

@@ -2,7 +2,7 @@
 
 These are deliberately self-contained helpers that draw a centered window over
 the main screen, run their own tiny input loop, and return a value.  Keeping
-them here keeps :mod:`martin_commander.app` focused on file-manager logic.
+them here keeps :mod:`meridian_commander.app` focused on file-manager logic.
 """
 
 from __future__ import annotations

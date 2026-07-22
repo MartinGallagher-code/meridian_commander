@@ -2,15 +2,15 @@
 
 Plugins are collected from three places:
 
-* the built-in package directory (``martin_commander/plugins/*.py``) --
+* the built-in package directory (``meridian_commander/plugins/*.py``) --
   dropping a file here adds a plug-in to the framework itself;
-* the user directory ``~/.config/martin-commander/plugins/*.py``
+* the user directory ``~/.config/meridian-commander/plugins/*.py``
   (``$XDG_CONFIG_HOME`` is honoured); and
 * any extra directories listed under ``[plugins] dirs`` in the
   configuration file.
 
 Any class in those modules that subclasses
-:class:`~martin_commander.plugin_api.PanePlugin` and defines a ``name`` is
+:class:`~meridian_commander.plugin_api.PanePlugin` and defines a ``name`` is
 offered in the plugin menu.  A module that fails to import is skipped (and
 reported alongside the working plugins) rather than breaking the menu.
 """
@@ -27,8 +27,11 @@ from ..plugin_api import InputOutputPlugin, PanePlugin
 
 
 def user_plugin_dir() -> str:
-    base = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
-    return os.path.join(base, "martin-commander", "plugins")
+    from ..config import config_dir
+
+    # Follows config_dir(), which also honours a pre-rename
+    # ~/.config/martin-commander directory when it is still in use.
+    return os.path.join(config_dir(), "plugins")
 
 
 def builtin_plugin_dir() -> str:
