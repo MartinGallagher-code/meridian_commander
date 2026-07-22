@@ -51,9 +51,9 @@ meridian-commander = "meridian_commander.app:main"
 meridian = "meridian_commander.app:main"
 
 [project.urls]
-Homepage = "https://github.com/MartinGallagher-code/martin_commander"
-Repository = "https://github.com/MartinGallagher-code/martin_commander"
-Issues = "https://github.com/MartinGallagher-code/martin_commander/issues"
+Homepage = "https://github.com/MartinGallagher-code/meridian_commander"
+Repository = "https://github.com/MartinGallagher-code/meridian_commander"
+Issues = "https://github.com/MartinGallagher-code/meridian_commander/issues"
 
 [tool.setuptools]
 packages = ["meridian_commander", "meridian_commander.plugins"]
