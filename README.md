@@ -22,7 +22,10 @@ and ships with a built-in file viewer and editor.
 - **Two independent panes** — browse two locations side by side, `Tab` between
   them, and swap them with `Ctrl-U`.
 - **Local and networked locations** — each pane can point at the local disk, an
-  **SFTP/SSH** server, or an **FTP** server. Press `F2` to open a location.
+  **SFTP** server, an **SSH (shell)** host, or an **FTP** server. Press `F2` to
+  open a location. The **SSH (shell)** mode lists and transfers files by running
+  ordinary commands (`ls`, `cat`, …) over the SSH channel, so it works even on
+  servers that permit SSH login but have the SFTP subsystem disabled.
 - **Copy & move across any pair of panes** — local→remote, remote→local,
   remote→remote and local→local all work through one streaming engine, with a
   cancellable progress bar (`F5` copy, `F6` move).
@@ -36,6 +39,15 @@ and ships with a built-in file viewer and editor.
   line handling, save with `Ctrl-S`), also with toggleable line numbers.
 - **Tag multiple files** (`Insert`/`Space`, `+` all, `-` none) for batch
   copy/move/delete.
+- **Per-pane hidden-file toggle** (`.`) — show or hide dotfiles independently in
+  each pane.
+- **Drop into a terminal** (`t` or `!`) in the current directory — a local shell
+  for local panes, or an `ssh` session into the same directory for SFTP panes.
+- **Mouse support** — click to select, double-click to open, wheel to scroll,
+  and **right-click for a context menu** of actions (view, edit, copy, move,
+  rename, delete, tag, mkdir, terminal).
+- **Works even when F-keys are hijacked** — every function key has a digit alias
+  (`1`–`0` → `F1`–`F10`) and the common actions have mnemonic letters.
 - **No required dependencies** for local + FTP use — it runs on the Python
   standard library. SFTP uses the optional [`paramiko`](https://www.paramiko.org/)
   package.
@@ -67,11 +79,17 @@ martin-commander /etc /var/log   # left pane in /etc, right pane in /var/log
 
 ### Connecting to a remote location
 
-Press **F2** in the pane you want to change and choose **SFTP** or **FTP**.
-You will be asked for host, username, port and credentials:
+Press **F2** in the pane you want to change and choose **SFTP**, **SSH (shell)**
+or **FTP**. You will be asked for host, username, port and credentials:
 
-- **SFTP** authenticates with an SSH key file, your SSH agent, or a password.
-- **FTP** uses the modern `MLSD` listing command; log in anonymously by leaving
+- **SFTP** authenticates with an SSH key file, your SSH agent, or a password,
+  and browses through the SFTP subsystem.
+- **SSH (shell)** authenticates the same way but does not use SFTP at all — it
+  drives `ls`/`cat`/`mkdir`/`rm`/`mv` over the SSH channel. Use it when a server
+  allows SSH login but has SFTP disabled. It assumes a POSIX-like remote shell.
+- **FTP** prefers the modern `MLSD` listing command and automatically falls
+  back to parsing classic `LIST` output on older servers that don't support it
+  (which otherwise answer `500 Unknown command`). Log in anonymously by leaving
   the defaults, or supply a username and password.
 
 Once connected, that pane behaves exactly like a local one — navigate, view,
@@ -92,6 +110,15 @@ edit, and copy/move/sync to and from it.
 | `Ctrl-U` | swap panes | `F9` | synchronize panes |
 | `Ctrl-R` | reload panes | `F10` | quit |
 | `Ctrl-G` | go to path | `Ctrl-T` | change sort order |
+| `.` | show/hide hidden files | `t` / `!` | terminal in current dir |
+
+**F-key aliases** (for terminals that swallow function keys): press the digit
+`1`–`0` for `F1`–`F10`, or the mnemonic letter — `?`/`1` help, `o` open/connect,
+`v` view, `e` edit, `c` copy, `m` move, `d` delete, `s` sync, `q` quit.
+
+**Mouse**: click to select and focus a pane, double-click to open a
+file/directory, scroll wheel to move through the listing, and **right-click** for
+a context menu of actions.
 
 In the **viewer**: `N` toggles line numbers, `W` toggles wrap, arrows/PgUp/PgDn
 scroll, `Q` quits.
@@ -106,6 +133,9 @@ In the **editor**: `Ctrl-S` saves, `Ctrl-Q` quits, `Ctrl-K` deletes a line,
 - a file present on both sides is compared by modification time, and the
   **newer** copy overwrites the older one (times within 2 seconds are treated as
   equal to avoid needless copies);
+- the copied file is stamped with the **source file's modification time**, so
+  both sides stay identical in age — a second sync finds nothing to do instead
+  of copying the file back the other way;
 - nothing is ever deleted.
 
 You see the full list of planned copies and the total byte count before
@@ -113,14 +143,14 @@ confirming, and the operation can be cancelled mid-way.
 
 ## Architecture
 
-Every location — local, SFTP, FTP — implements one small `FileSystem`
+Every location — local, SFTP, SSH shell, FTP — implements one small `FileSystem`
 interface (`listdir`, `stat`, streaming `open_read`/`open_write`, and the
 mutating operations). Because the interface is uniform, the copy/move engine and
 the sync engine are written once and work across any pair of backends.
 
 | Module | Responsibility |
 | --- | --- |
-| `filesystems.py` | `FileSystem` interface + Local / SFTP / FTP backends |
+| `filesystems.py` | `FileSystem` interface + Local / SFTP / SSH / FTP backends |
 | `operations.py` | streaming copy, recursive copy, move |
 | `sync.py` | bidirectional sync plan + execution |
 | `panel.py` | one pane's listing, cursor, selection, sorting |

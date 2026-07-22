@@ -148,6 +148,10 @@ def execute_sync_plan(
             )
         src = src_fs.join(src_root, *parts)
         dst = dst_fs.join(dst_root, *parts)
-        copy_file(src_fs, src, dst_fs, dst, progress, cancel)
+        # Preserve the source timestamp so both copies stay identical in age;
+        # otherwise the just-written file would look "newer" and the next sync
+        # would copy it straight back the other way.
+        copy_file(src_fs, src, dst_fs, dst, progress, cancel,
+                  preserve_mtime=True)
         copied += 1
     return copied

@@ -41,18 +41,29 @@ def copy_file(
     progress: ProgressCB = _noop_progress,
     cancel: CancelCB = _noop_cancel,
     total_override: int | None = None,
+    preserve_mtime: bool = False,
 ) -> None:
     """Stream a single file from ``src`` to ``dst``.
 
-    The destination's parent directory is created if necessary.
+    The destination's parent directory is created if necessary.  When
+    ``preserve_mtime`` is set, the destination is stamped with the source
+    file's modification time after the copy, so the two stay identical in age
+    (this is what keeps a synchronized pair from drifting on the next run).
     """
     parent = dst_fs.dirname(dst)
     if parent and not dst_fs.exists(parent):
         dst_fs.makedirs(parent)
 
-    try:
-        total = total_override if total_override is not None else src_fs.stat(src).size
-    except Exception:
+    src_mtime: float | None = None
+    total = total_override
+    if total is None or preserve_mtime:
+        try:
+            st = src_fs.stat(src)
+            total = st.size if total is None else total
+            src_mtime = st.mtime
+        except Exception:
+            total = total or 0
+    if total is None:
         total = 0
 
     label = dst_fs.basename(dst)
@@ -77,6 +88,14 @@ def copy_file(
             reader.close()
         except Exception:
             pass
+
+    if preserve_mtime and src_mtime is not None:
+        try:
+            dst_fs.utime(dst, src_mtime)
+        except Exception:
+            # Best-effort: a backend that cannot set times still copied fine.
+            pass
+
     progress(max(done, total), total, label)
 
 
@@ -104,11 +123,17 @@ def copy_path(
     dst: str,
     progress: ProgressCB = _noop_progress,
     cancel: CancelCB = _noop_cancel,
+    preserve_mtime: bool = False,
 ) -> None:
-    """Copy a file or a whole directory tree from ``src`` to ``dst``."""
+    """Copy a file or a whole directory tree from ``src`` to ``dst``.
+
+    ``preserve_mtime`` gives each copied file the same modification time as its
+    source (see :func:`copy_file`).
+    """
     entry = src_fs.stat(src)
     if not entry.is_dir:
-        copy_file(src_fs, src, dst_fs, dst, progress, cancel)
+        copy_file(src_fs, src, dst_fs, dst, progress, cancel,
+                  preserve_mtime=preserve_mtime)
         return
 
     # Directory: recreate the tree on the destination side.
@@ -124,7 +149,8 @@ def copy_path(
         if node.is_dir and not node.is_symlink:
             dst_fs.makedirs(d)
         else:
-            copy_file(src_fs, s, dst_fs, d, progress, cancel)
+            copy_file(src_fs, s, dst_fs, d, progress, cancel,
+                      preserve_mtime=preserve_mtime)
 
 
 def _split_rel(fs: FileSystem, rel: str) -> list[str]:
