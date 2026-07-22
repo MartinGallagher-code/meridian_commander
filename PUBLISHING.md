@@ -12,7 +12,7 @@ distribution name is **`meridian-commander`**; the import package is
    - **Trusted publishing (recommended, no tokens):** on PyPI go to
      *Your projects → Publishing → Add a new pending publisher* and register:
      - PyPI project name: `meridian-commander`
-     - Owner: `MartinGallagher-code`  ·  Repository: `martin_commander`
+     - Owner: `MartinGallagher-code`  ·  Repository: `meridian_commander`
      - Workflow name: `publish.yml`  ·  Environment: `pypi`
      The included GitHub Actions workflow then publishes automatically when
      you push a version tag — nothing else to configure.
