@@ -1,8 +1,9 @@
 # Test, build and publish meridian-commander to PyPI.
 #
 # Publishing uses PyPI "trusted publishing" (OIDC) -- see PUBLISHING.md for
-# the one-time PyPI-side setup. The publish job only runs on version tags
-# (v1.2.3); pushes and pull requests just run the test suite and a build.
+# the one-time PyPI-side setup. The publish job runs on version tags
+# (v1.2.3) or when the workflow is dispatched manually from the Actions tab;
+# ordinary pushes and pull requests just run the test suite and a build.
 
 name: publish
 
@@ -11,6 +12,7 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -47,7 +49,9 @@ jobs:
           path: dist/
 
   publish:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     needs: build
     runs-on: ubuntu-latest
     environment: pypi
