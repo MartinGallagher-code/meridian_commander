@@ -56,13 +56,7 @@ timeout = 30
 
 def config_dir() -> str:
     base = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
-    new = os.path.join(base, "meridian-commander")
-    # The project was previously named martin_commander; keep honouring an
-    # existing old config directory until a new one is created.
-    old = os.path.join(base, "martin-commander")
-    if not os.path.isdir(new) and os.path.isdir(old):
-        return old
-    return new
+    return os.path.join(base, "meridian-commander")
 
 
 def config_path() -> str:

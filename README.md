@@ -3,7 +3,7 @@
 *The meridian is noon — the other end of the clock from midnight.*
 
 A two-pane terminal file manager in the spirit of **Midnight Commander**,
-written in pure Python. (Formerly known as `martin_commander`.) It browses local **and networked** locations, copies and
+written in pure Python. It browses local **and networked** locations, copies and
 moves files between the two panes regardless of where each side lives,
 synchronizes directories so both panes hold the newest version of every file,
 and ships with a built-in file viewer and editor.

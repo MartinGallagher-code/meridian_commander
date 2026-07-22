@@ -29,8 +29,6 @@ from ..plugin_api import InputOutputPlugin, PanePlugin
 def user_plugin_dir() -> str:
     from ..config import config_dir
 
-    # Follows config_dir(), which also honours a pre-rename
-    # ~/.config/martin-commander directory when it is still in use.
     return os.path.join(config_dir(), "plugins")
 
 
