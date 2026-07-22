@@ -48,10 +48,18 @@ jobs:
           name: dist
           path: dist/
 
+  # Publish on: a version tag, a manual dispatch, or a push to main whose
+  # commit message contains "[release]" (lets a release be cut by merging a
+  # PR with that marker in the squash title). Re-publishing an existing
+  # version fails safely on the PyPI side.
   publish:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+      (github.event_name == 'push' && (
+        startsWith(github.ref, 'refs/tags/v') ||
+        (github.ref == 'refs/heads/main' &&
+         contains(github.event.head_commit.message, '[release]'))
+      ))
     needs: build
     runs-on: ubuntu-latest
     environment: pypi
