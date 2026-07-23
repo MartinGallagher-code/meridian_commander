@@ -86,6 +86,17 @@ pip install ".[ssh]"
 This installs the `meridian-commander` command and its short alias
 `meridian`.
 
+For development use an **editable** install from the repo root, so your code
+changes take effect without reinstalling:
+
+```bash
+python -m pip install --upgrade pip   # editable installs need pip >= 21.3
+pip install -e ".[ssh]"
+```
+
+(Older pip versions answer `-e` with `file 'setup.py' not found`; upgrading
+pip inside the virtualenv fixes it.)
+
 You can also run it straight from the source tree without installing:
 
 ```bash
