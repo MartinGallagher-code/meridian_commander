@@ -291,15 +291,111 @@ class LocalFileSystem(FileSystem):
 # ---------------------------------------------------------------------------
 # SFTP filesystem (paramiko)
 # ---------------------------------------------------------------------------
+def _split_user_host(host: str) -> tuple[str | None, str]:
+    """Split a ``user@host`` string; returns ``(user_or_None, host)``."""
+    if "@" in host:
+        user, _, rest = host.rpartition("@")
+        if user and rest:
+            return user, rest
+    return None, host
+
+
+def _resolve_ssh_connection(
+    host: str,
+    username: str | None = None,
+    port: int | None = None,
+    key_filename=None,
+    config_path: str | None = None,
+) -> dict:
+    """Resolve a connection the way the ``ssh`` command would.
+
+    ``host`` may be a real hostname, a ``user@host`` string, or an alias from
+    ``~/.ssh/config``.  HostName, User, Port, IdentityFile, ProxyCommand and
+    (single-hop) ProxyJump from the config are honoured; anything the caller
+    passed explicitly wins over the config.  Returns a dict with ``hostname``,
+    ``username``, ``port``, ``key_filename`` (possibly a list), and
+    ``proxy_command`` (a string or None).
+    """
+    at_user, host = _split_user_host(host)
+    if not username:
+        username = at_user
+
+    resolved = {
+        "hostname": host,
+        "username": username,
+        "port": port if port not in (None, 0) else None,
+        "key_filename": key_filename or None,
+        "proxy_command": None,
+    }
+
+    if config_path is None:
+        config_path = os.path.expanduser("~/.ssh/config")
+    try:
+        import paramiko
+
+        if os.path.exists(config_path):
+            with open(config_path) as f:
+                conf = paramiko.SSHConfig()
+                conf.parse(f)
+            found = conf.lookup(host)
+            resolved["hostname"] = found.get("hostname", host)
+            if not resolved["username"] and "user" in found:
+                resolved["username"] = found["user"]
+            # A port typed as 22 (the dialog default) counts as "not set", so
+            # a Port directive in the config wins -- same feel as plain ssh.
+            if resolved["port"] in (None, 22) and "port" in found:
+                try:
+                    resolved["port"] = int(found["port"])
+                except (TypeError, ValueError):
+                    pass
+            if not resolved["key_filename"] and "identityfile" in found:
+                files = [os.path.expanduser(p) for p in found["identityfile"]]
+                files = [p for p in files if os.path.exists(p)]
+                if files:
+                    resolved["key_filename"] = files
+            if "proxycommand" in found:
+                resolved["proxy_command"] = found["proxycommand"]
+            elif "proxyjump" in found:
+                # Single-hop ProxyJump via the system ssh client, which will
+                # itself use the user's config/agent for the jump host.
+                jport = resolved["port"] or 22
+                resolved["proxy_command"] = (
+                    f"ssh -W {resolved['hostname']}:{jport} {found['proxyjump']}"
+                )
+    except ImportError:
+        pass
+    except Exception:
+        # An unparsable config should not break connecting by real hostname.
+        pass
+
+    if not resolved["username"]:
+        import getpass
+
+        try:
+            resolved["username"] = getpass.getuser()
+        except Exception:  # pragma: no cover - exotic environments
+            resolved["username"] = "root"
+    if not resolved["port"]:
+        resolved["port"] = 22
+    return resolved
+
+
 def _open_ssh_client(
     host: str,
-    username: str,
+    username: str | None,
     password: str | None,
-    port: int,
-    key_filename: str | None,
+    port: int | None,
+    key_filename=None,
 ):
     """Open and authenticate a paramiko SSHClient, shared by the SFTP and SSH
-    backends.  Raises :class:`FileSystemError` on any failure."""
+    backends and the SSH plug-ins.
+
+    The connection is resolved through ``~/.ssh/config`` first (aliases,
+    HostName, User, Port, IdentityFile, ProxyCommand/ProxyJump), then
+    authenticated the way ``ssh`` would: explicit key file if given, otherwise
+    the SSH agent and the default keys (~/.ssh/id_*), with any password used
+    as a last resort.  Raises :class:`FileSystemError` on any failure.
+    """
     try:
         import paramiko
     except ImportError as exc:  # pragma: no cover - environment dependent
@@ -308,17 +404,32 @@ def _open_ssh_client(
             "(pip install paramiko)."
         ) from exc
 
+    res = _resolve_ssh_connection(host, username, port, key_filename)
+
+    sock = None
+    if res["proxy_command"]:
+        try:
+            sock = paramiko.ProxyCommand(res["proxy_command"])
+        except Exception as exc:
+            raise FileSystemError(
+                f"ProxyCommand failed for {host}: {exc}"
+            ) from exc
+
     client = paramiko.SSHClient()
+    client.load_system_host_keys()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
         client.connect(
-            hostname=host,
-            port=port,
-            username=username,
+            hostname=res["hostname"],
+            port=res["port"],
+            username=res["username"],
             password=password or None,
-            key_filename=key_filename or None,
-            look_for_keys=key_filename is None and password is None,
+            key_filename=res["key_filename"],
+            # Try agent + default keys whenever no password was given, even
+            # alongside an explicit key file -- like ssh, more ways to succeed.
+            look_for_keys=password is None,
             allow_agent=True,
+            sock=sock,
             timeout=20,
         )
     except Exception as exc:
@@ -338,16 +449,21 @@ class SFTPFileSystem(FileSystem):
     def __init__(
         self,
         host: str,
-        username: str,
+        username: str | None = None,
         password: str | None = None,
         port: int = 22,
         key_filename: str | None = None,
     ) -> None:
-        self.host = host
+        self.host = host              # as typed: may be an ssh-config alias
         self.port = port
-        self.username = username
+        self.typed_username = username or _split_user_host(host)[0]
         self._client = _open_ssh_client(host, username, password, port,
                                         key_filename)
+        # Show the username the connection actually authenticated as.
+        try:
+            self.username = self._client.get_transport().get_username()
+        except Exception:
+            self.username = username or "?"
         try:
             self._sftp = self._client.open_sftp()
         except Exception as exc:
@@ -849,18 +965,22 @@ class SSHFileSystem(FileSystem):
     def __init__(
         self,
         host: str,
-        username: str,
+        username: str | None = None,
         password: str | None = None,
         port: int = 22,
         key_filename: str | None = None,
     ) -> None:
-        self.host = host
+        self.host = host              # as typed: may be an ssh-config alias
         self.port = port
-        self.username = username
+        self.typed_username = username or _split_user_host(host)[0]
         self._read_templates = list(self.READ_TEMPLATES)
         self._write_templates = list(self.WRITE_TEMPLATES)
         self._client = _open_ssh_client(host, username, password, port,
                                         key_filename)
+        try:
+            self.username = self._client.get_transport().get_username()
+        except Exception:
+            self.username = username or "?"
         self._home = self._run("pwd").strip() or "/"
 
     def label(self) -> str:

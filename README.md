@@ -115,8 +115,16 @@ meridian-commander /etc /var/log   # left pane in /etc, right pane in /var/log
 Press **F2** in the pane you want to change and choose **SFTP**, **SSH (shell)**
 or **FTP**. You will be asked for host, username, port and credentials:
 
-- **SFTP** authenticates with an SSH key file, your SSH agent, or a password,
-  and browses through the SFTP subsystem.
+Meridian reads your **`~/.ssh/config`**, so you can enter a **host alias**
+(with its `HostName`, `User`, `Port`, `IdentityFile`, `ProxyJump`/`ProxyCommand`
+all applied) or a `user@host` string, and leave username, port, key file and
+password **blank** — it authenticates through your **SSH agent** and default
+keys (`~/.ssh/id_*`) just like the `ssh` command. In other words, if `ssh mybox`
+works in your shell, typing `mybox` here works too.
+
+- **SFTP** authenticates with your SSH agent / default keys / a per-host
+  `IdentityFile` (or an explicit key file or password if you supply one), and
+  browses through the SFTP subsystem.
 - **SSH (shell)** authenticates the same way but does not use SFTP at all — it
   drives `ls`/`mkdir`/`rm`/`mv` over the SSH channel. Use it when a server
   allows SSH login but has SFTP disabled. File contents are transferred with a
