@@ -40,12 +40,17 @@ and ships with a built-in file viewer and editor.
   the newest version of each file in whichever direction is needed, so both
   sides end up holding the latest of everything. Nothing is deleted; you get a
   preview and confirmation before anything is written.
-- **File viewer** (`F3`) — scrollable, with **search** (`/`, smart case, highlighted matches, `n`/`N` navigation) and **line numbers you can toggle**
-  (`N`) and horizontal scrolling; works on remote files too.
+- **File viewer** (`F3`) — scrollable, with **search** (`/`, smart case,
+  highlighted matches, `n`/`N` next/previous with wrap-around), toggleable
+  line numbers (`l`) and horizontal scrolling; works on remote files too.
 - **File editor** (`F4`) — a real in-place editor (insert/delete, Enter/Backspace
   line handling, save with `Ctrl-S`), also with toggleable line numbers.
 - **Tag multiple files** (`Insert`/`Space`, `+` all, `-` none) for batch
   copy/move/delete.
+- **Find files** (`f`) — search the pane's tree by substring or glob (remote
+  panes included, cancellable) and get a **browsable result list**: view or
+  edit a hit right from the list, or press Enter to jump the pane to the
+  containing directory with the cursor on the file.
 - **Per-pane hidden-file toggle** (`.`) — show or hide dotfiles independently in
   each pane.
 - **Terminal inside the pane** (`t`) — the pane itself becomes a
@@ -174,6 +179,7 @@ edit, and copy/move/sync to and from it.
 | `Ctrl-G` | go to path | `Ctrl-T` | change sort order |
 | `.` | show/hide hidden files | `t` | terminal inside this pane |
 | `p` / F11 | plug-in mode (this pane) | `!` | full-screen shell |
+| `f` | find files (browsable results) | | |
 | `C` | configuration menu | `Ctrl-]` | terminal: switch to other pane |
 
 **F-key aliases** (for terminals that swallow function keys): press the digit

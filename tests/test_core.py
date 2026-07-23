@@ -433,6 +433,59 @@ def test_viewer_search_not_found_and_positions(fs, tmp_path):
     assert v.match_positions("aaa bab aab") == [0, 8]
 
 
+# -- find files ----------------------------------------------------------------
+def test_collect_matches_substring_and_glob(fs, tmp_path):
+    from meridian_commander.findfiles import collect_matches
+
+    root = tmp_path / "tree"
+    write(str(root / "app.py"), "a")
+    write(str(root / "notes.txt"), "n")
+    write(str(root / "src" / "config.py"), "c")
+    write(str(root / "src" / "deep" / "myconf.ini"), "i")
+
+    # Bare word behaves as a substring match on the file name.
+    matches, truncated = collect_matches(fs, str(root), "conf")
+    rels = [r for r, _e in matches]
+    assert rels == ["src/config.py", "src/deep/myconf.ini"]
+    assert not truncated
+
+    # Explicit glob is used as-is.
+    matches, _ = collect_matches(fs, str(root), "*.py")
+    assert [r for r, _e in matches] == ["app.py", "src/config.py"]
+
+
+def test_collect_matches_truncation_and_cancel(fs, tmp_path):
+    from meridian_commander.findfiles import collect_matches
+
+    root = tmp_path / "many"
+    for i in range(10):
+        write(str(root / f"f{i:02d}.log"), "x")
+
+    matches, truncated = collect_matches(fs, str(root), "*.log",
+                                         max_results=3)
+    assert len(matches) == 3 and truncated
+
+    calls = {"n": 0}
+
+    def cancel():
+        calls["n"] += 1
+        return calls["n"] > 2  # cancel almost immediately
+
+    matches, _ = collect_matches(fs, str(root), "*.log", cancel=cancel)
+    assert len(matches) < 10
+
+
+def test_find_browser_paths(fs, tmp_path):
+    from meridian_commander.findfiles import FindBrowser, collect_matches
+
+    root = tmp_path / "tree"
+    write(str(root / "sub" / "target.txt"), "T")
+    matches, _ = collect_matches(fs, str(root), "target")
+    browser = FindBrowser(fs, str(root), "target", matches)
+    assert browser.current()[0] == "sub/target.txt"
+    assert browser.current_path() == str(root / "sub" / "target.txt")
+
+
 # -- editor key handling ------------------------------------------------------
 def test_editor_typing_and_save(fs, tmp_path):
     import curses
