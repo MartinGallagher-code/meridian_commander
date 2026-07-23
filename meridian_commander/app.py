@@ -1032,15 +1032,25 @@ def main(argv: list[str] | None = None) -> int:
         prog="meridian-commander",
         description="A two-pane terminal file manager (Midnight Commander style) "
                     "with local + SFTP/FTP browsing, copy/move/sync, viewer and editor.",
+        # Raw description formatting keeps --version's line breaks intact.
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     from . import __version__
 
+    version_text = (
+        f"%(prog)s {__version__}\n"
+        "Copyright (C) 2026 Martin Gallagher\n"
+        "License GPLv3+: GNU GPL version 3 or later "
+        "<https://gnu.org/licenses/gpl.html>.\n"
+        "This is free software: you are free to change and redistribute it.\n"
+        "There is NO WARRANTY, to the extent permitted by law."
+    )
     parser.add_argument("left", nargs="?", default=None,
                         help="starting directory for the left pane")
     parser.add_argument("right", nargs="?", default=None,
                         help="starting directory for the right pane")
     parser.add_argument("-V", "--version", action="version",
-                        version=f"%(prog)s {__version__}")
+                        version=version_text)
     args = parser.parse_args(argv)
 
     try:

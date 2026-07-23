@@ -71,10 +71,9 @@ class RunRemoteScript(InputOutputPlugin):
 
     def on_exit(self) -> None:
         if self._client is not None:
-            try:
-                self._client.close()
-            except Exception:
-                pass
+            from ..filesystems import _close_ssh_client
+
+            _close_ssh_client(self._client)
             self._client = None
 
     # -- helpers ------------------------------------------------------------
