@@ -1,8 +1,8 @@
 # Deploy the website in docs/ to GitHub Pages.
 #
-# One-time setup: in the repository settings, under Pages, set the source to
-# "GitHub Actions". After that, every push to main that touches docs/ (or a
-# manual dispatch from the Actions tab) redeploys the site.
+# Every push to main that touches docs/ (or a manual dispatch from the
+# Actions tab) redeploys the site. The configure-pages step enables Pages
+# on the repository automatically on the first run.
 
 name: pages
 
@@ -30,6 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v4
         with:
           path: docs
