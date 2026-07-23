@@ -112,11 +112,14 @@ sort_z() {
     if printf 'b\0a\0' | sort -z >/dev/null 2>&1; then sort -z; else cat; fi
 }
 
-trap 'rm -f "$tmp_abs"' EXIT
+body_abs="$tmp_abs.body"
+trap 'rm -f "$tmp_abs" "$body_abs"' EXIT
 
+# The body is written first so the entry count is known, then the final
+# bundle is assembled with the count in the header.  split.sh compares the
+# header count against what it restored, which catches a bundle truncated
+# exactly at a section boundary -- a cut that would otherwise parse cleanly.
 {
-    printf '# bundle format v2 (merge.sh) -- expand with split.sh\n'
-
     while IFS= read -r -d '' f; do
         rel="${f#"$src"/}"
         [ "$rel" = "$f" ] && continue          # the source dir itself
@@ -164,7 +167,14 @@ trap 'rm -f "$tmp_abs"' EXIT
             \( -type f -o -type l -o \( -type d -empty \) \) -print0 \
         | sort_z
     )
+} > "$body_abs"
+
+{
+    printf '# bundle format v2 (merge.sh) -- expand with split.sh\n'
+    printf '# bundle entries: %s\n' $((files + dirs + links))
+    cat "$body_abs"
 } > "$tmp_abs"
+rm -f "$body_abs"
 
 mv "$tmp_abs" "$out_abs"
 trap - EXIT

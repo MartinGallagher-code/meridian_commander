@@ -214,5 +214,15 @@ while IFS=$'\037' read -r kind path mode sum nonl payload; do
     restored=$((restored + 1))
 done < "$manifest"
 
+# v2 bundles carry their entry count in the header; a mismatch means the
+# bundle was truncated at a section boundary (e.g. a partial download),
+# which would otherwise parse cleanly and expand silently incomplete.
+expected=$(head -n 5 "$in" | sed -n 's/^# bundle entries: \([0-9][0-9]*\)$/\1/p' | head -n 1)
+if [ -n "$expected" ] && [ "$restored" -ne "$expected" ]; then
+    echo "split.sh: INCOMPLETE BUNDLE: header says $expected entries but only \
+$restored were present -- the bundle file is truncated (partial download?)" >&2
+    exit 1
+fi
+
 echo "Expanded $in into $dest: $restored entr(y/ies), $verified checksum(s) OK, $errors error(s)"
 [ "$errors" -eq 0 ] || exit 1
