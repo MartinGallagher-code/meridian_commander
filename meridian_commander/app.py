@@ -87,15 +87,27 @@ class App:
             return
 
         panel_h = height - 2
-        left_w = width // 2
-        right_w = width - left_w
+        # One column between the panes is reserved for a vertical divider, so
+        # the boundary stays obvious even when a pane is running a terminal
+        # or plug-in with free-form content.
+        left_w = (width - 1) // 2
+        div_x = left_w
+        right_x = left_w + 1
+        right_w = width - right_x
 
         # Remember each pane's screen rectangle so the mouse handler can map a
         # click back to a pane and a row.
         self._panel_boxes = [
             (self.left, 0, 0, panel_h, left_w),
-            (self.right, 0, left_w, panel_h, right_w),
+            (self.right, 0, right_x, panel_h, right_w),
         ]
+
+        divider_attr = curses.A_DIM
+        for row in range(panel_h):
+            try:
+                stdscr.addch(row, div_x, curses.ACS_VLINE, divider_attr)
+            except curses.error:
+                pass
 
         for panel, py, px, ph, pw in self._panel_boxes:
             if panel.plugin is not None:
