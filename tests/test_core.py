@@ -507,8 +507,100 @@ Host behind
 """)
     res = _resolve_ssh_connection("behind", config_path=cfg)
     assert res["hostname"] == "10.0.0.5"
-    assert res["proxy_command"] and "bastion" in res["proxy_command"]
-    assert "-W 10.0.0.5:22" in res["proxy_command"]
+    assert res["proxy_jump"] == "bastion"
+    assert res["proxy_command"] is None
+
+
+def test_parse_jump_spec():
+    from meridian_commander.filesystems import _parse_jump_spec
+
+    assert _parse_jump_spec("A") == [(None, "A", None)]
+    assert _parse_jump_spec("user@gw:2222") == [("user", "gw", 2222)]
+    assert _parse_jump_spec("A, b@B") == [(None, "A", None), ("b", "B", None)]
+
+
+class _FakeTransport:
+    def __init__(self, owner):
+        self.owner = owner
+
+    def open_channel(self, kind, dest, src):
+        self.owner.channels.append((kind, dest))
+        return f"chan->{dest[0]}:{dest[1]}"
+
+
+class _FakeSSHClientObj:
+    def __init__(self, res, sock):
+        self.res = res
+        self.sock = sock
+        self.channels = []
+        self.closed = False
+
+    def get_transport(self):
+        return _FakeTransport(self)
+
+    def close(self):
+        self.closed = True
+
+
+def test_proxyjump_chain_resolves_jump_alias(tmp_path, monkeypatch):
+    """Host B with 'ProxyJump A' must resolve alias A's own config."""
+    from meridian_commander import filesystems as fsmod
+
+    cfg, key = _write_ssh_config(tmp_path, """
+Host A
+    HostName a.example.com
+    User usera
+    Port 2022
+    IdentityFile {key}
+
+Host B
+    HostName b.internal
+    User userb
+    ProxyJump A
+""")
+    made = []
+
+    def fake_connect(res, password, sock):
+        c = _FakeSSHClientObj(res, sock)
+        made.append(c)
+        return c
+
+    monkeypatch.setattr(fsmod, "_connect_resolved", fake_connect)
+    client = fsmod._open_ssh_client("B", None, None, None, None,
+                                    config_path=cfg)
+
+    # Two connections: the jump host A (alias fully resolved), then B.
+    assert len(made) == 2
+    jump, final = made
+    assert jump.res["hostname"] == "a.example.com"
+    assert jump.res["username"] == "usera"
+    assert jump.res["port"] == 2022
+    assert jump.res["key_filename"] == [key]
+    # The tunnel to B was opened on A's transport, to B's resolved address.
+    assert jump.channels == [("direct-tcpip", ("b.internal", 22))]
+    # The final client authenticated as B's user, over the tunnel channel.
+    assert final.res["hostname"] == "b.internal"
+    assert final.res["username"] == "userb"
+    assert final.sock == "chan->b.internal:22"
+    assert client is final
+    assert client._mc_jump_clients == [jump]
+    # Closing the outer client tears down the jump chain too.
+    fsmod._close_ssh_client(client)
+    assert final.closed and jump.closed
+
+
+def test_proxyjump_loop_detected(tmp_path, monkeypatch):
+    from meridian_commander import filesystems as fsmod
+
+    cfg, _key = _write_ssh_config(tmp_path, """
+Host L
+    HostName l.example.com
+    ProxyJump L
+""")
+    monkeypatch.setattr(fsmod, "_connect_resolved",
+                        lambda res, password, sock: _FakeSSHClientObj(res, sock))
+    with pytest.raises(FileSystemError):
+        fsmod._open_ssh_client("L", None, None, None, None, config_path=cfg)
 
 
 def test_ssh_config_missing_file_uses_defaults(tmp_path):

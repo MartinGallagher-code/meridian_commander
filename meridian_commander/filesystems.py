@@ -326,6 +326,7 @@ def _resolve_ssh_connection(
         "port": port if port not in (None, 0) else None,
         "key_filename": key_filename or None,
         "proxy_command": None,
+        "proxy_jump": None,
     }
 
     if config_path is None:
@@ -356,12 +357,10 @@ def _resolve_ssh_connection(
             if "proxycommand" in found:
                 resolved["proxy_command"] = found["proxycommand"]
             elif "proxyjump" in found:
-                # Single-hop ProxyJump via the system ssh client, which will
-                # itself use the user's config/agent for the jump host.
-                jport = resolved["port"] or 22
-                resolved["proxy_command"] = (
-                    f"ssh -W {resolved['hostname']}:{jport} {found['proxyjump']}"
-                )
+                # Raw spec ("A", "user@gw:2222", "A,B", ...); each element may
+                # itself be a config alias.  _open_ssh_client connects the
+                # chain natively through paramiko.
+                resolved["proxy_jump"] = found["proxyjump"]
     except ImportError:
         pass
     except Exception:
@@ -380,21 +379,131 @@ def _resolve_ssh_connection(
     return resolved
 
 
+#: Safety valve against ProxyJump loops in the config (Host A -> B -> A ...).
+_MAX_JUMPS = 5
+
+
+def _parse_jump_spec(spec: str) -> list[tuple[str | None, str, int | None]]:
+    """Parse a ProxyJump value into ``(user, host, port)`` hops.
+
+    Accepts the forms ssh does: an alias (``A``), ``user@host``,
+    ``host:port``, and comma-separated chains (``A,B``).
+    """
+    hops: list[tuple[str | None, str, int | None]] = []
+    for item in spec.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        user, host = _split_user_host(item)
+        port = None
+        if host.count(":") == 1:  # bare host:port (IPv6 needs brackets in ssh too)
+            h, p = host.rsplit(":", 1)
+            if p.isdigit():
+                host, port = h, int(p)
+        hops.append((user, host, port))
+    return hops
+
+
+def _connect_resolved(res: dict, password: str | None, sock):
+    """Connect a paramiko SSHClient to an already-resolved destination."""
+    import paramiko
+
+    client = paramiko.SSHClient()
+    client.load_system_host_keys()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client.connect(
+        hostname=res["hostname"],
+        port=res["port"],
+        username=res["username"],
+        password=password or None,
+        key_filename=res["key_filename"],
+        # Try agent + default keys whenever no password was given, even
+        # alongside an explicit key file -- like ssh, more ways to succeed.
+        look_for_keys=password is None,
+        allow_agent=True,
+        sock=sock,
+        timeout=20,
+    )
+    return client
+
+
+def _close_ssh_client(client) -> None:
+    """Close a client and any jump-host clients its tunnel runs through."""
+    if client is None:
+        return
+    try:
+        client.close()
+    except Exception:
+        pass
+    for jump in getattr(client, "_mc_jump_clients", []):
+        _close_ssh_client(jump)
+
+
+def _open_jump_sock(spec: str, target_host: str, target_port: int,
+                    depth: int, config_path: str | None):
+    """Build the tunnel for a ProxyJump chain, all natively in paramiko.
+
+    Every hop is resolved through ``~/.ssh/config`` like a first-class
+    destination, so a jump host may be an alias with its own HostName, User,
+    Port and IdentityFile (and, for the first hop, even its own ProxyJump).
+    Later hops are reached through a direct-tcpip channel opened on the
+    previous hop, exactly as OpenSSH chains -J hops.
+
+    Returns ``(channel_to_target, jump_clients)``; the callers must keep the
+    jump clients alive for as long as the tunnel is used.
+    """
+    hops = _parse_jump_spec(spec)
+    if not hops:
+        return None, []
+    clients: list = []
+    try:
+        prev = None
+        for user, hhost, hport in hops:
+            if prev is None:
+                # First hop: a full connection of its own (recursion applies
+                # the hop's config, including any nested ProxyJump).
+                hop_str = f"{user}@{hhost}" if user else hhost
+                c = _open_ssh_client(hop_str, None, None, hport, None,
+                                     _depth=depth + 1,
+                                     config_path=config_path)
+            else:
+                hres = _resolve_ssh_connection(hhost, user, hport, None,
+                                               config_path=config_path)
+                chan = prev.get_transport().open_channel(
+                    "direct-tcpip", (hres["hostname"], hres["port"]),
+                    ("127.0.0.1", 0))
+                c = _connect_resolved(hres, None, chan)
+            clients.append(c)
+            prev = c
+        chan = prev.get_transport().open_channel(
+            "direct-tcpip", (target_host, target_port), ("127.0.0.1", 0))
+        return chan, clients
+    except Exception:
+        for c in clients:
+            _close_ssh_client(c)
+        raise
+
+
 def _open_ssh_client(
     host: str,
     username: str | None,
     password: str | None,
     port: int | None,
     key_filename=None,
+    _depth: int = 0,
+    config_path: str | None = None,
 ):
     """Open and authenticate a paramiko SSHClient, shared by the SFTP and SSH
     backends and the SSH plug-ins.
 
     The connection is resolved through ``~/.ssh/config`` first (aliases,
-    HostName, User, Port, IdentityFile, ProxyCommand/ProxyJump), then
-    authenticated the way ``ssh`` would: explicit key file if given, otherwise
-    the SSH agent and the default keys (~/.ssh/id_*), with any password used
-    as a last resort.  Raises :class:`FileSystemError` on any failure.
+    HostName, User, Port, IdentityFile, ProxyCommand/ProxyJump -- jump hosts
+    may themselves be aliases, and chains work), then authenticated the way
+    ``ssh`` would: explicit key file if given, otherwise the SSH agent and the
+    default keys (~/.ssh/id_*), with any password used as a last resort.
+    Jump hops authenticate via agent/keys only (there is no way to prompt for
+    a hop's password mid-connection).  Raises :class:`FileSystemError` on any
+    failure.
     """
     try:
         import paramiko
@@ -404,9 +513,16 @@ def _open_ssh_client(
             "(pip install paramiko)."
         ) from exc
 
-    res = _resolve_ssh_connection(host, username, port, key_filename)
+    if _depth > _MAX_JUMPS:
+        raise FileSystemError(
+            f"ProxyJump chain for {host} is too deep (loop in ~/.ssh/config?)"
+        )
+
+    res = _resolve_ssh_connection(host, username, port, key_filename,
+                                  config_path=config_path)
 
     sock = None
+    jump_clients: list = []
     if res["proxy_command"]:
         try:
             sock = paramiko.ProxyCommand(res["proxy_command"])
@@ -414,26 +530,27 @@ def _open_ssh_client(
             raise FileSystemError(
                 f"ProxyCommand failed for {host}: {exc}"
             ) from exc
+    elif res["proxy_jump"]:
+        try:
+            sock, jump_clients = _open_jump_sock(
+                res["proxy_jump"], res["hostname"], res["port"],
+                _depth, config_path)
+        except FileSystemError:
+            raise
+        except Exception as exc:
+            raise FileSystemError(
+                f"ProxyJump via '{res['proxy_jump']}' failed for {host}: {exc}"
+            ) from exc
 
-    client = paramiko.SSHClient()
-    client.load_system_host_keys()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
-        client.connect(
-            hostname=res["hostname"],
-            port=res["port"],
-            username=res["username"],
-            password=password or None,
-            key_filename=res["key_filename"],
-            # Try agent + default keys whenever no password was given, even
-            # alongside an explicit key file -- like ssh, more ways to succeed.
-            look_for_keys=password is None,
-            allow_agent=True,
-            sock=sock,
-            timeout=20,
-        )
+        client = _connect_resolved(res, password, sock)
     except Exception as exc:
+        for c in jump_clients:
+            _close_ssh_client(c)
         raise FileSystemError(f"Could not connect to {host}: {exc}") from exc
+    # The tunnel lives only while the jump clients do; tie their lifetime to
+    # this client so _close_ssh_client tears the whole chain down.
+    client._mc_jump_clients = jump_clients
     return client
 
 
@@ -467,7 +584,7 @@ class SFTPFileSystem(FileSystem):
         try:
             self._sftp = self._client.open_sftp()
         except Exception as exc:
-            self._client.close()
+            _close_ssh_client(self._client)
             raise FileSystemError(
                 f"Connected to {host} but could not open the SFTP subsystem: "
                 f"{exc}. If SFTP is disabled on the server, try the SSH (shell) "
@@ -557,7 +674,7 @@ class SFTPFileSystem(FileSystem):
         try:
             self._sftp.close()
         finally:
-            self._client.close()
+            _close_ssh_client(self._client)
 
 
 # ---------------------------------------------------------------------------
@@ -1175,7 +1292,7 @@ class SSHFileSystem(FileSystem):
         self._run(f"mv {self._q(src)} {self._q(dst)}")
 
     def close(self) -> None:
-        self._client.close()
+        _close_ssh_client(self._client)
 
 
 def _parse_scp_header(line: str) -> int:

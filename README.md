@@ -122,6 +122,23 @@ password **blank** — it authenticates through your **SSH agent** and default
 keys (`~/.ssh/id_*`) just like the `ssh` command. In other words, if `ssh mybox`
 works in your shell, typing `mybox` here works too.
 
+**`ProxyJump` is native and alias-aware**: given
+
+```
+Host A
+    HostName a.example.com
+    User usera
+Host B
+    HostName b.internal
+    ProxyJump A
+```
+
+connecting to `B` first connects to `A` (with *A's* user, port and keys),
+opens a tunnel through it, and reaches `B` — entirely inside the app, no
+external `ssh` process. Chains (`ProxyJump A,B`) and `user@host:port` hop
+specs work; jump hops authenticate via your agent/keys (a hop's password
+cannot be prompted mid-connection).
+
 - **SFTP** authenticates with your SSH agent / default keys / a per-host
   `IdentityFile` (or an explicit key file or password if you supply one), and
   browses through the SFTP subsystem.
