@@ -166,42 +166,60 @@ def connect_dialog(stdscr) -> dict | None:
         return {"scheme": "local"}
     scheme = {1: "sftp", 2: "ssh", 3: "ftp"}[kind]
 
-    host = prompt(stdscr, f"{scheme.upper()} connection", "Host:")
-    if not host:
-        return None
-    default_user = "anonymous" if scheme == "ftp" else ""
-    user = prompt(stdscr, f"{scheme.upper()} connection", "Username:",
-                  default=default_user)
-    if user is None:
-        return None
-    default_port = "21" if scheme == "ftp" else "22"
-    port_s = prompt(stdscr, f"{scheme.upper()} connection", "Port:",
-                    default=default_port)
-    if port_s is None:
-        return None
-    try:
-        port = int(port_s)
-    except ValueError:
-        port = int(default_port)
-
-    result = {"scheme": scheme, "host": host, "username": user, "port": port}
-
+    title = f"{scheme.upper()} connection"
     if scheme in ("sftp", "ssh"):
-        title = f"{scheme.upper()} connection"
+        # Everything except the host is optional: ~/.ssh/config aliases,
+        # user@host forms, agent + default keys and per-host IdentityFile
+        # entries are all honoured, exactly like the ssh command.
+        host = prompt(stdscr, title, "Host (name, alias, or user@host):")
+        if not host:
+            return None
+        default_user = ""
+        if "@" in host:
+            default_user, _, host = host.rpartition("@")
+        user = prompt(stdscr, title,
+                      "Username (blank = ssh config / current user):",
+                      default=default_user)
+        if user is None:
+            return None
+        port_s = prompt(stdscr, title, "Port (blank/22 = ssh config):",
+                        default="22")
+        if port_s is None:
+            return None
+        try:
+            port = int(port_s) if port_s.strip() else 22
+        except ValueError:
+            port = 22
+
+        result = {"scheme": scheme, "host": host,
+                  "username": user or None, "port": port}
         keyfile = prompt(stdscr, title,
-                         "Key file (blank = agent/password):", default="")
+                         "Key file (blank = ssh config / agent / ~/.ssh/id_*):",
+                         default="")
         if keyfile is None:
             return None
         result["key_filename"] = keyfile or None
-        if not keyfile:
-            pw = prompt(stdscr, title,
-                        "Password (blank = key/agent):", is_password=True)
-            if pw is None:
-                return None
-            result["password"] = pw or None
-        else:
-            result["password"] = None
+        pw = prompt(stdscr, title,
+                    "Password (blank = keys/agent -- usually just press Enter):",
+                    is_password=True)
+        if pw is None:
+            return None
+        result["password"] = pw or None
     else:
+        host = prompt(stdscr, title, "Host:")
+        if not host:
+            return None
+        user = prompt(stdscr, title, "Username:", default="anonymous")
+        if user is None:
+            return None
+        port_s = prompt(stdscr, title, "Port:", default="21")
+        if port_s is None:
+            return None
+        try:
+            port = int(port_s)
+        except ValueError:
+            port = 21
+        result = {"scheme": scheme, "host": host, "username": user, "port": port}
         pw = prompt(stdscr, "FTP connection", "Password:", is_password=True)
         if pw is None:
             return None

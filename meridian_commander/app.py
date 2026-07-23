@@ -36,6 +36,7 @@ from .filesystems import (
     LocalFileSystem,
     SFTPFileSystem,
     SSHFileSystem,
+    _split_user_host,
 )
 from .operations import (
     OperationCancelled,
@@ -420,8 +421,16 @@ class App:
             cwd = panel.path
         elif isinstance(fs, (SFTPFileSystem, SSHFileSystem)):
             remote = f"cd {shlex.quote(panel.path)} && exec ${{SHELL:-/bin/sh}}"
-            cmd = ["ssh", "-t", "-p", str(fs.port),
-                   f"{fs.username}@{fs.host}", remote]
+            # Only pass what the user typed explicitly, so ~/.ssh/config
+            # aliases keep providing their own HostName/User/Port/keys.
+            cmd = ["ssh", "-t"]
+            if fs.port not in (None, 22):
+                cmd += ["-p", str(fs.port)]
+            typed_user = _split_user_host(fs.host)[0]
+            target = fs.host
+            if fs.typed_username and not typed_user:
+                target = f"{fs.typed_username}@{fs.host}"
+            cmd += [target, remote]
         else:
             dialogs.message(self.stdscr, "Terminal",
                             "A terminal is only available for local or SFTP panes.")

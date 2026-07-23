@@ -18,6 +18,8 @@ from meridian_commander.filesystems import (
     LocalFileSystem,
     SSHFileSystem,
     _parse_scp_header,
+    _resolve_ssh_connection,
+    _split_user_host,
 )
 from meridian_commander.operations import copy_path, count_tree, move_path
 from meridian_commander.panel import Panel
@@ -443,6 +445,79 @@ def test_editor_delete_line_aliases(fs, tmp_path):
     assert ed.lines[0] == "two"
     ed.handle_key(25)   # Ctrl-Y (VS Code-safe alias) deletes "two"
     assert ed.lines[0] == "three"
+
+
+# -- ssh config resolution ----------------------------------------------------
+def test_split_user_host():
+    assert _split_user_host("host") == (None, "host")
+    assert _split_user_host("me@host") == ("me", "host")
+    assert _split_user_host("a@b@host") == ("a@b", "host")
+
+
+def _write_ssh_config(tmp_path, body, key_name="id_ed25519"):
+    key = tmp_path / key_name
+    key.write_text("KEY")
+    cfg = tmp_path / "config"
+    cfg.write_text(body.format(key=key))
+    return str(cfg), str(key)
+
+
+def test_ssh_config_alias_resolution(tmp_path):
+    cfg, key = _write_ssh_config(tmp_path, """
+Host prod
+    HostName prod.example.com
+    User deploy
+    Port 2222
+    IdentityFile {key}
+""")
+    res = _resolve_ssh_connection("prod", config_path=cfg)
+    assert res["hostname"] == "prod.example.com"
+    assert res["username"] == "deploy"
+    assert res["port"] == 2222
+    assert res["key_filename"] == [key]
+
+
+def test_ssh_config_explicit_overrides_config(tmp_path):
+    cfg, key = _write_ssh_config(tmp_path, """
+Host prod
+    HostName prod.example.com
+    User deploy
+    Port 2222
+""")
+    # An explicitly supplied user/port beats the config.
+    res = _resolve_ssh_connection("prod", username="root", port=2200,
+                                  config_path=cfg)
+    assert res["hostname"] == "prod.example.com"
+    assert res["username"] == "root"
+    assert res["port"] == 2200
+
+
+def test_ssh_config_user_at_host(tmp_path):
+    cfg, _key = _write_ssh_config(tmp_path, "Host x\n    HostName x.example.com\n")
+    res = _resolve_ssh_connection("bob@x", config_path=cfg)
+    assert res["hostname"] == "x.example.com"
+    assert res["username"] == "bob"
+
+
+def test_ssh_config_proxyjump(tmp_path):
+    cfg, _key = _write_ssh_config(tmp_path, """
+Host behind
+    HostName 10.0.0.5
+    ProxyJump bastion
+""")
+    res = _resolve_ssh_connection("behind", config_path=cfg)
+    assert res["hostname"] == "10.0.0.5"
+    assert res["proxy_command"] and "bastion" in res["proxy_command"]
+    assert "-W 10.0.0.5:22" in res["proxy_command"]
+
+
+def test_ssh_config_missing_file_uses_defaults(tmp_path):
+    res = _resolve_ssh_connection("plain.example.com",
+                                  config_path=str(tmp_path / "nope"))
+    assert res["hostname"] == "plain.example.com"
+    assert res["port"] == 22
+    assert res["username"]  # falls back to the current user
+    assert res["proxy_command"] is None
 
 
 # -- in-pane terminal ---------------------------------------------------------
