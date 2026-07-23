@@ -186,7 +186,7 @@ class App:
             if entry.is_symlink:
                 marker = "@" if not tagged else "*"
 
-            size_s = "  <DIR>" if entry.is_dir else human_size(entry.size)
+            size_s = " <DIR>" if entry.is_dir else human_size(entry.size)
             time_s = human_time(entry.mtime)
             name_w = w - 22
             line = f"{marker}{ljust(display, name_w)}{rjust(size_s, 6)} {time_s[:12]:>12}"

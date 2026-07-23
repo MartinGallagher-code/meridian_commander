@@ -39,12 +39,13 @@ def message(stdscr, title: str, text: str, error: bool = False) -> None:
     win = _center(stdscr, height, width)
     _box(win, title)
     attr = curses.A_BOLD if error else curses.A_NORMAL
-    for i, line in enumerate(lines):
+    win_h, win_w = win.getmaxyx()
+    for i, line in enumerate(lines[: win_h - 3]):
         try:
-            win.addstr(2 + i, 2, line[: win.getmaxyx()[1] - 4], attr)
+            win.addstr(2 + i, 2, line[: win_w - 4], attr)
         except curses.error:
             pass
-    win.addstr(height - 1, 2, " press any key ", curses.A_DIM)
+    win.addstr(win_h - 1, 2, " press any key ", curses.A_DIM)
     win.refresh()
     win.getch()
 
@@ -58,11 +59,15 @@ def confirm(stdscr, title: str, text: str, default_yes: bool = False) -> bool:
     choice = default_yes
     while True:
         _box(win, title)
-        for i, line in enumerate(lines):
-            win.addstr(2 + i, 2, line[: win.getmaxyx()[1] - 4])
+        win_h, win_w = win.getmaxyx()
+        for i, line in enumerate(lines[: win_h - 4]):
+            try:
+                win.addstr(2 + i, 2, line[: win_w - 4])
+            except curses.error:
+                pass
         yes = "[ Yes ]"
         no = "[ No ]"
-        y = height - 2
+        y = win_h - 2
         win.addstr(y, 4, yes, curses.A_REVERSE if choice else curses.A_NORMAL)
         win.addstr(y, 4 + len(yes) + 2, no,
                    curses.A_REVERSE if not choice else curses.A_NORMAL)

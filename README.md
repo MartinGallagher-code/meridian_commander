@@ -5,6 +5,8 @@
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 [![CI](https://github.com/MartinGallagher-code/meridian_commander/actions/workflows/publish.yml/badge.svg)](https://github.com/MartinGallagher-code/meridian_commander/actions/workflows/publish.yml)
 
+**Website:** <https://martingallagher-code.github.io/meridian_commander/> — screenshots and a tour.
+
 *The meridian is noon — the other end of the clock from midnight.*
 
 A two-pane terminal file manager in the spirit of **Midnight Commander**,

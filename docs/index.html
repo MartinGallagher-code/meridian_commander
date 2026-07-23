@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meridian Commander — two-pane terminal file manager for local and remote</title>
+<meta name="description" content="A two-pane terminal file manager in pure Python: browse local disks and SFTP/SSH/FTP servers side by side, copy and sync between any pair of locations, with a built-in viewer, editor, in-pane terminal and plug-ins.">
+<meta property="og:title" content="Meridian Commander">
+<meta property="og:description" content="Two-pane terminal file manager: local + SFTP/SSH/FTP panes, cross-location copy and bidirectional sync, in-pane terminal, viewer, editor and plug-ins. Pure Python, zero required dependencies.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://martingallagher-code.github.io/meridian_commander/">
+<meta property="og:image" content="https://martingallagher-code.github.io/meridian_commander/assets/main.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%23e8b339' stroke-width='2.5'/%3E%3Cline x1='16' y1='16' x2='16' y2='6.5' stroke='%23e8b339' stroke-width='2.5' stroke-linecap='round'/%3E%3Ccircle cx='16' cy='16' r='2' fill='%23e8b339'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="#">
+      <svg width="24" height="24" viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r="13" fill="none" stroke="#e8b339" stroke-width="2.5"/>
+        <line x1="16" y1="16" x2="16" y2="6.5" stroke="#e8b339" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="16" cy="16" r="2" fill="#e8b339"/>
+      </svg>
+      Meridian Commander
+    </a>
+    <nav class="top">
+      <a href="#features">Features</a>
+      <a href="#remote">Remote</a>
+      <a href="#sync">Sync</a>
+      <a href="#plugins">Plug-ins</a>
+      <a href="#install">Install</a>
+      <a class="gh" href="https://github.com/MartinGallagher-code/meridian_commander">GitHub&nbsp;→</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<div class="hero">
+  <div class="wrap">
+    <h1>The two-pane file manager<br>for <span class="cmdr">everywhere your files live</span></h1>
+    <p class="tagline">
+      A terminal file manager in the spirit of Midnight Commander, written in pure Python.
+      Put the local disk in one pane and an SFTP, SSH or FTP server in the other —
+      then copy, move, sync, view and edit as if it were all one machine.
+    </p>
+    <p class="epigraph">The meridian is noon — the other end of the clock from midnight.</p>
+
+    <div class="cta">
+      <a class="btn primary" href="#install">Get started</a>
+      <a class="btn" href="https://github.com/MartinGallagher-code/meridian_commander">View source</a>
+    </div>
+
+    <div class="pip">
+      <span class="dollar">$</span>
+      <code id="pipcmd">pip install "meridian-commander[ssh]"</code>
+      <button onclick="copyPip(this)" aria-label="Copy install command">Copy</button>
+    </div>
+
+    <figure class="shot">
+      <a href="assets/main.png"><img src="assets/main.png" alt="Meridian Commander main view: two panes side by side, one on a local project and one on /srv/www, with two files tagged in yellow"></a>
+    </figure>
+    <p class="subnote">Runs in any terminal · Python ≥ 3.9 · Linux &amp; macOS · GPL-3.0 · zero required dependencies for local + FTP use</p>
+  </div>
+</div>
+
+<section id="features">
+  <div class="wrap">
+    <span class="kicker">Features</span>
+    <h2>One interface, any pair of locations</h2>
+    <p class="sub">
+      Every location — local disk, SFTP, SSH shell, FTP — implements one small filesystem
+      interface, so the copy, move and sync engines are written once and work across any
+      pair of panes: local→remote, remote→local, even remote→remote.
+    </p>
+
+    <div class="grid">
+      <div class="card">
+        <div class="icon">🗂</div>
+        <h3>Two independent panes</h3>
+        <p>Browse two locations side by side. <code>Tab</code> between them, swap with <code>Ctrl-U</code>, sort, tag files for batch operations, and toggle hidden files per pane.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🌐</div>
+        <h3>Local + SFTP + SSH + FTP</h3>
+        <p>Each pane can point at the local disk or a remote server. SSH-shell mode works even on servers with the SFTP subsystem disabled, driving <code>ls</code>, <code>cat</code> and friends over the SSH channel.</p>
+      </div>
+      <div class="card">
+        <div class="icon">⇄</div>
+        <h3>Bidirectional sync</h3>
+        <p>One key compares both trees and copies the newest version of every file in whichever direction is needed. Full preview before anything is written, and nothing is ever deleted.</p>
+      </div>
+      <div class="card">
+        <div class="icon">📄</div>
+        <h3>Viewer &amp; editor built in</h3>
+        <p>A scrollable viewer with smart-case search and highlighted matches, and a real in-place editor with save on <code>Ctrl-S</code> — both work on remote files too.</p>
+      </div>
+      <div class="card">
+        <div class="icon">💻</div>
+        <h3>Terminal inside the pane</h3>
+        <p>Press <code>t</code> and the pane becomes a shell in that pane's directory — a real pty locally, or an interactive shell over the pane's existing SSH connection.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🔍</div>
+        <h3>Find files, browsably</h3>
+        <p>Search a pane's tree by substring or glob — remote panes included — and get a result list you can view, edit or jump into directly.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🧩</div>
+        <h3>Pane plug-ins</h3>
+        <p>A plug-in takes over a pane and can see the opposite pane's filesystem. Writing one takes a dozen lines of Python; built-ins include an SSH JSON push and run-remote-script.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🖱</div>
+        <h3>Mouse support</h3>
+        <p>Click to select, double-click to open, wheel to scroll, right-click for a context menu of actions — alongside full keyboard control.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🪶</div>
+        <h3>Pure Python, stdlib core</h3>
+        <p>Local and FTP use run on the standard library alone. SFTP/SSH needs only the optional <code>paramiko</code> package. No compiled extensions, no framework.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="remote">
+  <div class="wrap">
+    <span class="kicker">Remote locations</span>
+    <h2>If <code style="font-size:0.85em">ssh mybox</code> works, typing <code style="font-size:0.85em">mybox</code> here works</h2>
+
+    <div class="feature">
+      <div class="feature-copy">
+        <h3>Your SSH config, understood natively</h3>
+        <p>
+          Meridian reads <code>~/.ssh/config</code>. Enter a host alias or a
+          <code>user@host</code> string, leave everything else blank, and it authenticates
+          through your SSH agent and default keys — with <code>HostName</code>,
+          <code>User</code>, <code>Port</code> and <code>IdentityFile</code> all applied.
+        </p>
+        <ul>
+          <li><strong>Native, alias-aware <code>ProxyJump</code></strong> — jump-host chains are resolved and tunnelled entirely inside the app, no external <code>ssh</code> process.</li>
+          <li><strong>Restricted shells handled</strong> — file transfer falls back from <code>cat</code> to <code>dd</code> to the raw scp protocol, so viewing and editing work even on appliance shells that answer <code>Command not supported</code>.</li>
+          <li><strong>Old FTP servers too</strong> — prefers modern <code>MLSD</code> listings and falls back to parsing classic <code>LIST</code> output.</li>
+        </ul>
+        <p>Once connected, a remote pane behaves exactly like a local one.</p>
+      </div>
+      <figure class="shot">
+        <a href="assets/sftp.png"><img src="assets/sftp.png" alt="The Open location dialog with an SFTP connection form, where a bare ssh-config host alias 'web01' is being entered" loading="lazy"></a>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section id="sync">
+  <div class="wrap">
+    <span class="kicker">Synchronization</span>
+    <h2>Both sides end up with the newest of everything</h2>
+
+    <div class="feature flip">
+      <figure class="shot">
+        <a href="assets/sync.png"><img src="assets/sync.png" alt="The Synchronize panes dialog showing a plan of ten files with per-file direction arrows and reasons before confirmation" loading="lazy"></a>
+      </figure>
+      <div class="feature-copy">
+        <h3>A plan you approve, not a surprise</h3>
+        <p>
+          <kbd>F9</kbd> walks both directory trees and builds a plan: files missing on one
+          side are copied over, files present on both sides go in whichever direction the
+          newer copy lives. You see every planned copy — with its reason — and the total
+          byte count before confirming, and you can cancel mid-way.
+        </p>
+        <ul>
+          <li>Copied files are stamped with the source's modification time, so a second sync finds nothing to do.</li>
+          <li>Timestamps within 2 seconds count as equal — no needless copies across filesystems with coarse clocks.</li>
+          <li><strong>Nothing is ever deleted.</strong></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="feature">
+      <div class="feature-copy">
+        <h3>A shell without leaving the pane</h3>
+        <p>
+          Press <kbd>t</kbd> and the pane itself becomes a pseudo-terminal running a shell
+          in the pane's directory, while the other pane keeps working normally. On an SFTP
+          or SSH pane, the shell runs over the pane's existing SSH connection.
+        </p>
+        <ul>
+          <li><kbd>Ctrl-]</kbd> switches to the other pane while the shell keeps running.</li>
+          <li>For full-screen programs like <code>vim</code> or <code>htop</code>, <kbd>!</kbd> suspends the UI into a real terminal.</li>
+        </ul>
+      </div>
+      <figure class="shot">
+        <a href="assets/terminal.png"><img src="assets/terminal.png" alt="A shell running inside the left pane showing the output of a deploy script dry run, while the right pane still shows a file listing" loading="lazy"></a>
+      </figure>
+    </div>
+
+    <div class="feature flip">
+      <figure class="shot">
+        <a href="assets/viewer.png"><img src="assets/viewer.png" alt="The built-in file viewer on a Python source file with every match of a search highlighted and line numbers on" loading="lazy"></a>
+      </figure>
+      <div class="feature-copy">
+        <h3>View and edit, wherever the file is</h3>
+        <p>
+          The viewer scrolls, searches with smart case (<kbd>/</kbd>, matches highlighted,
+          <kbd>n</kbd>/<kbd>N</kbd> with wrap-around), toggles line numbers and wrapping.
+          The editor is a real in-place editor — insert and delete, sane Enter/Backspace
+          line handling, save with <kbd>Ctrl-S</kbd>. Both work on remote files: open a
+          config on a server, fix it, save it back.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="plugins">
+  <div class="wrap">
+    <span class="kicker">Plug-ins</span>
+    <h2>A pane that runs your code</h2>
+    <p class="sub">
+      Press <kbd>p</kbd> to put a pane into plug-in mode. The plug-in takes over the pane
+      and can see the opposite pane — its filesystem (local or remote), its directory, its
+      entries — so it can act on whatever you have open next to it. A complete plug-in is
+      a dozen lines in <code>~/.config/meridian-commander/plugins/</code>:
+    </p>
+
+    <pre class="block"><span class="k">from</span> meridian_commander.plugin_api <span class="k">import</span> InputOutputPlugin
+
+<span class="k">class</span> <span class="d">Shout</span>(InputOutputPlugin):
+    name = <span class="s">"Shout"</span>
+    description = <span class="s">"Uppercase whatever you type"</span>
+    prompt = <span class="s">"say> "</span>
+
+    <span class="k">def</span> <span class="d">process</span>(self, line):
+        <span class="k">return</span> [line.upper()]</pre>
+
+    <p class="sub" style="margin-top:22px">
+      <code>InputOutputPlugin</code> gives you the classic layout — scrolling output above,
+      input line below — and <code>self.ctx</code> exposes the opposite pane
+      (<code>other_fs</code>, <code>other_path</code>, <code>other_entries()</code>).
+      Subclass <code>PanePlugin</code> instead for full control of drawing and keys.
+      Built-ins include the in-pane terminal, find-in-other-pane, an SSH JSON push, and
+      run-remote-script.
+    </p>
+  </div>
+</section>
+
+<section id="screens">
+  <div class="wrap">
+    <span class="kicker">Screenshots</span>
+    <h2>More of the app</h2>
+    <div class="gallery">
+      <figure>
+        <a href="assets/connect.png"><img src="assets/connect.png" alt="The Open location menu offering Local disk, SFTP, SSH shell and FTP" loading="lazy"></a>
+        <figcaption>Open a location: local, SFTP, SSH (shell) or FTP</figcaption>
+      </figure>
+      <figure>
+        <a href="assets/find.png"><img src="assets/find.png" alt="Find files results listing matches with sizes and dates, with keys to view, edit or jump to each hit" loading="lazy"></a>
+        <figcaption>Find files — browsable results, remote panes included</figcaption>
+      </figure>
+      <figure>
+        <a href="assets/copy.png"><img src="assets/copy.png" alt="Copy dialog confirming two tagged items to /srv/www" loading="lazy"></a>
+        <figcaption>Copy tagged files to the other pane</figcaption>
+      </figure>
+      <figure>
+        <a href="assets/editor.png"><img src="assets/editor.png" alt="The built-in editor open on nginx.conf with line numbers" loading="lazy"></a>
+        <figcaption>The built-in editor</figcaption>
+      </figure>
+      <figure>
+        <a href="assets/help.png"><img src="assets/help.png" alt="The help screen listing key bindings" loading="lazy"></a>
+        <figcaption>Help is one keypress away</figcaption>
+      </figure>
+      <figure>
+        <a href="assets/main.png"><img src="assets/main.png" alt="Main two-pane view with tagged files" loading="lazy"></a>
+        <figcaption>Two panes, tagged files, one keystroke from anything</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="keys">
+  <div class="wrap">
+    <span class="kicker">Key bindings</span>
+    <h2>Muscle memory included</h2>
+    <p class="sub">
+      The classic function-key row does what it has done since 1986 — and every F-key has a
+      digit alias (<kbd>1</kbd>–<kbd>0</kbd>) plus a mnemonic letter, for terminals and
+      multiplexers that swallow function keys. A stray <kbd>Esc</kbd> never quits the app.
+    </p>
+
+    <div class="keys">
+      <div class="keygroup">
+        <h4>Function keys</h4>
+        <table>
+          <tr><td><kbd>F1</kbd> / <kbd>?</kbd></td><td>help</td></tr>
+          <tr><td><kbd>F2</kbd> / <kbd>o</kbd></td><td>open / connect location</td></tr>
+          <tr><td><kbd>F3</kbd> / <kbd>v</kbd></td><td>view file</td></tr>
+          <tr><td><kbd>F4</kbd> / <kbd>e</kbd></td><td>edit file</td></tr>
+          <tr><td><kbd>F5</kbd> / <kbd>c</kbd></td><td>copy to other pane</td></tr>
+          <tr><td><kbd>F6</kbd> / <kbd>m</kbd></td><td>move to other pane</td></tr>
+          <tr><td><kbd>F8</kbd> / <kbd>d</kbd></td><td>delete</td></tr>
+          <tr><td><kbd>F9</kbd> / <kbd>s</kbd></td><td>synchronize panes</td></tr>
+          <tr><td><kbd>F10</kbd> / <kbd>q</kbd></td><td>quit</td></tr>
+        </table>
+      </div>
+      <div class="keygroup">
+        <h4>Panes &amp; navigation</h4>
+        <table>
+          <tr><td><kbd>Tab</kbd></td><td>switch active pane</td></tr>
+          <tr><td><kbd>↑</kbd><kbd>↓</kbd> / <kbd>j</kbd><kbd>k</kbd></td><td>move cursor</td></tr>
+          <tr><td><kbd>Enter</kbd> / <kbd>→</kbd></td><td>enter directory / view file</td></tr>
+          <tr><td><kbd>Backspace</kbd> / <kbd>←</kbd></td><td>parent directory</td></tr>
+          <tr><td><kbd>Insert</kbd> / <kbd>Space</kbd></td><td>tag file (<kbd>+</kbd>/<kbd>-</kbd> all / none)</td></tr>
+          <tr><td><kbd>Ctrl-U</kbd></td><td>swap panes</td></tr>
+          <tr><td><kbd>Ctrl-G</kbd></td><td>go to path</td></tr>
+          <tr><td><kbd>.</kbd></td><td>show / hide hidden files</td></tr>
+        </table>
+      </div>
+      <div class="keygroup">
+        <h4>Power tools</h4>
+        <table>
+          <tr><td><kbd>t</kbd></td><td>terminal inside this pane</td></tr>
+          <tr><td><kbd>!</kbd></td><td>full-screen shell (vim, htop, …)</td></tr>
+          <tr><td><kbd>f</kbd></td><td>find files, browsable results</td></tr>
+          <tr><td><kbd>p</kbd> / <kbd>F11</kbd></td><td>plug-in mode for this pane</td></tr>
+          <tr><td><kbd>C</kbd></td><td>configuration menu</td></tr>
+          <tr><td><kbd>Ctrl-T</kbd></td><td>change sort order</td></tr>
+          <tr><td><kbd>Ctrl-R</kbd></td><td>reload panes</td></tr>
+          <tr><td>Right-click</td><td>context menu of actions</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <span class="kicker">Install</span>
+    <h2>Running in under a minute</h2>
+
+    <div class="steps">
+      <div class="step">
+        <span class="n">01</span>
+        <h3>Install</h3>
+        <pre>pip install "meridian-commander[ssh]"</pre>
+        <p>The <code>[ssh]</code> extra pulls in <code>paramiko</code> for SFTP/SSH panes. Plain <code>pip install meridian-commander</code> is enough for local and FTP use — it runs on the standard library alone.</p>
+      </div>
+      <div class="step">
+        <span class="n">02</span>
+        <h3>Launch</h3>
+        <pre>meridian-commander /etc /var/log
+meridian          # short alias</pre>
+        <p>Optionally pass a starting directory for each pane; both default to your home directory.</p>
+      </div>
+      <div class="step">
+        <span class="n">03</span>
+        <h3>Connect</h3>
+        <pre>F2  →  SFTP  →  mybox</pre>
+        <p>Type an <code>~/.ssh/config</code> alias or <code>user@host</code> and leave the rest blank — agent, keys, <code>ProxyJump</code> and all are applied, just like the <code>ssh</code> command.</p>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>From a checkout:</strong> <code>pip install -e ".[ssh]"</code> for development, or run it straight
+      from the source tree with <code>python -m meridian_commander</code>. Tests run with <code>pytest</code>.
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span class="foot-brand">
+      <svg width="18" height="18" viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r="13" fill="none" stroke="#e8b339" stroke-width="2.5"/>
+        <line x1="16" y1="16" x2="16" y2="6.5" stroke="#e8b339" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="16" cy="16" r="2" fill="#e8b339"/>
+      </svg>
+      Meridian Commander
+    </span>
+    <span>GPL-3.0-or-later · pure Python · © Martin Gallagher</span>
+    <nav>
+      <a href="https://github.com/MartinGallagher-code/meridian_commander">GitHub</a>
+      <a href="https://github.com/MartinGallagher-code/meridian_commander/issues">Issues</a>
+      <a href="https://pypi.org/project/meridian-commander/">PyPI</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+function copyPip(btn) {
+  navigator.clipboard.writeText(document.getElementById("pipcmd").textContent).then(function () {
+    btn.textContent = "Copied!";
+    setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+  });
+}
+</script>
+
+</body>
+</html>
