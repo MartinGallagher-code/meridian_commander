@@ -388,6 +388,51 @@ def test_scp_header_parsing():
         _parse_scp_header("garbage\n")
 
 
+# -- viewer search -------------------------------------------------------------
+def _make_viewer(fs, tmp_path, text):
+    from meridian_commander.viewer import Viewer
+
+    p = tmp_path / "view.txt"
+    p.write_text(text)
+    return Viewer(fs, str(p))
+
+
+def test_viewer_search_smart_case(fs, tmp_path):
+    v = _make_viewer(fs, tmp_path, "Alpha\nbravo\nALPHA again\ncharlie\n")
+    # Lowercase pattern: case-insensitive -> finds both "Alpha" lines.
+    v.set_search("alpha")
+    assert v.find_next(1) == 0
+    assert v.find_next(1) == 2
+    # Uppercase pattern: case-sensitive -> only the ALL-CAPS line.
+    v.set_search("ALPHA")
+    assert v.find_next(1) == 2
+    assert "wrapped" in v.notice or v.find_next(1) == 2
+
+
+def test_viewer_search_wraps_and_reverses(fs, tmp_path):
+    v = _make_viewer(fs, tmp_path, "x\nmatch one\nx\nmatch two\nx\n")
+    v.set_search("match")
+    assert v.find_next(1) == 1
+    assert v.find_next(1) == 3
+    # Wraps forward back to the first match.
+    assert v.find_next(1) == 1
+    assert "wrapped" in v.notice
+    # And reverses.
+    assert v.find_next(-1) == 3
+    # Jumping scrolled the view near the match.
+    assert v.top == max(0, 3 - 2)
+
+
+def test_viewer_search_not_found_and_positions(fs, tmp_path):
+    v = _make_viewer(fs, tmp_path, "aaa bab aab\n")
+    v.set_search("zzz")
+    assert v.find_next(1) is None
+    assert "not found" in v.notice
+    v.set_search("aa")
+    # Non-overlapping occurrences: "aa|a b|ab a|ab" -> positions 0 and 8.
+    assert v.match_positions("aaa bab aab") == [0, 8]
+
+
 # -- editor key handling ------------------------------------------------------
 def test_editor_typing_and_save(fs, tmp_path):
     import curses

@@ -40,7 +40,7 @@ and ships with a built-in file viewer and editor.
   the newest version of each file in whichever direction is needed, so both
   sides end up holding the latest of everything. Nothing is deleted; you get a
   preview and confirmation before anything is written.
-- **File viewer** (`F3`) — scrollable, with **line numbers you can toggle**
+- **File viewer** (`F3`) — scrollable, with **search** (`/`, smart case, highlighted matches, `n`/`N` navigation) and **line numbers you can toggle**
   (`N`) and horizontal scrolling; works on remote files too.
 - **File editor** (`F4`) — a real in-place editor (insert/delete, Enter/Backspace
   line handling, save with `Ctrl-S`), also with toggleable line numbers.
@@ -184,8 +184,9 @@ edit, and copy/move/sync to and from it.
 file/directory, scroll wheel to move through the listing, and **right-click** for
 a context menu of actions.
 
-In the **viewer**: `N` toggles line numbers, `W` toggles wrap, arrows/PgUp/PgDn
-scroll, `Q` quits.
+In the **viewer**: `/` (or F7) searches — smart case (a lowercase pattern is
+case-insensitive), matches highlighted, `n`/`N` next/previous with wrap-around;
+`l` toggles line numbers, `W` toggles wrap, arrows/PgUp/PgDn scroll, `Q` quits.
 In the **editor**: `F2` / `Ctrl-S` / `Ctrl-O` save, `F10` / `Ctrl-Q` quit,
 `Ctrl-Y` / `Ctrl-K` delete a line, `Ctrl-L` toggles line numbers. Esc does
 not quit — only `q`-style keys and `F10` leave the app, so a stray Esc never
