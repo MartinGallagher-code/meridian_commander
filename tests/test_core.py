@@ -388,6 +388,104 @@ def test_scp_header_parsing():
         _parse_scp_header("garbage\n")
 
 
+# -- viewer search -------------------------------------------------------------
+def _make_viewer(fs, tmp_path, text):
+    from meridian_commander.viewer import Viewer
+
+    p = tmp_path / "view.txt"
+    p.write_text(text)
+    return Viewer(fs, str(p))
+
+
+def test_viewer_search_smart_case(fs, tmp_path):
+    v = _make_viewer(fs, tmp_path, "Alpha\nbravo\nALPHA again\ncharlie\n")
+    # Lowercase pattern: case-insensitive -> finds both "Alpha" lines.
+    v.set_search("alpha")
+    assert v.find_next(1) == 0
+    assert v.find_next(1) == 2
+    # Uppercase pattern: case-sensitive -> only the ALL-CAPS line.
+    v.set_search("ALPHA")
+    assert v.find_next(1) == 2
+    assert "wrapped" in v.notice or v.find_next(1) == 2
+
+
+def test_viewer_search_wraps_and_reverses(fs, tmp_path):
+    v = _make_viewer(fs, tmp_path, "x\nmatch one\nx\nmatch two\nx\n")
+    v.set_search("match")
+    assert v.find_next(1) == 1
+    assert v.find_next(1) == 3
+    # Wraps forward back to the first match.
+    assert v.find_next(1) == 1
+    assert "wrapped" in v.notice
+    # And reverses.
+    assert v.find_next(-1) == 3
+    # Jumping scrolled the view near the match.
+    assert v.top == max(0, 3 - 2)
+
+
+def test_viewer_search_not_found_and_positions(fs, tmp_path):
+    v = _make_viewer(fs, tmp_path, "aaa bab aab\n")
+    v.set_search("zzz")
+    assert v.find_next(1) is None
+    assert "not found" in v.notice
+    v.set_search("aa")
+    # Non-overlapping occurrences: "aa|a b|ab a|ab" -> positions 0 and 8.
+    assert v.match_positions("aaa bab aab") == [0, 8]
+
+
+# -- find files ----------------------------------------------------------------
+def test_collect_matches_substring_and_glob(fs, tmp_path):
+    from meridian_commander.findfiles import collect_matches
+
+    root = tmp_path / "tree"
+    write(str(root / "app.py"), "a")
+    write(str(root / "notes.txt"), "n")
+    write(str(root / "src" / "config.py"), "c")
+    write(str(root / "src" / "deep" / "myconf.ini"), "i")
+
+    # Bare word behaves as a substring match on the file name.
+    matches, truncated = collect_matches(fs, str(root), "conf")
+    rels = [r for r, _e in matches]
+    assert rels == ["src/config.py", "src/deep/myconf.ini"]
+    assert not truncated
+
+    # Explicit glob is used as-is.
+    matches, _ = collect_matches(fs, str(root), "*.py")
+    assert [r for r, _e in matches] == ["app.py", "src/config.py"]
+
+
+def test_collect_matches_truncation_and_cancel(fs, tmp_path):
+    from meridian_commander.findfiles import collect_matches
+
+    root = tmp_path / "many"
+    for i in range(10):
+        write(str(root / f"f{i:02d}.log"), "x")
+
+    matches, truncated = collect_matches(fs, str(root), "*.log",
+                                         max_results=3)
+    assert len(matches) == 3 and truncated
+
+    calls = {"n": 0}
+
+    def cancel():
+        calls["n"] += 1
+        return calls["n"] > 2  # cancel almost immediately
+
+    matches, _ = collect_matches(fs, str(root), "*.log", cancel=cancel)
+    assert len(matches) < 10
+
+
+def test_find_browser_paths(fs, tmp_path):
+    from meridian_commander.findfiles import FindBrowser, collect_matches
+
+    root = tmp_path / "tree"
+    write(str(root / "sub" / "target.txt"), "T")
+    matches, _ = collect_matches(fs, str(root), "target")
+    browser = FindBrowser(fs, str(root), "target", matches)
+    assert browser.current()[0] == "sub/target.txt"
+    assert browser.current_path() == str(root / "sub" / "target.txt")
+
+
 # -- editor key handling ------------------------------------------------------
 def test_editor_typing_and_save(fs, tmp_path):
     import curses

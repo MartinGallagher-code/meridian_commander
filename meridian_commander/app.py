@@ -143,8 +143,11 @@ class App:
         panel.ensure_visible(body_h)
 
         border = curses.A_BOLD if active else curses.A_DIM
-        # Header: filesystem label + current path.
+        # Header: filesystem label + current path.  Long paths keep their
+        # tail visible (the deepest directories matter most).
         header = f"{panel.fs.label()}:{panel.path}"
+        if len(header) > w:
+            header = "~" + header[-(w - 1):]
         head_attr = curses.A_REVERSE if active else curses.A_NORMAL
         try:
             stdscr.addstr(y, x, ljust(header, w), head_attr)
@@ -348,6 +351,8 @@ class App:
             self._plugin_mode()
         elif key == ord("C"):  # configuration menu
             self._config_menu()
+        elif key == ord("f"):  # find files under the current directory
+            self._find_files()
         elif key == curses.KEY_MOUSE:
             self._handle_mouse()
         # F-keys, with digit (1..0 -> F1..F10) and mnemonic-letter alternates
@@ -624,9 +629,10 @@ class App:
 
         labels = ["View", "Edit", "Copy to other pane", "Move to other pane",
                   "Rename", "Delete", "Tag / untag", "New directory",
-                  "Terminal in this pane", "Full-screen shell", "Cancel"]
+                  "Find files here", "Terminal in this pane",
+                  "Full-screen shell", "Cancel"]
         actions = ["view", "edit", "copy", "move", "rename", "delete",
-                   "tag", "mkdir", "terminal", "shell", None]
+                   "tag", "mkdir", "find", "terminal", "shell", None]
         choice = dialogs.menu(self.stdscr, header[:40], labels)
         if choice is None:
             return
@@ -647,6 +653,8 @@ class App:
             panel.toggle_select()
         elif action == "mkdir":
             self._mkdir()
+        elif action == "find":
+            self._find_files()
         elif action == "terminal":
             self._open_terminal_pane()
         elif action == "shell":
@@ -669,6 +677,49 @@ class App:
             self._set_message(f"Renamed to {new_name}")
         except Exception as exc:
             dialogs.message(self.stdscr, "Rename error", str(exc), error=True)
+
+    def _find_files(self) -> None:
+        """Search the active pane's tree; browse results, jump/view/edit."""
+        from .findfiles import FindBrowser, collect_matches
+
+        panel = self.active
+        pattern = dialogs.prompt(
+            self.stdscr, "Find files",
+            "Name (substring or glob, e.g. conf or *.py):")
+        if not pattern:
+            return
+
+        dlg = dialogs.ProgressDialog(self.stdscr, "Find files")
+        dlg.set_overall(f"Searching under {panel.fs.label()}:{panel.path}")
+
+        def progress(count: int, rel: str) -> None:
+            dlg.update(0, 0, f"{count} found -- in {rel}")
+
+        try:
+            matches, truncated = collect_matches(
+                panel.fs, panel.path, pattern,
+                cancel=dlg.cancelled, progress=progress)
+        finally:
+            dlg.close()
+
+        if not matches:
+            dialogs.message(self.stdscr, "Find files",
+                            f"No matches for '{pattern}'.")
+            return
+
+        browser = FindBrowser(panel.fs, panel.path, pattern, matches,
+                              truncated)
+        rel = browser.run(self.stdscr)
+        curses.curs_set(0)
+        if rel:
+            parts = [p for p in rel.split("/") if p]
+            parent = panel.fs.join(panel.path, *parts[:-1]) if len(parts) > 1 \
+                else panel.path
+            if panel.chdir(parent, keep_name=parts[-1]):
+                self._set_message(f"Jumped to {parts[-1]}")
+            else:
+                dialogs.message(self.stdscr, "Find files",
+                                f"Cannot open:\n{parent}", error=True)
 
     def _go_to_path(self) -> None:
         panel = self.active
@@ -980,6 +1031,7 @@ class App:
             "  t              terminal in this pane (Ctrl-] switch, F10 close)\n"
             "  !              full-screen shell (for vim/htop etc.)\n"
             "  p / F11        plug-in mode: run a plug-in in this pane\n"
+            "  f              find files: browsable results (view/edit/goto)\n"
             "  C              configuration: edit config.ini / plug-ins\n"
             "\n"
             "  Function keys -- each also has digit and letter aliases,\n"
