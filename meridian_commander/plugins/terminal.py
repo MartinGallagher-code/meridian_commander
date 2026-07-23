@@ -321,14 +321,19 @@ class TerminalPlugin(PanePlugin):
 
     # -- drawing ---------------------------------------------------------------
     def draw(self, stdscr, y: int, x: int, h: int, w: int) -> None:
-        rows, cols = h - 1, w
+        # Match the file-pane layout: header row on top, status bar on the
+        # bottom, shell content in between -- so the terminal's usable area
+        # lines up exactly with the listing in the other pane.
+        rows, cols = h - 2, w
+        if rows < 1:
+            return
         if (rows, cols) != (self._rows, self._cols) and rows > 0 and cols > 0:
             self._rows, self._cols = rows, cols
             self._resize(rows, cols)
 
         fs = self.ctx.own_fs
         where = f"{fs.label()}:{self.ctx.own_path}"
-        title = f" [terminal] {where}  Ctrl-]:switch pane  F10:close "
+        title = f" [terminal] {where} "
         self.put(stdscr, y, x, w, title, curses.A_REVERSE)
 
         visible = self.term.visible(rows, self.scroll)
@@ -338,9 +343,14 @@ class TerminalPlugin(PanePlugin):
             self.put(stdscr, y + 1 + row, x, w, text)
 
         if self.status:
-            self.put(stdscr, y + h - 1, x, w, f" {self.status} ",
-                     curses.A_REVERSE)
-        elif self.scroll == 0 and visible:
+            footer = f" {self.status} "
+        elif self.scroll:
+            footer = f" scrollback ({self.scroll} lines back)  PgDn: forward "
+        else:
+            footer = " Ctrl-] switch pane   F10 close   PgUp/PgDn scroll "
+        self.put(stdscr, y + h - 1, x, w, footer, curses.A_REVERSE)
+
+        if not self.status and self.scroll == 0 and visible:
             # Draw the cursor as a reverse cell on the last rendered row.
             cy = y + 1 + pad + len(visible) - 1
             cx = x + min(self.term.col, w - 1)
