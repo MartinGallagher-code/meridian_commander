@@ -408,10 +408,21 @@ bundle-controlled strings to a shell.
 ```bash
 pip install ".[dev]"
 pytest
+
+# with a coverage report
+coverage run -m pytest && coverage report
 ```
 
 The test suite covers the filesystem-agnostic core (copy, move, sync, panel
-logic) using the local backend and temporary directories.
+logic) using the local backend and temporary directories, the key handlers for
+navigation and presets against a stubbed screen, and the dialog menu against a
+real curses screen on a pseudo-terminal.
+
+Coverage is reported in CI. `fail_under` in `pyproject.toml` is a ratchet
+rather than a target: it stops the total sliding backwards, and is meant to be
+raised as more of the curses layer comes under test. The bulk of what is not
+yet covered is drawing code in `app.py`, `dialogs.py`, `viewer.py` and
+`editor.py`.
 
 ## License
 

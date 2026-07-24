@@ -7,7 +7,9 @@ that also drives remote transfers (the backend interface is identical).
 
 from __future__ import annotations
 
+import curses
 import os
+import pty
 import time
 
 import pytest
@@ -21,7 +23,9 @@ from meridian_commander.filesystems import (
     _resolve_ssh_connection,
     _split_user_host,
 )
-from meridian_commander import presets
+from meridian_commander import app as app_mod
+from meridian_commander import dialogs, presets
+from meridian_commander.app import App
 from meridian_commander.operations import copy_path, count_tree, move_path
 from meridian_commander.panel import Panel
 from meridian_commander.sync import build_sync_plan, execute_sync_plan
@@ -1239,3 +1243,627 @@ def test_build_plugin_jsonl_roundtrip(fs, tmp_path, monkeypatch):
     js = read(str(tmp_path / "d" / "s.jsonl"))
     assert js == ('{"cat": "x", "val": "1"}\n'
                   '{"cat": "y", "val": "2"}\n')
+
+
+# -- app: home, mirror and presets --------------------------------------------
+#
+# These drive the real key handlers.  The screen and the blocking dialogs are
+# the only things replaced, so the panels, filesystems and presets file are
+# genuine and every assertion is about what the application actually did.
+
+class _StubScreen:
+    """A screen for handlers that never draw.  Only the size is ever asked."""
+
+    def __init__(self, height: int = 24, width: int = 80) -> None:
+        self._size = (height, width)
+
+    def getmaxyx(self):
+        return self._size
+
+
+class _ScriptedDialogs:
+    """Scripted stand-ins for the blocking dialogs.
+
+    Each helper answers from its script and records what it was asked, so a
+    test can assert both on the choice made and on the text the user saw.
+    A menu answer given as a string picks the first option containing it,
+    which keeps tests readable and independent of option ordering.
+    """
+
+    def __init__(self, monkeypatch, menu=(), prompt=(), confirm=()):
+        self.menu_answers = list(menu)
+        self.prompt_answers = list(prompt)
+        self.confirm_answers = list(confirm)
+        self.menus: list[tuple] = []
+        self.prompts: list[str] = []
+        self.messages: list[tuple] = []
+        monkeypatch.setattr(dialogs, "menu", self._menu)
+        monkeypatch.setattr(dialogs, "prompt", self._prompt)
+        monkeypatch.setattr(dialogs, "confirm", self._confirm)
+        monkeypatch.setattr(dialogs, "message", self._message)
+
+    def _menu(self, stdscr, title, options):
+        self.menus.append((title, list(options)))
+        answer = self.menu_answers.pop(0)
+        if isinstance(answer, str):
+            return next(i for i, o in enumerate(options) if answer in o)
+        return answer
+
+    def _prompt(self, stdscr, title, label, default="", is_password=False):
+        self.prompts.append(label)
+        return self.prompt_answers.pop(0)
+
+    def _confirm(self, stdscr, title, text, default_yes=False):
+        return self.confirm_answers.pop(0)
+
+    def _message(self, stdscr, title, text, error=False):
+        self.messages.append((title, text, error))
+
+    @property
+    def last_message(self) -> str:
+        return self.messages[-1][1] if self.messages else ""
+
+
+class _FakeRemoteBackend(LocalFileSystem):
+    """A local backend wearing an SFTP name tag.
+
+    Real enough to back a panel (it lists actual directories) while matching
+    a remote preset, which is what the reuse and reconnect paths key on.
+    """
+
+    scheme = "sftp"
+
+    def __init__(self, host="web1", username="deploy", port=22):
+        super().__init__()
+        self.host = host
+        self.typed_username = username
+        self.port = port
+        self.key_filename = ""
+
+    def label(self) -> str:
+        return f"sftp://{self.typed_username}@{self.host}"
+
+
+@pytest.fixture
+def app(tmp_path, monkeypatch):
+    """An App with two local panes and a presets file of its own."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    for side in ("left", "right"):
+        (tmp_path / side / "sub").mkdir(parents=True)
+        write(str(tmp_path / side / "file.txt"), side)
+    return App(_StubScreen(), str(tmp_path / "left"), str(tmp_path / "right"))
+
+
+def test_home_key_jumps_the_active_pane_home(app, tmp_path, monkeypatch):
+    home = tmp_path / "elsewhere"
+    home.mkdir()
+    monkeypatch.setattr(app.active.fs, "home", lambda: str(home))
+    app.handle_key(ord("~"))
+    assert app.active.path == str(home)
+    assert "Home:" in app.message
+    # The other pane is untouched.
+    assert app.other.path == str(tmp_path / "right")
+
+
+def test_home_key_uses_the_panes_own_filesystem(app, tmp_path):
+    """On a remote pane, '~' means the remote account's home, not the local one."""
+    remote_home = tmp_path / "remote_home"
+    (remote_home / "www").mkdir(parents=True)
+    backend = _FakeRemoteBackend()
+    backend.home = lambda: str(remote_home)
+    assert app.active.set_location(backend, str(tmp_path / "left"))
+    app.handle_key(ord("~"))
+    assert app.active.path == str(remote_home)
+    assert "www" in [e.name for e in app.active.entries]
+
+
+def test_home_key_reports_a_filesystem_that_cannot_say(app, monkeypatch):
+    def unavailable():
+        raise OSError("connection reset")
+
+    monkeypatch.setattr(app.active.fs, "home", unavailable)
+    scripted = _ScriptedDialogs(monkeypatch)
+    before = app.active.path
+    app.handle_key(ord("~"))
+    assert "Cannot determine the home directory" in scripted.last_message
+    assert app.active.path == before
+
+
+def test_home_key_reports_a_home_it_cannot_open(app, tmp_path, monkeypatch):
+    monkeypatch.setattr(app.active.fs, "home", lambda: str(tmp_path / "vanished"))
+    scripted = _ScriptedDialogs(monkeypatch)
+    before = app.active.path
+    app.handle_key(ord("~"))
+    assert "Cannot open home directory" in scripted.last_message
+    assert app.active.path == before
+
+
+def test_mirror_key_gives_both_panes_one_connection(app, tmp_path):
+    app.active.chdir(str(tmp_path / "left" / "sub"))
+    app.handle_key(ord("="))
+    assert app.other.path == app.active.path
+    # The same live backend, not a second connection to the same place: this
+    # is what makes a move between the panes a server-side rename.
+    assert app.other.fs is app.active.fs
+    assert app.active.fs.same_fs(app.other.fs)
+
+
+def test_mirror_key_leaves_the_other_panes_view_settings_alone(app):
+    app.other.show_hidden = True
+    app.other.set_sort("size")
+    app.handle_key(ord("="))
+    assert app.other.show_hidden is True
+    assert app.other.sort_key == "size"
+
+
+def test_mirror_key_declines_when_the_other_pane_is_busy(app, tmp_path):
+    app.other.plugin = object()
+    app.handle_key(ord("="))
+    assert "busy" in app.message
+    assert app.other.path == str(tmp_path / "right")
+
+
+def test_mirror_key_says_when_both_panes_already_match(app):
+    app.handle_key(ord("="))
+    app.handle_key(ord("="))
+    assert "already show this location" in app.message
+
+
+def test_mirror_key_reports_a_location_the_other_pane_cannot_open(app, monkeypatch):
+    monkeypatch.setattr(app.other, "set_location", lambda fs, path: False)
+    scripted = _ScriptedDialogs(monkeypatch)
+    app.handle_key(ord("="))
+    assert "Cannot open in the other pane" in scripted.last_message
+
+
+def test_preset_saved_then_returned_to(app, tmp_path, monkeypatch):
+    target = str(tmp_path / "left" / "sub")
+    app.active.chdir(target)
+    _ScriptedDialogs(monkeypatch, menu=["Save this location"], prompt=["work"])
+    app.handle_key(ord("b"))
+    assert "Preset 'work' saved" in app.message
+    assert [p.name for p in presets.load()] == ["work"]
+
+    # Wander off, then come back through the preset list.
+    app.active.chdir(str(tmp_path / "left"))
+    _ScriptedDialogs(monkeypatch, menu=["work"])
+    app.handle_key(ord("b"))
+    assert app.active.path == target
+
+
+def test_presets_menu_can_be_cancelled(app, monkeypatch):
+    before = app.active.path
+    for answer in ("Cancel", None):
+        _ScriptedDialogs(monkeypatch, menu=[answer])
+        app.handle_key(ord("b"))
+        assert app.active.path == before
+
+
+def test_save_preset_prompt_can_be_cancelled(app, monkeypatch):
+    _ScriptedDialogs(monkeypatch, menu=["Save this location"], prompt=[None])
+    app.handle_key(ord("b"))
+    assert presets.load() == []
+
+
+def test_save_preset_rejects_an_unusable_name(app, monkeypatch):
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Save this location"],
+                                prompt=["[oops]"])
+    app.handle_key(ord("b"))
+    assert "cannot be empty" in scripted.last_message
+    assert presets.load() == []
+
+
+def test_save_preset_replaces_an_existing_name_when_confirmed(app, tmp_path,
+                                                              monkeypatch):
+    _ScriptedDialogs(monkeypatch, menu=["Save this location"], prompt=["spot"])
+    app.handle_key(ord("b"))
+    app.active.chdir(str(tmp_path / "left" / "sub"))
+    _ScriptedDialogs(monkeypatch, menu=["Save this location"], prompt=["spot"],
+                     confirm=[True])
+    app.handle_key(ord("b"))
+    saved = presets.load()
+    assert len(saved) == 1
+    assert saved[0].path == str(tmp_path / "left" / "sub")
+
+
+def test_save_preset_keeps_the_original_when_replace_is_declined(app, tmp_path,
+                                                                 monkeypatch):
+    original = str(tmp_path / "left")
+    _ScriptedDialogs(monkeypatch, menu=["Save this location"], prompt=["spot"])
+    app.handle_key(ord("b"))
+    app.active.chdir(str(tmp_path / "left" / "sub"))
+    _ScriptedDialogs(monkeypatch, menu=["Save this location"], prompt=["spot"],
+                     confirm=[False])
+    app.handle_key(ord("b"))
+    assert [p.path for p in presets.load()] == [original]
+
+
+def test_save_preset_reports_a_write_failure(app, monkeypatch):
+    def read_only(*args, **kwargs):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(presets, "save", read_only)
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Save this location"],
+                                prompt=["work"])
+    app.handle_key(ord("b"))
+    assert "Could not write presets" in scripted.last_message
+
+
+def test_saving_a_remote_preset_notes_that_no_password_is_kept(app, tmp_path,
+                                                               monkeypatch):
+    assert app.active.set_location(_FakeRemoteBackend(), str(tmp_path / "left"))
+    _ScriptedDialogs(monkeypatch, menu=["Save this location"], prompt=["www"])
+    app.handle_key(ord("b"))
+    assert "no password stored" in app.message
+    saved = presets.load()[0]
+    assert (saved.scheme, saved.host, saved.username) == ("sftp", "web1", "deploy")
+    # Nothing resembling a password reached the file.
+    assert "password" not in read(presets.presets_path())
+
+
+def test_opening_a_preset_reuses_a_connection_a_pane_already_holds(app, tmp_path,
+                                                                   monkeypatch):
+    backend = _FakeRemoteBackend()
+    assert app.other.set_location(backend, str(tmp_path / "right"))
+    presets.save([presets.Preset(name="www", scheme="sftp",
+                                 path=str(tmp_path / "right" / "sub"),
+                                 host="web1", username="deploy", port=22)])
+
+    def must_not_dial(info):
+        raise AssertionError("dialled a server the other pane already holds")
+
+    monkeypatch.setattr(app, "_connect", must_not_dial)
+    _ScriptedDialogs(monkeypatch, menu=["www"])
+    app.handle_key(ord("b"))
+    assert app.active.fs is backend
+    assert app.active.path == str(tmp_path / "right" / "sub")
+
+
+def test_opening_a_preset_asks_for_a_password_only_after_keys_fail(app, tmp_path,
+                                                                   monkeypatch):
+    attempts = []
+
+    def flaky(info):
+        attempts.append(dict(info))
+        if not info.get("password"):
+            raise FileSystemError("no authentication methods available")
+        return _FakeRemoteBackend()
+
+    monkeypatch.setattr(app, "_connect", flaky)
+    presets.save([presets.Preset(name="www", scheme="sftp",
+                                 path=str(tmp_path / "right"), host="web1",
+                                 username="deploy", port=22)])
+    scripted = _ScriptedDialogs(monkeypatch, menu=["www"], prompt=["hunter2"])
+    app.handle_key(ord("b"))
+    # The first attempt went out without a password, like ssh itself.
+    assert attempts[0].get("password") is None
+    assert attempts[1]["password"] == "hunter2"
+    assert "Password" in scripted.prompts[0]
+    assert app.active.path == str(tmp_path / "right")
+
+
+def test_opening_a_preset_gives_up_when_no_password_is_offered(app, tmp_path,
+                                                               monkeypatch):
+    def refuses(info):
+        raise FileSystemError("auth failed")
+
+    monkeypatch.setattr(app, "_connect", refuses)
+    presets.save([presets.Preset(name="www", scheme="sftp", path="/srv",
+                                 host="web1", username="deploy", port=22)])
+    before = app.active.path
+    scripted = _ScriptedDialogs(monkeypatch, menu=["www"], prompt=[""])
+    app.handle_key(ord("b"))
+    assert "auth failed" in scripted.last_message
+    assert app.active.path == before
+
+
+def test_opening_a_preset_reports_a_password_that_also_fails(app, tmp_path,
+                                                             monkeypatch):
+    def always_refuses(info):
+        raise FileSystemError("permission denied")
+
+    monkeypatch.setattr(app, "_connect", always_refuses)
+    presets.save([presets.Preset(name="www", scheme="sftp", path="/srv",
+                                 host="web1", username="deploy", port=22)])
+    scripted = _ScriptedDialogs(monkeypatch, menu=["www"], prompt=["wrong"])
+    app.handle_key(ord("b"))
+    assert "permission denied" in scripted.last_message
+
+
+def test_preset_falls_back_to_home_when_the_directory_has_gone(app, tmp_path,
+                                                               monkeypatch):
+    gone = tmp_path / "left" / "sub"
+    app.active.chdir(str(gone))
+    _ScriptedDialogs(monkeypatch, menu=["Save this location"], prompt=["temp"])
+    app.handle_key(ord("b"))
+
+    app.active.chdir(str(tmp_path / "left"))
+    os.rmdir(gone)
+    fallback = tmp_path / "fallback"
+    fallback.mkdir()
+    monkeypatch.setattr(app.active.fs, "home", lambda: str(fallback))
+    _ScriptedDialogs(monkeypatch, menu=["temp"])
+    app.handle_key(ord("b"))
+    assert app.active.path == str(fallback)
+    assert "is gone" in app.message
+
+
+def test_preset_reports_a_location_that_will_not_open_at_all(app, tmp_path,
+                                                             monkeypatch):
+    presets.save([presets.Preset(name="nope", scheme="local",
+                                 path=str(tmp_path / "missing"))])
+    monkeypatch.setattr(app.active, "set_location", lambda fs, path: False)
+    scripted = _ScriptedDialogs(monkeypatch, menu=["nope"])
+    app.handle_key(ord("b"))
+    assert "Cannot open" in scripted.last_message
+
+
+def test_delete_preset_removes_it_after_confirmation(app, monkeypatch):
+    _ScriptedDialogs(monkeypatch, menu=["Save this location"], prompt=["doomed"])
+    app.handle_key(ord("b"))
+    _ScriptedDialogs(monkeypatch, menu=["Delete a preset", "doomed"],
+                     confirm=[True])
+    app.handle_key(ord("b"))
+    assert presets.load() == []
+    assert "'doomed' deleted" in app.message
+
+
+def test_delete_preset_can_be_backed_out_of(app, monkeypatch):
+    _ScriptedDialogs(monkeypatch, menu=["Save this location"], prompt=["keep"])
+    app.handle_key(ord("b"))
+    # Cancelled at the list, then declined at the confirmation.
+    _ScriptedDialogs(monkeypatch, menu=["Delete a preset", "Cancel"])
+    app.handle_key(ord("b"))
+    assert [p.name for p in presets.load()] == ["keep"]
+    _ScriptedDialogs(monkeypatch, menu=["Delete a preset", "keep"],
+                     confirm=[False])
+    app.handle_key(ord("b"))
+    assert [p.name for p in presets.load()] == ["keep"]
+
+
+def test_delete_preset_with_none_saved_says_so(app, monkeypatch):
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Delete a preset"])
+    app.handle_key(ord("b"))
+    assert "No presets saved yet" in scripted.last_message
+
+
+def test_delete_preset_reports_a_write_failure(app, monkeypatch):
+    _ScriptedDialogs(monkeypatch, menu=["Save this location"], prompt=["doomed"])
+    app.handle_key(ord("b"))
+
+    def read_only(*args, **kwargs):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(presets, "save", read_only)
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Delete a preset", "doomed"],
+                                confirm=[True])
+    app.handle_key(ord("b"))
+    assert "Could not write presets" in scripted.last_message
+
+
+def test_connect_builds_the_backend_the_scheme_asks_for(app, monkeypatch):
+    made = []
+
+    def recorder(name):
+        def factory(**kwargs):
+            made.append((name, kwargs))
+            return f"{name}-backend"
+        return factory
+
+    for attr, name in (("SFTPFileSystem", "sftp"), ("SSHFileSystem", "ssh"),
+                       ("FTPFileSystem", "ftp")):
+        monkeypatch.setattr(app_mod, attr, recorder(name))
+
+    assert isinstance(app._connect({"scheme": "local"}), LocalFileSystem)
+    remote = {"scheme": "sftp", "host": "h", "username": "u", "port": 22,
+              "password": "p", "key_filename": None}
+    assert app._connect(remote) == "sftp-backend"
+    assert app._connect(dict(remote, scheme="ssh")) == "ssh-backend"
+    assert app._connect(dict(remote, scheme="ftp")) == "ftp-backend"
+    # An FTP login with no user given is the conventional anonymous one.
+    app._connect({"scheme": "ftp", "host": "h", "username": "", "port": 21})
+    assert made[-1][1]["username"] == "anonymous"
+    assert made[-1][1]["password"] == ""
+
+
+def test_context_menu_offers_home_mirror_and_presets(app, tmp_path, monkeypatch):
+    home = tmp_path / "ctx_home"
+    home.mkdir()
+    monkeypatch.setattr(app.active.fs, "home", lambda: str(home))
+
+    _ScriptedDialogs(monkeypatch, menu=["Home directory"])
+    app._context_menu()
+    assert app.active.path == str(home)
+
+    _ScriptedDialogs(monkeypatch, menu=["Same location in other pane"])
+    app._context_menu()
+    assert app.other.fs is app.active.fs and app.other.path == str(home)
+
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Presets (go to / save)",
+                                                   "Cancel"])
+    app._context_menu()
+    assert scripted.menus[-1][0] == "Presets"
+
+
+# -- dialogs: a menu longer than the screen ------------------------------------
+#
+# These run against a real curses screen of a fixed size.  That is the point:
+# the bug being guarded against was an unhandled curses.error from drawing
+# past the bottom of the window, which only a real window reports.
+
+def _with_curses_screen(rows: int, cols: int, fn):
+    """Run ``fn(stdscr)`` on a real curses screen ``rows`` x ``cols``."""
+    master, slave = pty.openpty()
+    saved_out, saved_in = os.dup(1), os.dup(0)
+    saved_term = os.environ.get("TERM")
+    os.environ["TERM"] = "xterm"
+    os.dup2(slave, 1)
+    os.dup2(slave, 0)
+    started = False
+    try:
+        try:
+            stdscr = curses.initscr()
+        except curses.error as exc:   # a machine with no terminfo database
+            pytest.skip(f"curses screen unavailable: {exc}")
+        started = True
+        curses.resizeterm(rows, cols)
+        return fn(stdscr)
+    finally:
+        if started:
+            curses.endwin()
+        os.dup2(saved_out, 1)
+        os.dup2(saved_in, 0)
+        for fd in (saved_out, saved_in, master, slave):
+            os.close(fd)
+        if saved_term is None:
+            os.environ.pop("TERM", None)
+        else:
+            os.environ["TERM"] = saved_term
+
+
+class _ScriptedWindow:
+    """A real curses window with its keystrokes scripted and draws recorded."""
+
+    def __init__(self, win, keys, fail_draws: bool = False):
+        self._win = win
+        self._keys = list(keys)
+        self._fail_draws = fail_draws
+        self.drawn: list[tuple] = []
+
+    def getch(self):
+        return self._keys.pop(0)
+
+    def addstr(self, *args):
+        self.drawn.append(args)
+        # Only the body rows are refused: the frame and title are drawn by
+        # _box, which bounds its own writes and is not what is under test.
+        if self._fail_draws and args[0] >= 2:
+            raise curses.error("addwstr() returned ERR")
+        return self._win.addstr(*args)
+
+    def __getattr__(self, name):
+        return getattr(self._win, name)
+
+
+def _run_menu(monkeypatch, rows, options, keys, fail_draws=False, title="Presets"):
+    """Drive ``dialogs.menu`` on an ``rows``-high screen; return (choice, draws)."""
+    real_center = dialogs._center
+    captured = {}
+
+    def scripted_center(stdscr, height, width):
+        window = _ScriptedWindow(real_center(stdscr, height, width), keys,
+                                 fail_draws)
+        captured["window"] = window
+        return window
+
+    monkeypatch.setattr(dialogs, "_center", scripted_center)
+    choice = _with_curses_screen(
+        rows, 60, lambda stdscr: dialogs.menu(stdscr, title, options))
+    return choice, captured["window"].drawn
+
+
+def test_menu_scrolls_a_list_taller_than_the_screen(monkeypatch):
+    """A full preset list on a short terminal scrolls instead of overflowing."""
+    options = [f"preset {i}" for i in range(40)]
+    choice, drawn = _run_menu(monkeypatch, 12, options, [curses.KEY_END, 10])
+    assert choice == 39
+    # The last entry scrolled into view, and the counter tracked the cursor.
+    assert any("preset 39" in str(draw) for draw in drawn)
+    assert any(" 40/40 " in str(draw) for draw in drawn)
+
+
+def test_menu_paging_and_wrapping_keys(monkeypatch):
+    options = [f"preset {i}" for i in range(40)]
+    keys = [curses.KEY_NPAGE, curses.KEY_NPAGE, curses.KEY_PPAGE,
+            curses.KEY_HOME, curses.KEY_UP, curses.KEY_DOWN, 10]
+    choice, drawn = _run_menu(monkeypatch, 12, options, keys)
+    # Home returned to the top; Up from there wrapped to the end and Down back.
+    assert choice == 0
+    assert any(" 1/40 " in str(draw) for draw in drawn)
+    assert any(" 40/40 " in str(draw) for draw in drawn)
+
+
+def test_menu_on_a_short_list_needs_no_counter(monkeypatch):
+    choice, drawn = _run_menu(monkeypatch, 24, ["alpha", "beta"],
+                              [ord("j"), ord("k"), ord("j"), 10])
+    assert choice == 1
+    assert not any("/2 " in str(draw) for draw in drawn)
+
+
+def test_menu_escape_chooses_nothing(monkeypatch):
+    choice, _ = _run_menu(monkeypatch, 24, ["alpha", "beta"], [27])
+    assert choice is None
+
+
+def test_menu_survives_a_window_that_refuses_to_draw(monkeypatch):
+    """A refused write (a resize race, say) must not take the menu down."""
+    options = [f"preset {i}" for i in range(40)]
+    choice, drawn = _run_menu(monkeypatch, 12, options, [curses.KEY_DOWN, 10],
+                              fail_draws=True)
+    assert choice == 1
+    assert drawn                      # it did keep trying to draw
+
+
+# -- presets file: damaged and hand-edited files -------------------------------
+
+def test_preset_load_survives_a_damaged_file(tmp_path):
+    """A hand-edited file that no longer parses yields no presets, not a crash."""
+    path = tmp_path / "presets.ini"
+    path.write_text("this is not an ini file\n[unclosed\n")
+    assert presets.load(str(path)) == []
+
+
+def test_preset_load_ignores_a_nonsense_port(tmp_path):
+    path = tmp_path / "presets.ini"
+    path.write_text("[www]\nscheme = sftp\nhost = web1\nport = not-a-number\n")
+    loaded = presets.load(str(path))
+    assert len(loaded) == 1
+    assert loaded[0].port == 0
+    # A zero port means "the scheme's default" when connecting.
+    assert loaded[0].connect_info()["port"] == 22
+
+
+def test_open_location_connects_and_lands_on_the_remote_home(app, tmp_path,
+                                                             monkeypatch):
+    remote_home = tmp_path / "remote"
+    (remote_home / "www").mkdir(parents=True)
+    backend = _FakeRemoteBackend()
+    backend.home = lambda: str(remote_home)
+    info = {"scheme": "sftp", "host": "web1", "username": "deploy",
+            "port": 22, "key_filename": None}
+    monkeypatch.setattr(dialogs, "connect_dialog", lambda stdscr: info)
+    monkeypatch.setattr(app, "_connect", lambda given: backend)
+
+    app.handle_key(ord("o"))
+    assert app.active.fs is backend
+    assert app.active.path == str(remote_home)
+    assert "Connected" in app.message
+
+
+def test_open_location_can_be_cancelled(app, monkeypatch):
+    before = app.active.fs
+    monkeypatch.setattr(dialogs, "connect_dialog", lambda stdscr: None)
+    app.handle_key(ord("o"))
+    assert app.active.fs is before
+
+
+def test_open_location_reports_a_refused_connection(app, monkeypatch):
+    monkeypatch.setattr(dialogs, "connect_dialog",
+                        lambda stdscr: {"scheme": "sftp", "host": "web1",
+                                        "username": "deploy", "port": 22})
+    scripted = _ScriptedDialogs(monkeypatch)
+
+    def refused(info):
+        raise FileSystemError("connection refused")
+
+    monkeypatch.setattr(app, "_connect", refused)
+    app.handle_key(ord("o"))
+    assert "connection refused" in scripted.last_message
+
+    # An unexpected error is reported with its type rather than escaping.
+    def broken(info):
+        raise ValueError("port must be an integer")
+
+    monkeypatch.setattr(app, "_connect", broken)
+    app.handle_key(ord("o"))
+    assert "ValueError: port must be an integer" in scripted.last_message

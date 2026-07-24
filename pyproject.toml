@@ -53,7 +53,7 @@ sftp = ["paramiko>=2.7"]        # kept as an alias of "ssh"
 # alone; pandas only accelerates group-by aggregation on large files when
 # present. Everything degrades gracefully without it.
 data = ["pandas>=1.3"]
-dev = ["paramiko>=2.7", "pytest>=7.0", "build", "twine"]
+dev = ["paramiko>=2.7", "pytest>=7.0", "coverage>=6.0", "build", "twine"]
 
 [project.scripts]
 meridian-commander = "meridian_commander.app:main"
@@ -66,3 +66,17 @@ Issues = "https://github.com/MartinGallagher-code/meridian_commander/issues"
 
 [tool.setuptools]
 packages = ["meridian_commander", "meridian_commander.plugins"]
+
+[tool.coverage.run]
+source = ["meridian_commander"]
+
+[tool.coverage.report]
+precision = 1
+show_missing = true
+# A ratchet, not a target. It exists so coverage cannot quietly slide
+# backwards; raise it as more of the curses layer comes under test. The
+# number is deliberately a little below the current total so an unrelated
+# change does not fail CI over a rounding difference.
+fail_under = 48
+# No exclusions on purpose: an honest number is more useful than a flattering
+# one, and "# pragma: no cover" is still available where it is truly wanted.

@@ -24,3 +24,8 @@ htmlcov/
 .vscode/
 *.swp
 .DS_Store
+
+# Coverage
+.coverage
+coverage.json
+htmlcov/

@@ -28,7 +28,11 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[dev]"
       - name: Run tests
-        run: pytest -q
+        run: python -m coverage run -m pytest -q
+      - name: Coverage
+        # Prints the per-module table and fails if the total drops below the
+        # ratchet in pyproject.toml.
+        run: python -m coverage report
 
   build:
     needs: test
