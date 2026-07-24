@@ -184,14 +184,17 @@ class TerminalPlugin(PanePlugin):
 
         shell = os.environ.get("SHELL", "/bin/sh")
         pid, fd = pty.fork()
-        if pid == 0:  # child
+        # pragma: no cover -- this branch runs only in the forked child, which
+        # replaces its own process image with the shell a few lines later, so
+        # no in-process coverage tracer can ever observe it.
+        if pid == 0:  # child  # pragma: no cover
             try:
                 os.chdir(path)
             except OSError:
                 pass
             os.environ["TERM"] = "vt100"
             os.execvp(shell, [shell])
-            os._exit(127)  # pragma: no cover
+            os._exit(127)
         self._pid = pid
         self._fd = fd
         flags = fcntl.fcntl(fd, fcntl.F_GETFL)
