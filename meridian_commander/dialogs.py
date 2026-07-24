@@ -134,22 +134,49 @@ def prompt(stdscr, title: str, label: str, default: str = "",
 
 
 def menu(stdscr, title: str, options: list[str]) -> int | None:
-    """Vertical single-choice menu.  Returns the selected index or None."""
+    """Vertical single-choice menu.  Returns the selected index or None.
+
+    A list too long for the screen (a well stocked preset list on a short
+    terminal) scrolls instead of overflowing the window.
+    """
     width = max(len(title) + 4, max((len(o) for o in options), default=0) + 6, 30)
-    height = len(options) + 4
-    win = _center(stdscr, height, width)
+    win = _center(stdscr, len(options) + 4, width)
+    win_h, win_w = win.getmaxyx()
+    body = max(1, win_h - 4)     # rows available for options
     idx = 0
+    top = 0
     while True:
+        # Keep the cursor inside the visible window.
+        top = max(min(top, idx), idx - body + 1, 0)
         _box(win, title)
-        for i, opt in enumerate(options):
+        for row in range(min(body, len(options) - top)):
+            i = top + row
             attr = curses.A_REVERSE if i == idx else curses.A_NORMAL
-            win.addstr(2 + i, 2, f" {opt} ".ljust(width - 4)[: width - 4], attr)
+            text = f" {options[i]} ".ljust(win_w - 4)[: win_w - 4]
+            try:
+                win.addstr(2 + row, 2, text, attr)
+            except curses.error:
+                pass
+        if len(options) > body:
+            try:
+                win.addstr(win_h - 1, 2, f" {idx + 1}/{len(options)} ",
+                           curses.A_DIM)
+            except curses.error:
+                pass
         win.refresh()
         k = win.getch()
         if k in (curses.KEY_UP, ord("k")):
             idx = (idx - 1) % len(options)
         elif k in (curses.KEY_DOWN, ord("j")):
             idx = (idx + 1) % len(options)
+        elif k == curses.KEY_PPAGE:
+            idx = max(0, idx - body)
+        elif k == curses.KEY_NPAGE:
+            idx = min(len(options) - 1, idx + body)
+        elif k == curses.KEY_HOME:
+            idx = 0
+        elif k == curses.KEY_END:
+            idx = len(options) - 1
         elif k in (10, 13, curses.KEY_ENTER):
             return idx
         elif k == 27:

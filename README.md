@@ -34,6 +34,9 @@ and ships with a built-in file viewer and editor.
   (the *remote* account's home on a remote pane), and `=` points the **other
   pane at this pane's directory and connection**, reusing the same live session
   so a remote location is never dialled — or authenticated — twice.
+- **Presets** (`b`) — save the places you keep coming back to, local or remote,
+  and reopen one from a list. A preset stores the connection *and* the
+  directory (never a password) and reuses a connection that is already open.
 - **Local and networked locations** — each pane can point at the local disk, an
   **SFTP** server, an **SSH (shell)** host, or an **FTP** server. Press `F2` to
   open a location. The **SSH (shell)** mode lists and transfers files by running
@@ -172,6 +175,37 @@ cannot be prompted mid-connection).
 Once connected, that pane behaves exactly like a local one — navigate, view,
 edit, and copy/move/sync to and from it.
 
+### Presets — saved locations
+
+Press **`b`** for the preset list. It shows every saved location and offers
+**Save this location as a preset…** and **Delete a preset…**.
+
+A preset remembers a pane's *connection and directory*, so a place you visit
+often is two keystrokes away instead of a trip through the connect dialog.
+Choosing one points the active pane at it; combine with `=` to bring the other
+pane along.
+
+- Opening a preset **reuses a connection that is already open** in either pane,
+  so a saved remote location appears instantly and without authenticating a
+  second time.
+- **Passwords are never saved.** A remote preset reconnects the way `ssh`
+  would — your agent, `~/.ssh/config` and default keys — and you are asked for
+  a password only if that fails.
+- If a preset's directory has since disappeared, the pane opens that location's
+  home directory instead of going nowhere.
+
+Presets live in `~/.config/meridian-commander/presets.ini` (one section each,
+`$XDG_CONFIG_HOME` honoured), which is plain text and safe to edit by hand:
+
+```ini
+[www]
+scheme = sftp
+host = web1
+username = deploy
+port = 22
+path = /srv/www
+```
+
 ### Key bindings
 
 | Key | Action | Key | Action |
@@ -188,6 +222,7 @@ edit, and copy/move/sync to and from it.
 | `Ctrl-R` | reload panes | `F10` | quit |
 | `Ctrl-G` | go to path | `Ctrl-T` | change sort order |
 | `~` | home directory (this pane) | `=` | other pane: same location |
+| `b` | presets: saved locations | | |
 | `.` | show/hide hidden files | `t` | terminal inside this pane |
 | `p` / F11 | plug-in mode (this pane) | `!` | full-screen shell |
 | `f` | find files (browsable results) | | |
@@ -309,6 +344,11 @@ Press **`C`** for the configuration menu:
   `~/.config/meridian-commander/plugins/` so you can manage plug-ins like any
   other files.
 
+Saved locations are kept separately, in
+`~/.config/meridian-commander/presets.ini` — see
+[Presets](#presets--saved-locations). They are written by the app (`b`) rather
+than by hand, which is why they are not part of `config.ini`.
+
 ## How synchronization works
 
 `F9` builds a plan by walking both panes' directory trees:
@@ -340,6 +380,7 @@ the sync engine are written once and work across any pair of backends.
 | `plugin_api.py` | pane plug-in API (`PanePlugin`, `InputOutputPlugin`, context) |
 | `plugins/` | plug-in discovery + built-in plug-ins |
 | `config.py` | `config.ini` handling (per-plug-in sections, plug-in dirs) |
+| `presets.py` | saved locations: `presets.ini` load/save, live-connection reuse |
 | `panel.py` | one pane's listing, cursor, selection, sorting |
 | `viewer.py` / `editor.py` | file viewer and editor |
 | `dialogs.py` | prompts, menus, confirmations, progress bars |

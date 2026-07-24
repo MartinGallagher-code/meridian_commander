@@ -21,6 +21,7 @@ from meridian_commander.filesystems import (
     _resolve_ssh_connection,
     _split_user_host,
 )
+from meridian_commander import presets
 from meridian_commander.operations import copy_path, count_tree, move_path
 from meridian_commander.panel import Panel
 from meridian_commander.sync import build_sync_plan, execute_sync_plan
@@ -268,6 +269,102 @@ def test_panel_set_location_rolls_back_on_failure(fs, tmp_path):
     assert panel.fs is fs
     assert panel.path == str(tmp_path / "here")
     assert "a.txt" in [e.name for e in panel.entries]
+
+
+class _FakeRemoteFS:
+    """Stands in for a live SFTP backend in preset matching/serialisation."""
+
+    scheme = "sftp"
+
+    def __init__(self, host="web1", username="deploy", port=22):
+        self.host = host
+        self.typed_username = username
+        self.port = port
+
+
+def test_preset_label_and_connect_info():
+    local = presets.Preset(name="etc", scheme="local", path="/etc")
+    assert local.label() == "local:/etc"
+    remote = presets.Preset(name="www", scheme="sftp", path="/srv/www",
+                            host="web1", username="deploy", port=22)
+    # The default port is left out; a custom one is shown.
+    assert remote.label() == "sftp://deploy@web1:/srv/www"
+    assert remote.connect_info() == {
+        "scheme": "sftp", "host": "web1", "username": "deploy",
+        "port": 22, "key_filename": None,
+    }
+    odd = presets.Preset(name="w", scheme="sftp", path="/", host="h", port=2222)
+    assert odd.label() == "sftp://h:2222:/"
+
+
+def test_preset_round_trip(tmp_path):
+    path = str(tmp_path / "presets.ini")
+    items = [
+        presets.Preset(name="etc", scheme="local", path="/etc"),
+        presets.Preset(name="www", scheme="sftp", path="/srv/www",
+                       host="web1", username="deploy", port=22),
+    ]
+    presets.save(items, path)
+    loaded = presets.load(path)
+    assert loaded == items
+    # No password field is ever written.
+    with open(path) as f:
+        assert "password" not in f.read()
+
+
+def test_preset_load_missing_file_is_empty(tmp_path):
+    assert presets.load(str(tmp_path / "nothing.ini")) == []
+
+
+def test_preset_add_replaces_in_place_and_remove():
+    a = presets.Preset(name="a", path="/a")
+    b = presets.Preset(name="b", path="/b")
+    items = [a, b]
+    updated = presets.add(presets.Preset(name="a", path="/moved"), items)
+    assert [p.name for p in updated] == ["a", "b"]      # keeps its position
+    assert updated[0].path == "/moved"
+    added = presets.add(presets.Preset(name="c", path="/c"), items)
+    assert [p.name for p in added] == ["a", "b", "c"]
+    assert [p.name for p in presets.remove("a", items)] == ["b"]
+
+
+def test_preset_valid_name():
+    assert presets.valid_name("www")
+    assert not presets.valid_name("")
+    assert not presets.valid_name("   ")
+    assert not presets.valid_name("DEFAULT")
+    assert not presets.valid_name("with [brackets]")
+
+
+def test_preset_matches_live_connection(fs):
+    local = presets.Preset(name="etc", scheme="local", path="/etc")
+    assert local.matches(fs)
+    assert not local.matches(_FakeRemoteFS())
+
+    remote = presets.Preset(name="www", scheme="sftp", path="/srv/www",
+                            host="web1", username="deploy", port=22)
+    assert remote.matches(_FakeRemoteFS())
+    assert not remote.matches(_FakeRemoteFS(host="other"))
+    assert not remote.matches(_FakeRemoteFS(username="root"))
+    assert not remote.matches(_FakeRemoteFS(port=2222))
+    assert not remote.matches(fs)
+
+
+def test_preset_from_location(fs, tmp_path):
+    local = presets.from_location("here", fs, str(tmp_path))
+    assert local == presets.Preset(name="here", scheme="local",
+                                   path=str(tmp_path))
+    remote = presets.from_location("www", _FakeRemoteFS(), "/srv/www")
+    assert remote.host == "web1" and remote.username == "deploy"
+    assert remote.scheme == "sftp" and remote.port == 22
+    # A preset built from a live connection matches that connection again.
+    assert remote.matches(_FakeRemoteFS())
+
+
+def test_presets_path_follows_xdg_config_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert presets.presets_path() == str(
+        tmp_path / "meridian-commander" / "presets.ini")
 
 
 def test_ftp_list_parser_unix():
