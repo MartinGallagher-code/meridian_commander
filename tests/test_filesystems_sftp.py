@@ -691,3 +691,30 @@ def test_a_failed_connection_tears_down_the_jump_chain(monkeypatch, tmp_path):
         real_open("web", None, None, None, config_path=config)
     # The tunnel is useless without the target, so it is closed too.
     assert gateway.closed is True
+
+
+def test_a_system_with_no_resolvable_user_falls_back_to_root(tmp_path,
+                                                             monkeypatch):
+    """Containers with no passwd entry make getuser() raise."""
+
+    def no_user():
+        raise KeyError("no matching passwd entry")
+
+    monkeypatch.setattr("getpass.getuser", no_user)
+    res = _resolve_ssh_connection("web1", config_path=str(tmp_path / "absent"))
+    assert res["username"] == "root"
+
+
+def test_connecting_without_paramiko_explains_what_to_install(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_paramiko(name, *args, **kwargs):
+        if name == "paramiko":
+            raise ImportError("No module named 'paramiko'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_paramiko)
+    with pytest.raises(FileSystemError, match="pip install paramiko"):
+        _open_ssh_client("web1", "deploy", None, 22)

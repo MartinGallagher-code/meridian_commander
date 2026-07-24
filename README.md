@@ -413,16 +413,29 @@ pytest
 coverage run -m pytest && coverage report
 ```
 
-The test suite covers the filesystem-agnostic core (copy, move, sync, panel
-logic) using the local backend and temporary directories, the key handlers for
-navigation and presets against a stubbed screen, and the dialog menu against a
-real curses screen on a pseudo-terminal.
+**Coverage is 100%, and CI fails if it drops.** Every statement in the package
+is executed by the suite; `fail_under = 100` in `pyproject.toml` enforces it.
+There are no `exclude_lines` rules and exactly one `# pragma: no cover` in the
+tree — the forked child of `pty.fork()`, which `exec`s into the shell before
+any in-process tracer could record it.
 
-Coverage is reported in CI. `fail_under` in `pyproject.toml` is a ratchet
-rather than a target: it stops the total sliding backwards, and is meant to be
-raised as more of the curses layer comes under test. The bulk of what is not
-yet covered is drawing code in `app.py`, `dialogs.py`, `viewer.py` and
-`editor.py`.
+How the awkward parts are reached:
+
+- **Filesystem logic** (copy, move, sync, panel behaviour) runs against the
+  local backend in temporary directories.
+- **Drawing and key loops** — panes, dialogs, the viewer, the editor, the
+  find browser, the in-pane terminal — run against a *real* curses screen on a
+  pseudo-terminal, with only the keystrokes scripted. Overflow errors are only
+  reported by a real window, so a stand-in would not catch a regression.
+- **Remote backends** (SFTP, SSH-shell, FTP) run against paramiko- and
+  ftplib-shaped stand-ins, so the full fallback chains — `cat`/`dd`/scp,
+  `MLSD`/`LIST`, ProxyJump tunnels — are exercised without a network.
+- **The local terminal** really forks a shell on a real pty.
+
+`tests/support.py` holds the shared harness and `tests/conftest.py` the
+fixtures; the guiding rule is that only the terminal and the blocking dialogs
+are ever replaced, so assertions are about what the application did rather
+than which mock it called.
 
 ## License
 

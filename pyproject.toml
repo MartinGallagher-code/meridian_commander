@@ -76,10 +76,8 @@ source = ["meridian_commander"]
 [tool.coverage.report]
 precision = 1
 show_missing = true
-# A ratchet, not a target. It exists so coverage cannot quietly slide
-# backwards; raise it as more of the curses layer comes under test. The
-# number is deliberately a little below the current total so an unrelated
-# change does not fail CI over a rounding difference.
-fail_under = 48
-# No exclusions on purpose: an honest number is more useful than a flattering
-# one, and "# pragma: no cover" is still available where it is truly wanted.
+# The suite covers every statement and CI fails if that stops being true.
+# There are no exclude_lines rules and exactly one "# pragma: no cover" in the
+# tree -- the forked child of pty.fork(), which execs into the shell before any
+# in-process tracer could record it -- so this number is the honest one.
+fail_under = 100

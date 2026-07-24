@@ -310,3 +310,68 @@ def test_ctrl_c_can_be_declined(loop_app, monkeypatch):
     app, _ = loop_app([KeyboardInterrupt(), ord("q")])
     app.run()
     assert app.running is False
+
+
+class _RefusingScreen(_StubScreen):
+    """A screen that refuses every write, as a full terminal does at its edge."""
+
+    def erase(self):
+        pass
+
+    def addstr(self, *args, **kwargs):
+        raise curses.error("addwstr() returned ERR")
+
+    def addch(self, *args, **kwargs):
+        raise curses.error("addch() returned ERR")
+
+    def attrset(self, *args):
+        pass
+
+    def noutrefresh(self):
+        pass
+
+
+def test_drawing_survives_a_screen_that_refuses_every_write(panes, monkeypatch):
+    """Every write in the main draw is guarded; none may escape."""
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    monkeypatch.setattr(curses, "ACS_VLINE",
+                        getattr(curses, "ACS_VLINE", ord("|")), raising=False)
+    monkeypatch.setattr(curses, "has_colors", lambda: False)
+
+    class _Plugin:
+        def draw(self, stdscr, y, x, h, w):
+            raise RuntimeError("and the error report cannot be drawn either")
+
+    app = App(_RefusingScreen(), str(panes / "left"), str(panes / "right"))
+    app.left.plugin = _Plugin()
+    app.left.error = "unreadable"
+    app.right.selected = {"readme.txt"}
+    app.draw()                                # must not raise
+
+
+def test_the_function_bar_stops_at_the_screen_edge(panes, monkeypatch):
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    monkeypatch.setattr(curses, "ACS_VLINE",
+                        getattr(curses, "ACS_VLINE", ord("|")), raising=False)
+    monkeypatch.setattr(curses, "has_colors", lambda: False)
+
+    drawn = []
+
+    class _Recording(_StubScreen):
+        def addstr(self, y, x, text, *args):
+            drawn.append((y, x, text))
+
+    screen = _Recording(24, 80)
+    app = App(screen, str(panes / "left"), str(panes / "right"))
+    # Narrower than the ten function keys: the loop stops instead of wrapping.
+    app._draw_function_bar(23, 5)
+    assert drawn
+    # Five of the ten keys fit; the loop stops rather than wrapping around.
+    assert len(drawn) == 10
+
+
+def test_activating_nothing_does_nothing(panes, monkeypatch):
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    app = App(_StubScreen(), str(panes / "left"), str(panes / "right"))
+    app.left.entries = []
+    app._activate_entry()                     # must not raise

@@ -158,21 +158,29 @@ def test_a_copy_cancelled_mid_flight_says_so(app, tmp_path, monkeypatch,
     assert "Copy cancelled" in app.message
 
 
-def test_a_copy_cancelled_from_the_progress_window(app, tmp_path, monkeypatch,
-                                                   _quiet_progress):
+def test_a_copy_cancelled_between_items(app, tmp_path, monkeypatch,
+                                        _quiet_progress):
+    """Cancelling between two items stops before the second is started."""
     _files(app, tmp_path, a="one", b="two")
     app.left.selected = {"a", "b"}
     _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+
+    copied = []
+    # A copy that ignores the cancel callback, so the only place the run can
+    # stop is the check at the top of the loop.
+    monkeypatch.setattr(app_mod, "copy_path",
+                        lambda *a, **k: copied.append(a[1]))
 
     real_factory = dialogs.ProgressDialog
 
     def cancelling(stdscr, title):
         dlg = real_factory(stdscr, title)
-        dlg.cancel_after = 1
+        dlg.cancel_after = 0
         return dlg
 
     monkeypatch.setattr(dialogs, "ProgressDialog", cancelling)
     app._copy()
+    assert len(copied) == 1
     assert "Copy cancelled" in app.message
 
 
