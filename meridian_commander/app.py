@@ -18,6 +18,8 @@ Key bindings (also shown in the F1 help screen)::
     Ctrl-R         reload both panes           F10  quit
     Ctrl-G         go to path
     Ctrl-T         change sort order
+    ~              home directory (this pane)
+    =              other pane: same location as this one
 """
 
 from __future__ import annotations
@@ -337,6 +339,10 @@ class App:
             self._set_message("Reloaded")
         elif key == 7:  # Ctrl-G go to path
             self._go_to_path()
+        elif key == ord("~"):  # home directory of this pane's filesystem
+            self._go_home()
+        elif key == ord("="):  # other pane: same location as this one
+            self._mirror_to_other_pane()
         elif key == 20:  # Ctrl-T sort
             self._sort_menu()
         elif key == ord("."):  # toggle hidden files in the active pane
@@ -629,10 +635,12 @@ class App:
 
         labels = ["View", "Edit", "Copy to other pane", "Move to other pane",
                   "Rename", "Delete", "Tag / untag", "New directory",
+                  "Home directory", "Same location in other pane",
                   "Find files here", "Terminal in this pane",
                   "Full-screen shell", "Cancel"]
         actions = ["view", "edit", "copy", "move", "rename", "delete",
-                   "tag", "mkdir", "find", "terminal", "shell", None]
+                   "tag", "mkdir", "home", "mirror", "find", "terminal",
+                   "shell", None]
         choice = dialogs.menu(self.stdscr, header[:40], labels)
         if choice is None:
             return
@@ -653,6 +661,10 @@ class App:
             panel.toggle_select()
         elif action == "mkdir":
             self._mkdir()
+        elif action == "home":
+            self._go_home()
+        elif action == "mirror":
+            self._mirror_to_other_pane()
         elif action == "find":
             self._find_files()
         elif action == "terminal":
@@ -730,6 +742,50 @@ class App:
         if not panel.chdir(target):
             dialogs.message(self.stdscr, "Error",
                             f"Cannot open:\n{target}", error=True)
+
+    def _go_home(self) -> None:
+        """Jump the active pane to its own filesystem's home directory.
+
+        On a remote pane that is the remote account's home, so the key means
+        the same thing wherever the pane happens to be pointing.
+        """
+        panel = self.active
+        try:
+            home = panel.fs.home()
+        except Exception as exc:
+            dialogs.message(self.stdscr, "Error",
+                            f"Cannot determine the home directory:\n{exc}",
+                            error=True)
+            return
+        if panel.chdir(home):
+            self._set_message(f"Home: {panel.fs.label()}:{panel.path}")
+        else:
+            dialogs.message(self.stdscr, "Error",
+                            f"Cannot open home directory:\n{home}", error=True)
+
+    def _mirror_to_other_pane(self) -> None:
+        """Show this pane's location in the other pane as well.
+
+        The panes then share one live connection, so a remote location is not
+        dialled (or authenticated) a second time and a move between the two
+        panes is a cheap same-server rename.  The other pane's own view
+        settings (sort order, hidden files) are left alone.
+        """
+        panel = self.active
+        other = self.other
+        if other.plugin is not None:
+            self._set_message("Other pane is busy -- close its plug-in "
+                              "or terminal first")
+            return
+        if other.fs is panel.fs and other.path == panel.path:
+            self._set_message("Both panes already show this location")
+            return
+        if not other.set_location(panel.fs, panel.path):
+            dialogs.message(self.stdscr, "Error",
+                            f"Cannot open in the other pane:\n{panel.path}",
+                            error=True)
+            return
+        self._set_message(f"Other pane: {other.fs.label()}:{other.path}")
 
     def _sort_menu(self) -> None:
         options = ["Name", "Extension", "Size", "Modify time"]
@@ -1027,6 +1083,8 @@ class App:
             "  Insert / Space tag file    +/-  tag all / untag all\n"
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
             "  Ctrl-G         go to path   Ctrl-T  sort order\n"
+            "  ~              home directory of this pane's location\n"
+            "  =              other pane: same directory and connection\n"
             "  .              show/hide hidden files (this pane)\n"
             "  t              terminal in this pane (Ctrl-] switch, F10 close)\n"
             "  !              full-screen shell (for vim/htop etc.)\n"

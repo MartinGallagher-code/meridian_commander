@@ -30,6 +30,10 @@ and ships with a built-in file viewer and editor.
 
 - **Two independent panes** — browse two locations side by side, `Tab` between
   them, and swap them with `Ctrl-U`.
+- **Home and mirror shortcuts** — `~` jumps a pane to its own home directory
+  (the *remote* account's home on a remote pane), and `=` points the **other
+  pane at this pane's directory and connection**, reusing the same live session
+  so a remote location is never dialled — or authenticated — twice.
 - **Local and networked locations** — each pane can point at the local disk, an
   **SFTP** server, an **SSH (shell)** host, or an **FTP** server. Press `F2` to
   open a location. The **SSH (shell)** mode lists and transfers files by running
@@ -183,6 +187,7 @@ edit, and copy/move/sync to and from it.
 | `Ctrl-U` | swap panes | `F9` | synchronize panes |
 | `Ctrl-R` | reload panes | `F10` | quit |
 | `Ctrl-G` | go to path | `Ctrl-T` | change sort order |
+| `~` | home directory (this pane) | `=` | other pane: same location |
 | `.` | show/hide hidden files | `t` | terminal inside this pane |
 | `p` / F11 | plug-in mode (this pane) | `!` | full-screen shell |
 | `f` | find files (browsable results) | | |

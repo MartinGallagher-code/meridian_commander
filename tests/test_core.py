@@ -230,6 +230,46 @@ def test_panel_hidden_toggle(fs, tmp_path):
     assert ".secret" in [e.name for e in panel.entries]
 
 
+def test_panel_go_home(fs, tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    os.makedirs(str(home / "deep" / "deeper"), exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    panel = Panel(fs, str(home / "deep" / "deeper"))
+    assert panel.go_home() is True
+    assert panel.path == str(home)
+    assert "deep" in [e.name for e in panel.entries]
+
+
+def test_panel_set_location_switches_filesystem(fs, tmp_path):
+    write(str(tmp_path / "here" / "a.txt"), "a")
+    write(str(tmp_path / "there" / "b.txt"), "b")
+    panel = Panel(fs, str(tmp_path / "here"))
+    panel.selected.add("a.txt")
+
+    # A second backend instance stands in for "the other pane's connection".
+    other_fs = LocalFileSystem()
+    assert panel.set_location(other_fs, str(tmp_path / "there")) is True
+    assert panel.fs is other_fs
+    assert panel.path == str(tmp_path / "there")
+    assert "b.txt" in [e.name for e in panel.entries]
+    # View state is reset for the new location.
+    assert panel.selected == set()
+    assert panel.cursor == 0 and panel.top == 0
+    # Sharing one backend makes a move between the panes a rename.
+    assert other_fs.same_fs(other_fs)
+
+
+def test_panel_set_location_rolls_back_on_failure(fs, tmp_path):
+    write(str(tmp_path / "here" / "a.txt"), "a")
+    panel = Panel(fs, str(tmp_path / "here"))
+    other_fs = LocalFileSystem()
+    assert panel.set_location(other_fs, str(tmp_path / "nope")) is False
+    # Still on the original filesystem and directory, still listable.
+    assert panel.fs is fs
+    assert panel.path == str(tmp_path / "here")
+    assert "a.txt" in [e.name for e in panel.entries]
+
+
 def test_ftp_list_parser_unix():
     # Servers that answer MLSD with "500 Unknown command" fall back to LIST;
     # verify the ls -l parser handles the common shapes.
