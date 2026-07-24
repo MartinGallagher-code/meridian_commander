@@ -74,6 +74,13 @@ class _FtpLike(_RemoteLike, FTPFileSystem):
         return f"ftp://{self.username}@{self.host}"
 
 
+#: Wheel buttons are absent from some curses builds (Python 3.9 has no
+#: BUTTON5_PRESSED). The app reads them with getattr at call time, so pinning
+#: them here makes the wheel behave the same way on every build.
+_WHEEL_UP = 0x08000000
+_WHEEL_DOWN = 0x10000000
+
+
 @pytest.fixture(autouse=True)
 def _quiet_screen(monkeypatch):
     monkeypatch.setattr(curses, "doupdate", lambda: None)
@@ -81,6 +88,8 @@ def _quiet_screen(monkeypatch):
     monkeypatch.setattr(curses, "ACS_VLINE",
                         getattr(curses, "ACS_VLINE", ord("|")), raising=False)
     monkeypatch.setattr(curses, "has_colors", lambda: False)
+    monkeypatch.setattr(curses, "BUTTON4_PRESSED", _WHEEL_UP, raising=False)
+    monkeypatch.setattr(curses, "BUTTON5_PRESSED", _WHEEL_DOWN, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -781,10 +790,10 @@ def test_a_right_click_on_the_header_still_opens_the_menu(boxed, monkeypatch):
 
 def test_the_wheel_scrolls_a_pane(boxed, monkeypatch):
     boxed.left.move_to(5)
-    _mouse(monkeypatch, 5, 5, curses.BUTTON5_PRESSED)
+    _mouse(monkeypatch, 5, 5, _WHEEL_DOWN)
     boxed.handle_key(curses.KEY_MOUSE)
     assert boxed.left.cursor == min(8, len(boxed.left.entries) - 1)
-    _mouse(monkeypatch, 5, 5, curses.BUTTON4_PRESSED)
+    _mouse(monkeypatch, 5, 5, _WHEEL_UP)
     boxed.handle_key(curses.KEY_MOUSE)
     assert boxed.left.cursor < 8
 
@@ -794,9 +803,9 @@ def test_the_wheel_scrolls_a_plugins_output(boxed, monkeypatch):
     boxed.left.plugin = plugin
     # A plug-in owning the active pane consumes KEY_MOUSE itself, so the
     # mouse handler is what turns a wheel event into a scroll.
-    _mouse(monkeypatch, 5, 5, curses.BUTTON4_PRESSED)
+    _mouse(monkeypatch, 5, 5, _WHEEL_UP)
     boxed._handle_mouse()
-    _mouse(monkeypatch, 5, 5, curses.BUTTON5_PRESSED)
+    _mouse(monkeypatch, 5, 5, _WHEEL_DOWN)
     boxed._handle_mouse()
     assert plugin.keys == [curses.KEY_PPAGE, curses.KEY_NPAGE]
 
@@ -814,7 +823,7 @@ def test_a_plugin_that_fails_to_scroll_is_ignored(boxed, monkeypatch):
     plugin = _Plugin(None)
     plugin.answer = RuntimeError("scroll failed")
     boxed.left.plugin = plugin
-    _mouse(monkeypatch, 5, 5, curses.BUTTON4_PRESSED)
+    _mouse(monkeypatch, 5, 5, _WHEEL_UP)
     boxed._handle_mouse()                   # must not raise
 
 
