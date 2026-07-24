@@ -818,6 +818,9 @@ def test_plugin_discovery_finds_builtins():
     assert "Find in other pane" in names
     assert "JSON push" in names
     assert "Run remote script" in names
+    assert "Profile table" in names
+    assert "Clean table" in names
+    assert "Build dataset" in names
     assert not errors
 
 
@@ -925,3 +928,177 @@ def test_panel_selection(fs, tmp_path):
     assert "one" in panel.selected and "two" in panel.selected
     panel.clear_selection()
     assert not panel.selected
+
+
+# -- data plugins (Profile / Clean / Build table) ---------------------------
+def _data_ctx(fs, directory, selected, monkeypatch):
+    """A plugin context whose *other* pane holds the tagged data files."""
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(directory / "_cfg"))
+    panel = Panel(fs, str(directory))
+    panel.selected = set(selected)
+    return SimpleNamespace(
+        other_fs=fs, other_path=str(directory), other_panel=panel,
+        other_selected=panel.selected_entries, refresh_other=panel.refresh)
+
+
+def test_tabular_read_write_roundtrip(fs, tmp_path):
+    from meridian_commander.plugins import _tabular as tabular
+
+    write(str(tmp_path / "t.csv"), "a,b\n1,x\n2,y\n")
+    table = tabular.read_table(fs, str(tmp_path / "t.csv"))
+    assert table.header == ["a", "b"]
+    assert table.rows == [["1", "x"], ["2", "y"]]
+    assert table.delimiter == ","
+    tabular.write_table(fs, str(tmp_path / "out.csv"), table.header, table.rows)
+    assert read(str(tmp_path / "out.csv")) == "a,b\n1,x\n2,y\n"
+
+
+def test_tabular_infers_types_and_delimiter(fs, tmp_path):
+    from meridian_commander.plugins import _tabular as tabular
+
+    assert tabular.infer_type(["1", "2", "3"]) == "int"
+    assert tabular.infer_type(["1.5", "2", ""]) == "float"
+    assert tabular.infer_type(["yes", "no"]) == "bool"
+    assert tabular.infer_type(["2021-01-02", "1999-12-31"]) == "date"
+    assert tabular.infer_type(["a", "b", "1"]) == "str"
+    write(str(tmp_path / "t.tsv"), "a\tb\n1\t2\n")
+    table = tabular.read_table(fs, str(tmp_path / "t.tsv"))
+    assert table.delimiter == "\t"
+    assert table.header == ["a", "b"]
+    # A ragged semicolon file (Sniffer gives up) still resolves to ';'.
+    write(str(tmp_path / "r.csv"), "region;amount\nnorth;10\nsouth;;\n")
+    ragged = tabular.read_table(fs, str(tmp_path / "r.csv"))
+    assert ragged.delimiter == ";"
+    assert ragged.header == ["region", "amount"]
+
+
+def test_profile_plugin_reports_shape_and_stats(fs, tmp_path, monkeypatch):
+    from meridian_commander.plugins.csv_profile import CsvProfile
+
+    write(str(tmp_path / "d" / "data.csv"),
+          "id,name,score\n1,alice,10\n2,bob,20\n3,,30\n")
+    ctx = _data_ctx(fs, tmp_path / "d", {"data.csv"}, monkeypatch)
+    plug = CsvProfile(ctx)
+    joined = "\n".join(plug.process(""))
+    assert "3 row(s) x 3 column(s)" in joined
+    assert "id [int]" in joined
+    assert "score [int]" in joined
+    assert "mean=20" in joined
+    assert "name [str]" in joined
+    # the null in the name column is counted
+    assert "nulls=1" in joined
+
+
+def test_profile_plugin_head_and_column(fs, tmp_path, monkeypatch):
+    from meridian_commander.plugins.csv_profile import CsvProfile
+
+    write(str(tmp_path / "d" / "data.csv"),
+          "id,name\n1,alice\n2,bob\n3,carol\n")
+    ctx = _data_ctx(fs, tmp_path / "d", {"data.csv"}, monkeypatch)
+    plug = CsvProfile(ctx)
+    joined = "\n".join(plug.process("head 2"))
+    assert "alice" in joined and "bob" in joined
+    assert "carol" not in joined
+    joined = "\n".join(plug.process("col name"))
+    assert "value counts" in joined
+
+
+def test_profile_plugin_requires_selection(fs, tmp_path, monkeypatch):
+    from meridian_commander.plugins.csv_profile import CsvProfile
+
+    (tmp_path / "d").mkdir()
+    ctx = _data_ctx(fs, tmp_path / "d", set(), monkeypatch)
+    plug = CsvProfile(ctx)
+    with pytest.raises(RuntimeError):
+        plug.process("")
+
+
+def test_clean_plugin_dedupe_writes_sibling(fs, tmp_path, monkeypatch):
+    from meridian_commander.plugins.csv_clean import CsvClean
+
+    write(str(tmp_path / "d" / "t.csv"), "a,b\n1,x\n1,x\n2,y\n")
+    ctx = _data_ctx(fs, tmp_path / "d", {"t.csv"}, monkeypatch)
+    plug = CsvClean(ctx)
+    plug.process("dedupe")
+    assert read(str(tmp_path / "d" / "t.cleaned.csv")) == "a,b\n1,x\n2,y\n"
+
+
+def test_clean_plugin_filter_and_retype(fs, tmp_path, monkeypatch):
+    from meridian_commander.plugins.csv_clean import CsvClean
+
+    write(str(tmp_path / "d" / "t.csv"), "n,tag\n1,keep\n5,keep\n9,drop\n")
+    ctx = _data_ctx(fs, tmp_path / "d", {"t.csv"}, monkeypatch)
+    plug = CsvClean(ctx)
+    plug.process("filter n < 6")
+    assert read(str(tmp_path / "d" / "t.cleaned.csv")) == "n,tag\n1,keep\n5,keep\n"
+
+
+def test_clean_plugin_preview_does_not_write(fs, tmp_path, monkeypatch):
+    from meridian_commander.plugins.csv_clean import CsvClean
+
+    write(str(tmp_path / "d" / "t.csv"), "a\n 1 \n 2 \n")
+    ctx = _data_ctx(fs, tmp_path / "d", {"t.csv"}, monkeypatch)
+    plug = CsvClean(ctx)
+    plug.process("preview trim")
+    assert not (tmp_path / "d" / "t.cleaned.csv").exists()
+
+
+def test_clean_plugin_retype_failure_raises(fs, tmp_path, monkeypatch):
+    from meridian_commander.plugins.csv_clean import CsvClean
+
+    write(str(tmp_path / "d" / "t.csv"), "n\n1\n2\noops\n")
+    ctx = _data_ctx(fs, tmp_path / "d", {"t.csv"}, monkeypatch)
+    plug = CsvClean(ctx)
+    with pytest.raises(ValueError):
+        plug.process("retype n int")
+    assert not (tmp_path / "d" / "t.cleaned.csv").exists()
+
+
+def test_build_plugin_concat_union(fs, tmp_path, monkeypatch):
+    from meridian_commander.plugins.csv_build import CsvBuild
+
+    write(str(tmp_path / "d" / "a.csv"), "x,y\n1,2\n")
+    write(str(tmp_path / "d" / "b.csv"), "y,z\n3,4\n")
+    ctx = _data_ctx(fs, tmp_path / "d", {"a.csv", "b.csv"}, monkeypatch)
+    plug = CsvBuild(ctx)
+    plug.process("concat")
+    out = read(str(tmp_path / "d" / "dataset.csv"))
+    assert out == "x,y,z\n1,2,\n,3,4\n"
+
+
+def test_build_plugin_join(fs, tmp_path, monkeypatch):
+    from meridian_commander.plugins.csv_build import CsvBuild
+
+    write(str(tmp_path / "d" / "a.csv"), "id,name\n1,alice\n2,bob\n")
+    write(str(tmp_path / "d" / "b.csv"), "id,age\n1,30\n")
+    ctx = _data_ctx(fs, tmp_path / "d", {"a.csv", "b.csv"}, monkeypatch)
+    plug = CsvBuild(ctx)
+    plug.process("join id")
+    out = read(str(tmp_path / "d" / "joined.csv"))
+    assert out == "id,name,age\n1,alice,30\n2,bob,\n"
+
+
+def test_build_plugin_groupby_stdlib_fallback(fs, tmp_path, monkeypatch):
+    from meridian_commander.plugins import csv_build
+
+    # Force the pure-stdlib path even if pandas happens to be installed.
+    monkeypatch.setattr(csv_build, "has_pandas", lambda: False)
+    write(str(tmp_path / "d" / "s.csv"), "cat,val\nx,1\nx,3\ny,10\n")
+    ctx = _data_ctx(fs, tmp_path / "d", {"s.csv"}, monkeypatch)
+    plug = csv_build.CsvBuild(ctx)
+    plug.process("groupby cat mean:val")
+    assert read(str(tmp_path / "d" / "s.groupby.csv")) == "cat,mean_val\nx,2\ny,10\n"
+
+
+def test_build_plugin_jsonl_roundtrip(fs, tmp_path, monkeypatch):
+    from meridian_commander.plugins.csv_build import CsvBuild
+
+    write(str(tmp_path / "d" / "s.csv"), "cat,val\nx,1\ny,2\n")
+    ctx = _data_ctx(fs, tmp_path / "d", {"s.csv"}, monkeypatch)
+    plug = CsvBuild(ctx)
+    plug.process("to-jsonl")
+    js = read(str(tmp_path / "d" / "s.jsonl"))
+    assert js == ('{"cat": "x", "val": "1"}\n'
+                  '{"cat": "y", "val": "2"}\n')
