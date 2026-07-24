@@ -32,13 +32,36 @@ def read(path: str) -> str:
 
 
 class _StubScreen:
-    """A screen for handlers that never draw.  Only the size is ever asked."""
+    """A screen that reports a size and silently swallows any drawing.
+
+    Handlers under test mostly never draw, but a few (the sync preview) call
+    draw() mid-operation; there is nothing to assert about those pixels, so
+    they go nowhere rather than needing a real terminal.
+    """
 
     def __init__(self, height: int = 24, width: int = 80) -> None:
         self._size = (height, width)
 
     def getmaxyx(self):
         return self._size
+
+    def erase(self):
+        pass
+
+    def addstr(self, *args, **kwargs):
+        pass
+
+    def addch(self, *args, **kwargs):
+        pass
+
+    def attrset(self, *args):
+        pass
+
+    def noutrefresh(self):
+        pass
+
+    def timeout(self, value):
+        pass
 
 
 class _ScriptedDialogs:
@@ -133,6 +156,9 @@ def with_curses_screen(rows: int, cols: int, fn):
         started = True
         curses.start_color()
         curses.resizeterm(rows, cols)
+        # curses keeps one screen per process, so wipe whatever an earlier
+        # test left behind: every caller expects a blank terminal.
+        stdscr.erase()
         return fn(stdscr)
     finally:
         if started:
