@@ -419,6 +419,12 @@ There are no `exclude_lines` rules and exactly one `# pragma: no cover` in the
 tree — the forked child of `pty.fork()`, which `exec`s into the shell before
 any in-process tracer could record it.
 
+On Python 3.9 the same suite measures 99.9%. Precise line events arrived with
+PEP 626 in 3.10; before that the tracer does not record a `break` following an
+if-block that ends in its own jump, so two such statements read as unexecuted
+even though they run. The gate is enforced on 3.10+ and the report is printed
+on 3.9.
+
 How the awkward parts are reached:
 
 - **Filesystem logic** (copy, move, sync, panel behaviour) runs against the

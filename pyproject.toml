@@ -80,4 +80,8 @@ show_missing = true
 # There are no exclude_lines rules and exactly one "# pragma: no cover" in the
 # tree -- the forked child of pty.fork(), which execs into the shell before any
 # in-process tracer could record it -- so this number is the honest one.
+#
+# Python 3.9 reports 99.9%: before PEP 626 (3.10) the tracer misses a "break"
+# that follows an if-block ending in its own jump, so two statements read as
+# unexecuted there despite running. The workflow enforces the gate on 3.10+.
 fail_under = 100
