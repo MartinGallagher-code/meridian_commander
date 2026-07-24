@@ -161,9 +161,14 @@ class _ScriptedWindow:
 
     def addstr(self, *args):
         self.drawn.append(args)
-        # Only the body rows are refused: the frame and title are drawn by
-        # _box, which bounds its own writes and is not what is under test.
-        if self._fail_draws and args[0] >= 2:
+        # fail_draws is True to refuse the body rows (the frame and title come
+        # from _box, which bounds its own writes), or a predicate taking
+        # (y, x) to target exactly the writes the code under test guards.
+        if callable(self._fail_draws):
+            refuse = self._fail_draws(args[0], args[1])
+        else:
+            refuse = self._fail_draws and args[0] >= 2
+        if refuse:
             raise curses.error("addwstr() returned ERR")
         return self._win.addstr(*args)
 
