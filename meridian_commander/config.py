@@ -51,6 +51,33 @@ remote_dir = /tmp
 ; Interpreter used to run it ("sh", "bash", "python3", ...).
 interpreter = sh
 timeout = 30
+
+; -- Data plugins (Profile table / Clean table / Build dataset) --------------
+; These act on the CSV/TSV/JSON-lines file selected in the *other* pane.
+; "delimiter" blank = auto-detect (comma/tab/semicolon/pipe); "has_header"
+; yes/no; "max_bytes" caps how much of a large file is read.
+
+[plugin:csv_profile]
+delimiter =
+encoding = utf-8
+has_header = yes
+; Most-common values shown per categorical column.
+top_n = 5
+; Rows shown by the head/tail commands.
+preview_rows = 20
+max_bytes = 67108864
+
+[plugin:csv_clean]
+delimiter =
+encoding = utf-8
+has_header = yes
+max_bytes = 67108864
+
+[plugin:csv_build]
+delimiter =
+encoding = utf-8
+has_header = yes
+max_bytes = 67108864
 """
 
 

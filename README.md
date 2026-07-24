@@ -71,7 +71,8 @@ and ships with a built-in file viewer and editor.
 - **Pane plug-ins** (`p`) — put a pane into plug-in mode: pick from discovered
   plug-ins and it takes over the pane, with access to the opposite pane's
   contents. Writing one takes a dozen lines (see *Plug-ins* below); built-ins
-  include remote JSON push and run-remote-script over SSH.
+  include remote JSON push and run-remote-script over SSH, plus data tools for
+  profiling, cleaning and building CSV/TSV datasets.
 - **In-app configuration** (`C`) — edit `config.ini` and plug-in files in the
   built-in editor without leaving the app.
 - **No required dependencies** for local + FTP use — it runs on the Python
@@ -85,6 +86,9 @@ pip install meridian-commander            # once published to PyPI
 
 # with SFTP/SSH support (remote panes, in-pane remote terminal, SSH plug-ins)
 pip install "meridian-commander[ssh]"
+
+# optional: pandas acceleration for the data plug-ins' group-by on large files
+pip install "meridian-commander[data]"
 
 # or from a checkout
 pip install ".[ssh]"
@@ -239,6 +243,27 @@ Built-in plug-ins:
 - **Run remote script** — on each input, logs into an SSH server, copies a
   configured local script into a configured remote directory, runs it with the
   input as arguments, and shows its output.
+
+Data plug-ins (for CSV/TSV/JSON-lines files; select the file in the *other*
+pane, then open the plug-in). These are pure standard library and read at most a
+capped number of bytes, so a huge file cannot hang the interface; they work on
+remote panes too:
+
+- **Profile table** — reports the table's shape and a per-column profile:
+  inferred type, null count/percentage, distinct count and, for numeric columns,
+  min/max/mean/median. `col <name>` drills into one column (histogram or value
+  counts); `head`/`tail [n]` preview rows.
+- **Clean table** — cleaning verbs written to a *new* sibling file (the source
+  is never touched): `trim`, `dedupe`, `dropnull`, `fillnull`, `drop`, `keep`,
+  `rename`, `filter <col> <op> <value>`, `retype <col> int|float`,
+  `normalize-headers`. Prefix any command with `preview` to test it without
+  writing.
+- **Build dataset** — compose files tagged in the other pane: `concat` (union of
+  columns), `join <key>` (first two tagged files), `sample <n|n%>`,
+  `split <col>` (one file per value), `to-jsonl` / `from-jsonl`, and
+  `groupby <col> <agg>[:col]` (count/sum/mean/min/max). `groupby` uses pandas
+  when the optional `meridian-commander[data]` extra is installed and otherwise
+  falls back to a pure-stdlib implementation with identical output.
 
 ### Writing a plug-in
 
