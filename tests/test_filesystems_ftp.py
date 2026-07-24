@@ -512,3 +512,52 @@ def test_ftp_upload_as_a_context_manager(ftp):
     with fs.open_write("/new.bin") as writer:
         writer.write(b"payload")
     assert fake.uploaded == b"payload"
+
+
+# -- transfer failures ---------------------------------------------------------
+
+def test_a_download_that_fails_raises_on_read(ftp):
+    fake = _FakeFTP()
+
+    def broken(command, callback, blocksize=8192):
+        raise OSError("data connection failed")
+
+    fake.retrbinary = broken
+    fs, _ = ftp(fake)
+    reader = fs.open_read("/a.bin")
+    with pytest.raises(OSError, match="data connection failed"):
+        reader.read(-1)
+
+
+def test_an_upload_that_fails_raises_on_close(ftp):
+    fake = _FakeFTP()
+
+    def broken(command, fileobj):
+        raise OSError("no write permission")
+
+    fake.storbinary = broken
+    fs, _ = ftp(fake)
+    writer = fs.open_write("/a.bin")
+    with pytest.raises(OSError, match="no write permission"):
+        writer.close()
+
+
+def test_an_upload_that_has_already_failed_refuses_more_writes(ftp):
+    fake = _FakeFTP()
+
+    def broken(command, fileobj):
+        raise OSError("disk full")
+
+    fake.storbinary = broken
+    fs, _ = ftp(fake)
+    writer = fs.open_write("/a.bin")
+    # The worker thread fails as soon as it starts; the next write reports it.
+    for _ in range(200):
+        try:
+            writer.write(b"x")
+        except OSError as exc:
+            assert "disk full" in str(exc)
+            break
+        time.sleep(0.005)
+    else:
+        pytest.fail("the write never reported the failure")

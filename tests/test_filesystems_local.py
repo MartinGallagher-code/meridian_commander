@@ -291,3 +291,32 @@ def test_local_rename(fs, tmp_path):
 
 def test_two_local_backends_are_not_the_same_connection():
     assert LocalFileSystem().same_fs(LocalFileSystem()) is False
+
+
+def test_a_listing_entry_that_vanishes_mid_scan_is_still_shown(fs, tmp_path,
+                                                               monkeypatch):
+    """Between scandir and stat a file can disappear; it must still list."""
+
+    class _Vanishing:
+        name = "gone.txt"
+
+        def stat(self, follow_symlinks=True):
+            raise OSError("no such file or directory")
+
+        def is_symlink(self):
+            return False
+
+        def is_dir(self, follow_symlinks=True):
+            return False
+
+    class _Scan:
+        def __enter__(self):
+            return [_Vanishing()]
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(os, "scandir", lambda path: _Scan())
+    entries = fs.listdir(str(tmp_path))
+    assert [e.name for e in entries] == ["gone.txt"]
+    assert entries[0].is_dir is False

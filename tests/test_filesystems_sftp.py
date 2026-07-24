@@ -661,3 +661,33 @@ def test_sftp_close_still_closes_the_client_if_the_channel_objects(sftp_fs):
     with pytest.raises(OSError):
         fs.close()
     assert client.closed is True
+
+
+def test_resolution_defaults_to_the_users_own_ssh_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    ssh_dir = tmp_path / ".ssh"
+    ssh_dir.mkdir()
+    (ssh_dir / "config").write_text("Host web\n  HostName from-home-config\n")
+    # No config_path given: ~/.ssh/config is consulted, like ssh itself.
+    assert _resolve_ssh_connection("web")["hostname"] == "from-home-config"
+
+
+def test_a_failed_connection_tears_down_the_jump_chain(monkeypatch, tmp_path):
+    gateway = _FakeClient()
+    real_open = fsmod._open_ssh_client
+
+    def hop(host, *args, **kwargs):
+        if host == "gw":
+            return gateway
+        return real_open(host, *args, **kwargs)
+
+    def refuse(res, password, sock):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(fsmod, "_open_ssh_client", hop)
+    monkeypatch.setattr(fsmod, "_connect_resolved", refuse)
+    config = _write_config(tmp_path, "Host web\n  ProxyJump gw\n")
+    with pytest.raises(FileSystemError, match="Could not connect"):
+        real_open("web", None, None, None, config_path=config)
+    # The tunnel is useless without the target, so it is closed too.
+    assert gateway.closed is True

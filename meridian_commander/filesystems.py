@@ -1010,10 +1010,6 @@ class _FTPWriter:
         self._error: Exception | None = None
         self._queue: "queue.Queue[bytes | None]" = queue.Queue(maxsize=16)
 
-        def reader() -> bytes:
-            chunk = self._queue.get()
-            return chunk if chunk is not None else b""
-
         def worker() -> None:
             try:
                 ftp.storbinary(f"STOR {path}", _QueueFile(self._queue))
