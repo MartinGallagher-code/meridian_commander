@@ -178,9 +178,10 @@ class _KeyScript:
     the drawing is genuinely exercised; only the input is synthetic.
     """
 
-    def __init__(self, win, keys):
+    def __init__(self, win, keys, fail_draws: bool = False):
         self._win = win
         self._keys = list(keys)
+        self._fail_draws = fail_draws
         self.drawn: list[tuple] = []
 
     def getch(self):
@@ -190,10 +191,12 @@ class _KeyScript:
 
     def addstr(self, *args):
         self.drawn.append(args)
-        try:
-            return self._win.addstr(*args)
-        except curses.error:
-            pass               # the real screen may be smaller than the write
+        if self._fail_draws:
+            raise curses.error("addwstr() returned ERR")
+        # Errors from the real window are deliberately *not* swallowed here:
+        # the code under test has its own guards, and hiding the error would
+        # hide whether those guards work.
+        return self._win.addstr(*args)
 
     def __getattr__(self, name):
         return getattr(self._win, name)
@@ -227,3 +230,24 @@ def run_menu(monkeypatch, rows, options, keys, fail_draws=False, title="Presets"
     choice = with_curses_screen(
         rows, 60, lambda stdscr: dialogs.menu(stdscr, title, options))
     return choice, captured["window"].drawn
+
+
+def script_newwin(monkeypatch, keys, fail_draws: bool = False):
+    """Patch ``curses.newwin`` so windows created replay ``keys``.
+
+    Full-screen components build their own window and read keys from it.  The
+    window handed back is real -- everything drawn goes through curses and is
+    bounds-checked by it -- only the input is scripted.  Returns a dict that
+    collects the windows as they are created.
+    """
+    real_newwin = curses.newwin
+    captured: dict = {"windows": []}
+
+    def fake_newwin(*args, **kwargs):
+        window = _KeyScript(real_newwin(*args, **kwargs), keys, fail_draws)
+        captured["windows"].append(window)
+        captured["window"] = window
+        return window
+
+    monkeypatch.setattr(curses, "newwin", fake_newwin)
+    return captured
