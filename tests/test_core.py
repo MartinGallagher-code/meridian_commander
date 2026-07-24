@@ -30,23 +30,13 @@ from meridian_commander.operations import copy_path, count_tree, move_path
 from meridian_commander.panel import Panel
 from meridian_commander.sync import build_sync_plan, execute_sync_plan
 
-
-@pytest.fixture
-def fs():
-    return LocalFileSystem()
-
-
-def write(path: str, content: str, mtime: float | None = None) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        f.write(content)
-    if mtime is not None:
-        os.utime(path, (mtime, mtime))
-
-
-def read(path: str) -> str:
-    with open(path) as f:
-        return f.read()
+from support import (
+    _FakeRemoteBackend,
+    _ScriptedDialogs,
+    read,
+    run_menu,
+    write,
+)
 
 
 def test_copy_file(fs, tmp_path):
@@ -1251,89 +1241,6 @@ def test_build_plugin_jsonl_roundtrip(fs, tmp_path, monkeypatch):
 # the only things replaced, so the panels, filesystems and presets file are
 # genuine and every assertion is about what the application actually did.
 
-class _StubScreen:
-    """A screen for handlers that never draw.  Only the size is ever asked."""
-
-    def __init__(self, height: int = 24, width: int = 80) -> None:
-        self._size = (height, width)
-
-    def getmaxyx(self):
-        return self._size
-
-
-class _ScriptedDialogs:
-    """Scripted stand-ins for the blocking dialogs.
-
-    Each helper answers from its script and records what it was asked, so a
-    test can assert both on the choice made and on the text the user saw.
-    A menu answer given as a string picks the first option containing it,
-    which keeps tests readable and independent of option ordering.
-    """
-
-    def __init__(self, monkeypatch, menu=(), prompt=(), confirm=()):
-        self.menu_answers = list(menu)
-        self.prompt_answers = list(prompt)
-        self.confirm_answers = list(confirm)
-        self.menus: list[tuple] = []
-        self.prompts: list[str] = []
-        self.messages: list[tuple] = []
-        monkeypatch.setattr(dialogs, "menu", self._menu)
-        monkeypatch.setattr(dialogs, "prompt", self._prompt)
-        monkeypatch.setattr(dialogs, "confirm", self._confirm)
-        monkeypatch.setattr(dialogs, "message", self._message)
-
-    def _menu(self, stdscr, title, options):
-        self.menus.append((title, list(options)))
-        answer = self.menu_answers.pop(0)
-        if isinstance(answer, str):
-            return next(i for i, o in enumerate(options) if answer in o)
-        return answer
-
-    def _prompt(self, stdscr, title, label, default="", is_password=False):
-        self.prompts.append(label)
-        return self.prompt_answers.pop(0)
-
-    def _confirm(self, stdscr, title, text, default_yes=False):
-        return self.confirm_answers.pop(0)
-
-    def _message(self, stdscr, title, text, error=False):
-        self.messages.append((title, text, error))
-
-    @property
-    def last_message(self) -> str:
-        return self.messages[-1][1] if self.messages else ""
-
-
-class _FakeRemoteBackend(LocalFileSystem):
-    """A local backend wearing an SFTP name tag.
-
-    Real enough to back a panel (it lists actual directories) while matching
-    a remote preset, which is what the reuse and reconnect paths key on.
-    """
-
-    scheme = "sftp"
-
-    def __init__(self, host="web1", username="deploy", port=22):
-        super().__init__()
-        self.host = host
-        self.typed_username = username
-        self.port = port
-        self.key_filename = ""
-
-    def label(self) -> str:
-        return f"sftp://{self.typed_username}@{self.host}"
-
-
-@pytest.fixture
-def app(tmp_path, monkeypatch):
-    """An App with two local panes and a presets file of its own."""
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    for side in ("left", "right"):
-        (tmp_path / side / "sub").mkdir(parents=True)
-        write(str(tmp_path / side / "file.txt"), side)
-    return App(_StubScreen(), str(tmp_path / "left"), str(tmp_path / "right"))
-
-
 def test_home_key_jumps_the_active_pane_home(app, tmp_path, monkeypatch):
     home = tmp_path / "elsewhere"
     home.mkdir()
@@ -1691,81 +1598,10 @@ def test_context_menu_offers_home_mirror_and_presets(app, tmp_path, monkeypatch)
 # the bug being guarded against was an unhandled curses.error from drawing
 # past the bottom of the window, which only a real window reports.
 
-def _with_curses_screen(rows: int, cols: int, fn):
-    """Run ``fn(stdscr)`` on a real curses screen ``rows`` x ``cols``."""
-    master, slave = pty.openpty()
-    saved_out, saved_in = os.dup(1), os.dup(0)
-    saved_term = os.environ.get("TERM")
-    os.environ["TERM"] = "xterm"
-    os.dup2(slave, 1)
-    os.dup2(slave, 0)
-    started = False
-    try:
-        try:
-            stdscr = curses.initscr()
-        except curses.error as exc:   # a machine with no terminfo database
-            pytest.skip(f"curses screen unavailable: {exc}")
-        started = True
-        curses.resizeterm(rows, cols)
-        return fn(stdscr)
-    finally:
-        if started:
-            curses.endwin()
-        os.dup2(saved_out, 1)
-        os.dup2(saved_in, 0)
-        for fd in (saved_out, saved_in, master, slave):
-            os.close(fd)
-        if saved_term is None:
-            os.environ.pop("TERM", None)
-        else:
-            os.environ["TERM"] = saved_term
-
-
-class _ScriptedWindow:
-    """A real curses window with its keystrokes scripted and draws recorded."""
-
-    def __init__(self, win, keys, fail_draws: bool = False):
-        self._win = win
-        self._keys = list(keys)
-        self._fail_draws = fail_draws
-        self.drawn: list[tuple] = []
-
-    def getch(self):
-        return self._keys.pop(0)
-
-    def addstr(self, *args):
-        self.drawn.append(args)
-        # Only the body rows are refused: the frame and title are drawn by
-        # _box, which bounds its own writes and is not what is under test.
-        if self._fail_draws and args[0] >= 2:
-            raise curses.error("addwstr() returned ERR")
-        return self._win.addstr(*args)
-
-    def __getattr__(self, name):
-        return getattr(self._win, name)
-
-
-def _run_menu(monkeypatch, rows, options, keys, fail_draws=False, title="Presets"):
-    """Drive ``dialogs.menu`` on an ``rows``-high screen; return (choice, draws)."""
-    real_center = dialogs._center
-    captured = {}
-
-    def scripted_center(stdscr, height, width):
-        window = _ScriptedWindow(real_center(stdscr, height, width), keys,
-                                 fail_draws)
-        captured["window"] = window
-        return window
-
-    monkeypatch.setattr(dialogs, "_center", scripted_center)
-    choice = _with_curses_screen(
-        rows, 60, lambda stdscr: dialogs.menu(stdscr, title, options))
-    return choice, captured["window"].drawn
-
-
 def test_menu_scrolls_a_list_taller_than_the_screen(monkeypatch):
     """A full preset list on a short terminal scrolls instead of overflowing."""
     options = [f"preset {i}" for i in range(40)]
-    choice, drawn = _run_menu(monkeypatch, 12, options, [curses.KEY_END, 10])
+    choice, drawn = run_menu(monkeypatch, 12, options, [curses.KEY_END, 10])
     assert choice == 39
     # The last entry scrolled into view, and the counter tracked the cursor.
     assert any("preset 39" in str(draw) for draw in drawn)
@@ -1776,7 +1612,7 @@ def test_menu_paging_and_wrapping_keys(monkeypatch):
     options = [f"preset {i}" for i in range(40)]
     keys = [curses.KEY_NPAGE, curses.KEY_NPAGE, curses.KEY_PPAGE,
             curses.KEY_HOME, curses.KEY_UP, curses.KEY_DOWN, 10]
-    choice, drawn = _run_menu(monkeypatch, 12, options, keys)
+    choice, drawn = run_menu(monkeypatch, 12, options, keys)
     # Home returned to the top; Up from there wrapped to the end and Down back.
     assert choice == 0
     assert any(" 1/40 " in str(draw) for draw in drawn)
@@ -1784,21 +1620,21 @@ def test_menu_paging_and_wrapping_keys(monkeypatch):
 
 
 def test_menu_on_a_short_list_needs_no_counter(monkeypatch):
-    choice, drawn = _run_menu(monkeypatch, 24, ["alpha", "beta"],
+    choice, drawn = run_menu(monkeypatch, 24, ["alpha", "beta"],
                               [ord("j"), ord("k"), ord("j"), 10])
     assert choice == 1
     assert not any("/2 " in str(draw) for draw in drawn)
 
 
 def test_menu_escape_chooses_nothing(monkeypatch):
-    choice, _ = _run_menu(monkeypatch, 24, ["alpha", "beta"], [27])
+    choice, _ = run_menu(monkeypatch, 24, ["alpha", "beta"], [27])
     assert choice is None
 
 
 def test_menu_survives_a_window_that_refuses_to_draw(monkeypatch):
     """A refused write (a resize race, say) must not take the menu down."""
     options = [f"preset {i}" for i in range(40)]
-    choice, drawn = _run_menu(monkeypatch, 12, options, [curses.KEY_DOWN, 10],
+    choice, drawn = run_menu(monkeypatch, 12, options, [curses.KEY_DOWN, 10],
                               fail_draws=True)
     assert choice == 1
     assert drawn                      # it did keep trying to draw

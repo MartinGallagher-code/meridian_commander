@@ -12,7 +12,7 @@ def human_size(size: int | None) -> str:
     if size < 1024:
         return f"{size:6d}"
     value = float(size)
-    for unit in ("K", "M", "G", "T", "P"):
+    for unit in ("K", "M", "G", "T", "P", "E"):
         value /= 1024.0
         if value < 1024.0:
             if value < 10:
