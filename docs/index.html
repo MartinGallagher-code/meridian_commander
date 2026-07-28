@@ -104,6 +104,11 @@
         <p>Press <code>t</code> and the pane becomes a shell in that pane's directory — a real pty locally, or an interactive shell over the pane's existing SSH connection.</p>
       </div>
       <div class="card">
+        <div class="icon">📊</div>
+        <h3>Spreadsheets in a grid</h3>
+        <p><code>F3</code> on an <code>.xlsx</code> opens a full-screen grid — row numbers, column letters, aligned numbers, dates through the workbook's own formats, <code>Tab</code> between sheets. Read with the standard library alone, so it needs nothing installed.</p>
+      </div>
+      <div class="card">
         <div class="icon">🔍</div>
         <h3>Find files, browsably</h3>
         <p>Search a pane's tree by substring or glob — remote panes included — and get a result list you can view, edit or jump into directly.</p>
@@ -211,6 +216,15 @@
           line handling, save with <kbd>Ctrl-S</kbd>. Both work on remote files: open a
           config on a server, fix it, save it back.
         </p>
+        <p>
+          Press <kbd>F3</kbd> on an <code>.xlsx</code> or <code>.xlsm</code> and you get a
+          grid instead: row numbers, column letters, numbers right-aligned, dates rendered
+          through the workbook's own number formats, <kbd>Tab</kbd> between sheets and the
+          same <kbd>/</kbd> search. A workbook is a zip of XML, so it is read with
+          <code>zipfile</code> and <code>xml.etree</code> — nothing to install, and a
+          spreadsheet on a remote pane opens like any other file. Legacy <code>.xls</code>
+          is a different format entirely and stays in the text viewer.
+        </p>
       </div>
     </div>
   </div>
@@ -297,7 +311,7 @@
         <table>
           <tr><td><kbd>F1</kbd> / <kbd>?</kbd></td><td>help</td></tr>
           <tr><td><kbd>F2</kbd> / <kbd>o</kbd></td><td>open / connect location</td></tr>
-          <tr><td><kbd>F3</kbd> / <kbd>v</kbd></td><td>view file</td></tr>
+          <tr><td><kbd>F3</kbd> / <kbd>v</kbd></td><td>view file (grid for <code>.xlsx</code>)</td></tr>
           <tr><td><kbd>F4</kbd> / <kbd>e</kbd></td><td>edit file</td></tr>
           <tr><td><kbd>F5</kbd> / <kbd>c</kbd></td><td>copy to other pane</td></tr>
           <tr><td><kbd>F6</kbd> / <kbd>m</kbd></td><td>move to other pane</td></tr>

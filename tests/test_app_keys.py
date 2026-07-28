@@ -285,7 +285,7 @@ def test_the_sync_key(app, monkeypatch, key):
 @pytest.mark.parametrize("key", [curses.KEY_F3, ord("3"), ord("v")])
 def test_the_view_key(app, monkeypatch, key):
     opened = []
-    monkeypatch.setattr(app_mod, "Viewer",
+    monkeypatch.setattr(app_mod, "viewer_for",
                         lambda fs, path: _Recorder(opened, path))
     _point_at(app.left, "file.txt")
     app.handle_key(key)
@@ -950,7 +950,7 @@ def test_main_reports_its_version(capsys):
 
 def test_the_context_menu_view_and_edit(app, monkeypatch):
     opened = []
-    monkeypatch.setattr(app_mod, "Viewer",
+    monkeypatch.setattr(app_mod, "viewer_for",
                         lambda fs, path: _Recorder(opened, ("view", path)))
     monkeypatch.setattr(app_mod, "Editor",
                         lambda fs, path: _Recorder(opened, ("edit", path)))

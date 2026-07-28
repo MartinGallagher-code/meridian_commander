@@ -9,8 +9,11 @@ mock it happened to call.
 from __future__ import annotations
 
 import curses
+import io
 import os
 import pty
+import zipfile
+from xml.sax.saxutils import escape
 
 import pytest
 
@@ -282,3 +285,120 @@ def script_newwin(monkeypatch, keys, fail_draws: bool = False):
 
     monkeypatch.setattr(curses, "newwin", fake_newwin)
     return captured
+
+
+# -- spreadsheet fixtures ------------------------------------------------------
+# Workbooks are built as real zip archives with the part layout a producer
+# writes, so the reader is exercised on the format rather than on a stand-in.
+# The reader was checked against openpyxl-written files while it was written;
+# the fixtures below reproduce the same layout so the suite needs no producer.
+
+XLSX_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+XLSX_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+XLSX_PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+
+
+def xlsx_bytes(parts: dict, *, compress: bool = True) -> bytes:
+    """Zip a mapping of archive member name to contents into workbook bytes.
+
+    ``compress=False`` stores the parts verbatim, so a test can damage one of
+    them by substituting bytes of the same length -- which leaves the archive
+    openable and fails only when that part is read.
+    """
+    buf = io.BytesIO()
+    mode = zipfile.ZIP_DEFLATED if compress else zipfile.ZIP_STORED
+    with zipfile.ZipFile(buf, "w", mode) as zf:
+        for name, content in parts.items():
+            zf.writestr(name, content)
+    return buf.getvalue()
+
+
+def _col(index: int) -> str:
+    """A1-style column label.  Written out here so the fixtures do not lean
+    on the very function under test."""
+    name = ""
+    index += 1
+    while index > 0:
+        index, rem = divmod(index - 1, 26)
+        name = chr(65 + rem) + name
+    return name
+
+
+def rows_xml(rows) -> str:
+    """``<row>``/``<c>`` XML for a list of row lists, every cell inline text.
+
+    Empty cells are left out entirely, the way a real producer writes them, so
+    the reader's handling of sparse rows is exercised by every fixture.
+    """
+    out = []
+    for r, row in enumerate(rows, 1):
+        cells = "".join(
+            f'<c r="{_col(c)}{r}" t="inlineStr"><is><t>'
+            f"{escape(str(value))}</t></is></c>"
+            for c, value in enumerate(row) if str(value) != "")
+        out.append(f'<row r="{r}">{cells}</row>')
+    return "".join(out)
+
+
+def sheet_xml(body: str) -> str:
+    """Wrap ``<row>`` XML in a worksheet part."""
+    return (f'<?xml version="1.0"?><worksheet xmlns="{XLSX_MAIN}">'
+            f"<sheetData>{body}</sheetData></worksheet>")
+
+
+def xlsx_parts(sheets: dict, *, shared: str = "", styles: str = "",
+               workbook_pr: str = "<workbookPr/>") -> dict:
+    """The standard archive layout for a workbook.
+
+    ``sheets`` maps a sheet name to its worksheet XML; ``shared`` and
+    ``styles`` are part bodies, included (with their relationships) only when
+    given, so a workbook without them can be built too.
+    """
+    entries = list(sheets.items())
+    declarations = "".join(
+        f'<sheet name="{escape(name)}" sheetId="{i}" r:id="rId{i}"/>'
+        for i, (name, _xml) in enumerate(entries, 1))
+    rels = "".join(
+        f'<Relationship Id="rId{i}" Type="{XLSX_REL}/worksheet" '
+        f'Target="worksheets/sheet{i}.xml"/>'
+        for i in range(1, len(entries) + 1))
+    parts = {
+        "[Content_Types].xml":
+            f'<?xml version="1.0"?><Types xmlns="{XLSX_PKG}"/>',
+        "_rels/.rels":
+            f'<?xml version="1.0"?><Relationships xmlns="{XLSX_PKG}">'
+            f'<Relationship Id="rIdW" Type="{XLSX_REL}/officeDocument" '
+            f'Target="xl/workbook.xml"/></Relationships>',
+        "xl/workbook.xml":
+            f'<?xml version="1.0"?><workbook xmlns="{XLSX_MAIN}" '
+            f'xmlns:r="{XLSX_REL}">{workbook_pr}'
+            f"<sheets>{declarations}</sheets></workbook>",
+    }
+    for i, (_name, xml) in enumerate(entries, 1):
+        parts[f"xl/worksheets/sheet{i}.xml"] = xml
+    if shared:
+        rels += (f'<Relationship Id="rIdS" Type="{XLSX_REL}/sharedStrings" '
+                 f'Target="sharedStrings.xml"/>')
+        parts["xl/sharedStrings.xml"] = shared
+    if styles:
+        rels += (f'<Relationship Id="rIdT" Type="{XLSX_REL}/styles" '
+                 f'Target="styles.xml"/>')
+        parts["xl/styles.xml"] = styles
+    parts["xl/_rels/workbook.xml.rels"] = (
+        f'<?xml version="1.0"?><Relationships xmlns="{XLSX_PKG}">'
+        f"{rels}</Relationships>")
+    return parts
+
+
+def simple_xlsx(sheets: dict) -> bytes:
+    """Workbook bytes from ``{sheet name: list of row lists}``."""
+    return xlsx_bytes(xlsx_parts(
+        {name: sheet_xml(rows_xml(rows)) for name, rows in sheets.items()}))
+
+
+def write_xlsx(path: str, sheets: dict) -> str:
+    """Write a workbook to ``path`` and return the path."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(simple_xlsx(sheets))
+    return path

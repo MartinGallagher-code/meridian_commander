@@ -156,7 +156,7 @@ class FindBrowser:
     # -- main loop -------------------------------------------------------------
     def run(self, stdscr) -> str | None:
         from .editor import Editor
-        from .viewer import Viewer
+        from .viewer import viewer_for
 
         curses.curs_set(0)
         height, width = stdscr.getmaxyx()
@@ -188,11 +188,13 @@ class FindBrowser:
                 if cur is not None:
                     return cur[0]
             elif key in (ord("v"), curses.KEY_F3):
-                self._open(Viewer, stdscr)
+                self._open(viewer_for, stdscr)
             elif key in (ord("e"), curses.KEY_F4):
                 self._open(Editor, stdscr)
 
-    def _open(self, cls, stdscr) -> None:
+    def _open(self, make, stdscr) -> None:
+        """Open the highlighted result with ``make(fs, path)`` -- a browser
+        class, or the factory that picks one by file type."""
         cur = self.current()
         if cur is None:
             return
@@ -202,7 +204,7 @@ class FindBrowser:
             return
         target = self.current_path()
         try:
-            cls(self.fs, target).run(stdscr)
+            make(self.fs, target).run(stdscr)
         except Exception as exc:
             self.notice = f" {exc} "
         curses.curs_set(0)

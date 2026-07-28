@@ -8,7 +8,7 @@ Key bindings (also shown in the F1 help screen)::
 
     Tab            switch active pane          F1   help
     Up/Down        move cursor                 F2   open / connect location
-    PgUp/PgDn      page                        F3   view file
+    PgUp/PgDn      page                        F3   view file (grid: .xlsx)
     Home/End       first / last                F4   edit file
     Enter / Right  enter dir / view file       F5   copy  ->  other pane
     Backspace/Left parent directory            F6   move  ->  other pane
@@ -50,7 +50,7 @@ from .operations import (
 from .panel import Panel
 from .sync import build_sync_plan, execute_sync_plan
 from .util import human_size, human_time, ljust, rjust
-from .viewer import Viewer
+from .viewer import viewer_for
 
 
 class App:
@@ -983,8 +983,7 @@ class App:
             panel.enter()
             return
         try:
-            viewer = Viewer(panel.fs, target)
-            viewer.run(self.stdscr)
+            viewer_for(panel.fs, target).run(self.stdscr)
         except Exception as exc:
             dialogs.message(self.stdscr, "View error", str(exc), error=True)
         curses.curs_set(0)
@@ -1226,6 +1225,7 @@ class App:
             "  !              full-screen shell (for vim/htop etc.)\n"
             "  p / F11        plug-in mode: run a plug-in in this pane\n"
             "  f              find files: browsable results (view/edit/goto)\n"
+            "  F3 on .xlsx    spreadsheet grid: Tab sheet, / find, w width\n"
             "  C              configuration: edit config.ini / plug-ins\n"
             "\n"
             "  Function keys -- each also has digit and letter aliases,\n"
