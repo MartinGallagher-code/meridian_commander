@@ -247,7 +247,8 @@ Built-in plug-ins:
 Data plug-ins (for CSV/TSV/JSON-lines files; select the file in the *other*
 pane, then open the plug-in). These are pure standard library and read at most a
 capped number of bytes, so a huge file cannot hang the interface; they work on
-remote panes too:
+remote panes too. See the [data tools tutorial](docs/DATA_TOOLS.md) for a
+step-by-step walkthrough with examples.
 
 - **Profile table** — reports the table's shape and a per-column profile:
   inferred type, null count/percentage, distinct count and, for numeric columns,
