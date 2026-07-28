@@ -125,7 +125,11 @@ trap 'rm -f "$tmp_abs" "$body_abs"' EXIT
         [ "$rel" = "$f" ] && continue          # the source dir itself
         f_abs="$src_abs/$rel"
         case "$f_abs" in
-            "$out_abs"|"$tmp_abs"|"$script_abs"|"$split_abs") continue ;;
+            # The body tempfile belongs here too: find runs concurrently with
+            # the loop that writes it, so bundling into the tree being scanned
+            # would otherwise inline the growing file into itself and never
+            # terminate.
+            "$out_abs"|"$tmp_abs"|"$body_abs"|"$script_abs"|"$split_abs") continue ;;
         esac
 
         case "$rel" in
