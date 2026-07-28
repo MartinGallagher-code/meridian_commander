@@ -104,6 +104,11 @@
         <p>Press <code>t</code> and the pane becomes a shell in that pane's directory — a real pty locally, or an interactive shell over the pane's existing SSH connection.</p>
       </div>
       <div class="card">
+        <div class="icon">🗜</div>
+        <h3>Archives as directories</h3>
+        <p>Press Enter on a <code>.zip</code> or <code>.tar.gz</code> and the pane goes into it. An archive is a read-only filesystem, not a viewer, so listing, tagging and copying files out all work exactly as from a directory.</p>
+      </div>
+      <div class="card">
         <div class="icon">📝</div>
         <h3>Word documents as text</h3>
         <p><code>F3</code> on a <code>.docx</code> shows the document wrapped to the terminal — headings ruled, lists indented, tables in aligned columns — and searchable like any other file. Standard library only.</p>
@@ -338,7 +343,7 @@
         <table>
           <tr><td><kbd>Tab</kbd></td><td>switch active pane</td></tr>
           <tr><td><kbd>↑</kbd><kbd>↓</kbd> / <kbd>j</kbd><kbd>k</kbd></td><td>move cursor</td></tr>
-          <tr><td><kbd>Enter</kbd> / <kbd>→</kbd></td><td>enter directory / view file</td></tr>
+          <tr><td><kbd>Enter</kbd> / <kbd>→</kbd></td><td>enter directory or archive / view file</td></tr>
           <tr><td><kbd>Backspace</kbd> / <kbd>←</kbd></td><td>parent directory</td></tr>
           <tr><td><kbd>Insert</kbd> / <kbd>Space</kbd></td><td>tag file (<kbd>+</kbd>/<kbd>-</kbd> all / none)</td></tr>
           <tr><td><kbd>Ctrl-U</kbd></td><td>swap panes</td></tr>

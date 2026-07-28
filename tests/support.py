@@ -12,6 +12,7 @@ import curses
 import io
 import os
 import pty
+import tarfile
 import zipfile
 from xml.sax.saxutils import escape
 
@@ -486,3 +487,55 @@ def write_docx(path: str, body: str, numbering: str = "") -> str:
     with open(path, "wb") as f:
         f.write(simple_docx(body, numbering))
     return path
+
+
+# -- archive fixtures ----------------------------------------------------------
+def write_zip(path: str, members: dict) -> str:
+    """Write a zip.  A member name ending in "/" becomes a directory entry."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, content in members.items():
+            zf.writestr(name, content)
+    return path
+
+
+def write_tar(path: str, members: dict, *, mode: str = "w",
+              symlinks: dict | None = None, dirs=(), fifos=()) -> str:
+    """Write a tar (optionally compressed via ``mode``, e.g. ``"w:gz"``)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with tarfile.open(path, mode) as tf:
+        for name in dirs:
+            info = tarfile.TarInfo(name)
+            info.type = tarfile.DIRTYPE
+            tf.addfile(info)
+        for name, content in members.items():
+            data = content.encode() if isinstance(content, str) else content
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            info.mtime = 1700000000
+            tf.addfile(info, io.BytesIO(data))
+        for name, target in (symlinks or {}).items():
+            info = tarfile.TarInfo(name)
+            info.type = tarfile.SYMTYPE
+            info.linkname = target
+            tf.addfile(info)
+        for name in fifos:
+            info = tarfile.TarInfo(name)
+            info.type = tarfile.FIFOTYPE
+            tf.addfile(info)
+    return path
+
+
+class _NoLocalPath(LocalFileSystem):
+    """A backend with no local path, the way every remote one is.
+
+    The archive reader asks for a real file and falls back to streaming the
+    bytes when there is none; this is what makes that fallback reachable
+    without a network.
+    """
+
+    scheme = "sftp"
+    local_path = None
+
+    def label(self) -> str:
+        return "sftp://elsewhere"
