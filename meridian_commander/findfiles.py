@@ -156,7 +156,7 @@ class FindBrowser:
     # -- main loop -------------------------------------------------------------
     def run(self, stdscr) -> str | None:
         from .editor import Editor
-        from .viewer import viewer_for
+        from .browsers import viewer_for
 
         curses.curs_set(0)
         height, width = stdscr.getmaxyx()

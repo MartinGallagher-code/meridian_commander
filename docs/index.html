@@ -104,6 +104,11 @@
         <p>Press <code>t</code> and the pane becomes a shell in that pane's directory — a real pty locally, or an interactive shell over the pane's existing SSH connection.</p>
       </div>
       <div class="card">
+        <div class="icon">📝</div>
+        <h3>Word documents as text</h3>
+        <p><code>F3</code> on a <code>.docx</code> shows the document wrapped to the terminal — headings ruled, lists indented, tables in aligned columns — and searchable like any other file. Standard library only.</p>
+      </div>
+      <div class="card">
         <div class="icon">📊</div>
         <h3>Spreadsheets in a grid</h3>
         <p><code>F3</code> on an <code>.xlsx</code> opens a full-screen grid — row numbers, column letters, aligned numbers, dates through the workbook's own formats, <code>Tab</code> between sheets. Read with the standard library alone, so it needs nothing installed.</p>
@@ -225,6 +230,14 @@
           spreadsheet on a remote pane opens like any other file. Legacy <code>.xls</code>
           is a different format entirely and stays in the text viewer.
         </p>
+        <p>
+          A <code>.docx</code> opens the same way, as text: headings ruled, bulleted and
+          numbered lists indented by depth, tables laid out as aligned columns, wrapped to
+          whatever width the terminal happens to be. A list marker comes from the
+          document's own <code>numbering.xml</code> — in a real Word file a bullet and a
+          numbered item are both style <em>ListParagraph</em>, and nothing else tells them
+          apart.
+        </p>
       </div>
     </div>
   </div>
@@ -311,7 +324,7 @@
         <table>
           <tr><td><kbd>F1</kbd> / <kbd>?</kbd></td><td>help</td></tr>
           <tr><td><kbd>F2</kbd> / <kbd>o</kbd></td><td>open / connect location</td></tr>
-          <tr><td><kbd>F3</kbd> / <kbd>v</kbd></td><td>view file (grid for <code>.xlsx</code>)</td></tr>
+          <tr><td><kbd>F3</kbd> / <kbd>v</kbd></td><td>view file (grid <code>.xlsx</code>, doc <code>.docx</code>)</td></tr>
           <tr><td><kbd>F4</kbd> / <kbd>e</kbd></td><td>edit file</td></tr>
           <tr><td><kbd>F5</kbd> / <kbd>c</kbd></td><td>copy to other pane</td></tr>
           <tr><td><kbd>F6</kbd> / <kbd>m</kbd></td><td>move to other pane</td></tr>

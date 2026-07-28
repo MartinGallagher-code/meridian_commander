@@ -10,7 +10,7 @@ import zipfile
 
 import pytest
 
-from meridian_commander import xlsx
+from meridian_commander import ooxml, xlsx
 from meridian_commander.filesystems import LocalFileSystem
 
 from support import (
@@ -344,45 +344,45 @@ def test_unexpected_children_of_the_workbook_are_ignored():
 
 # -- refusals ------------------------------------------------------------------
 def test_a_file_that_is_not_a_zip_archive():
-    with pytest.raises(xlsx.XlsxError, match="not a readable"):
+    with pytest.raises(ooxml.OoxmlError, match="not a readable"):
         xlsx.parse_workbook(b"plain text, not a spreadsheet", "x.xlsx")
 
 
 def test_an_archive_with_no_workbook_part():
     parts = xlsx_parts({"S": sheet_xml("")})
     del parts["xl/workbook.xml"]
-    with pytest.raises(xlsx.XlsxError, match="no workbook part"):
+    with pytest.raises(ooxml.OoxmlError, match="no workbook part"):
         parse(parts)
 
 
 def test_a_workbook_that_declares_no_sheets():
-    with pytest.raises(xlsx.XlsxError, match="declares no sheets"):
+    with pytest.raises(ooxml.OoxmlError, match="declares no sheets"):
         parse(xlsx_parts({}))
 
 
 def test_a_workbook_part_that_is_not_valid_xml():
     parts = xlsx_parts({"S": sheet_xml("")})
     parts["xl/workbook.xml"] = "<workbook><sheets>"
-    with pytest.raises(xlsx.XlsxError, match="not valid XML"):
+    with pytest.raises(ooxml.OoxmlError, match="not valid XML"):
         parse(parts)
 
 
 def test_a_sheet_that_is_not_valid_xml():
     parts = xlsx_parts({"S": "<worksheet><sheetData><row>"})
-    with pytest.raises(xlsx.XlsxError, match="sheet 'S' is not valid XML"):
+    with pytest.raises(ooxml.OoxmlError, match="sheet 'S' is not valid XML"):
         parse(parts)
 
 
 def test_a_part_too_large_to_read(monkeypatch):
-    monkeypatch.setattr(xlsx, "MAX_PART_BYTES", 1)
-    with pytest.raises(xlsx.XlsxError, match="too large to read"):
+    monkeypatch.setattr(ooxml, "MAX_PART_BYTES", 1)
+    with pytest.raises(ooxml.OoxmlError, match="too large to read"):
         parse(xlsx_parts({"S": sheet_xml("")}))
 
 
 def test_a_sheet_too_large_to_read(monkeypatch):
     parts = xlsx_parts({"S": sheet_xml(rows_xml([["x" * 80]] * 400))})
-    monkeypatch.setattr(xlsx, "MAX_PART_BYTES", 20_000)
-    with pytest.raises(xlsx.XlsxError, match="sheet 'S' is too large"):
+    monkeypatch.setattr(ooxml, "MAX_PART_BYTES", 20_000)
+    with pytest.raises(ooxml.OoxmlError, match="sheet 'S' is too large"):
         parse(parts)
 
 
@@ -411,7 +411,7 @@ def test_a_part_whose_stored_bytes_are_damaged(where, message):
     data = bytearray(xlsx_bytes(_damaged_parts(where), compress=False))
     at = data.index(b"marker")
     data[at:at + 6] = b"BROKEN"
-    with pytest.raises(xlsx.XlsxError, match=message):
+    with pytest.raises(ooxml.OoxmlError, match=message):
         xlsx.parse_workbook(bytes(data), "book.xlsx")
 
 
@@ -435,8 +435,8 @@ def test_read_workbook_through_a_backend(tmp_path):
 
 def test_a_file_too_large_to_hold_in_memory(tmp_path, monkeypatch):
     path = write_xlsx(str(tmp_path / "book.xlsx"), {"S": [["x"]]})
-    monkeypatch.setattr(xlsx, "MAX_BYTES", 10)
-    with pytest.raises(xlsx.XlsxError, match="cannot be read in part"):
+    monkeypatch.setattr(ooxml, "MAX_BYTES", 10)
+    with pytest.raises(ooxml.OoxmlError, match="cannot be read in part"):
         xlsx.read_workbook(LocalFileSystem(), path)
 
 

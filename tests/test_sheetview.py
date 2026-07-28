@@ -12,7 +12,8 @@ from meridian_commander.sheetview import (
     SheetView,
     looks_numeric,
 )
-from meridian_commander.viewer import Viewer, viewer_for
+from meridian_commander.browsers import viewer_for
+from meridian_commander.viewer import Viewer
 
 from support import (
     _KeyScript,
