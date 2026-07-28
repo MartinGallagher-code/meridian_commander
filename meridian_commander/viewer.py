@@ -15,6 +15,8 @@ from __future__ import annotations
 import curses
 
 from .filesystems import FileSystem
+from .sheetview import SheetView
+from .xlsx import is_spreadsheet
 
 MAX_VIEW_BYTES = 16 * 1024 * 1024  # 16 MiB safety cap
 
@@ -250,3 +252,15 @@ class Viewer:
     def _scroll(self, delta: int, body_h: int) -> None:
         self.notice = ""
         self.top = max(0, min(self.top + delta, max(0, len(self.lines) - 1)))
+
+
+def viewer_for(fs: FileSystem, path: str):
+    """Pick the browser for ``path``: the grid for a workbook, else the viewer.
+
+    The choice is made on the name rather than the content, because that is all
+    a remote pane knows before downloading the file -- and it is what the user
+    is looking at when they press F3.
+    """
+    if is_spreadsheet(fs.basename(path)):
+        return SheetView(fs, path)
+    return Viewer(fs, path)

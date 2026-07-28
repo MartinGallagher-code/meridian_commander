@@ -52,6 +52,11 @@ and ships with a built-in file viewer and editor.
 - **File viewer** (`F3`) — scrollable, with **search** (`/`, smart case,
   highlighted matches, `n`/`N` next/previous with wrap-around), toggleable
   line numbers (`l`) and horizontal scrolling; works on remote files too.
+- **Spreadsheet browser** (`F3` on an `.xlsx`/`.xlsm`) — a full-screen grid
+  with row numbers, column letters, right-aligned numbers, dates rendered
+  through the workbook's own number formats, `Tab` between sheets and the same
+  `/` search. It reads the format with the **standard library alone**, so
+  spreadsheets open with nothing installed — on remote panes too.
 - **File editor** (`F4`) — a real in-place editor (insert/delete, Enter/Backspace
   line handling, save with `Ctrl-S`), also with toggleable line numbers.
 - **Tag multiple files** (`Insert`/`Space`, `+` all, `-` none) for batch
@@ -206,13 +211,53 @@ port = 22
 path = /srv/www
 ```
 
+### Spreadsheets
+
+`F3` on a file whose name ends `.xlsx` or `.xlsm` opens a full-screen grid
+instead of the text viewer:
+
+```
+ Sheet: quarterly.xlsx -- Sales (1/2)
+    A      B          C          D          E         F
+  1 Region Q1 Revenue Q2 Revenue Opened     Manager   Notes
+  2 North      1234.5    1402.75 2023-03-15 Ada       steady growth
+  3 South         -98          0 2024-12-31 Grace     under review
+  4 East      88123.5      91002 2020-01-01 Alan
+  5 West           42        7.5 2019-06-30 Katherine new territory this year
+
+ B3  -98  Tab sheet  [/]find  n/N  [w]idth  [q]uit
+```
+
+It is full-screen rather than in-pane on purpose: half of an 80-column terminal
+is about 39 columns, which is two or three spreadsheet columns.
+
+**No dependency.** An `.xlsx` is a zip archive of XML, so `zipfile` and
+`xml.etree` are the whole of it — spreadsheets open on a machine with nothing
+installed, and on a remote pane the file arrives through the same `open_read`
+as any other. Values are shown the way the spreadsheet shows them: shared and
+inline strings, numbers, booleans, cached formula results, and date serials
+rendered through the workbook's number formats (including the 1904 date system
+and Excel's phantom 29 February 1900).
+
+**Legacy `.xls` is not supported.** Despite the name it is an unrelated
+format — a compound-document binary, not zipped XML — with no standard-library
+path, so reading it would mean a third-party dependency. Such files stay in the
+text viewer, where they look like the binary they are.
+
+Styling, charts, images and merged-cell geometry are ignored; this is a reader
+for looking at data. Very large workbooks are capped (50,000 rows and 1,024
+columns per sheet) and the title says `[truncated]` when a cap was hit. The
+whole file has to be read before anything can be shown — a zip's index lives at
+its end, so a partial read parses as nothing — which is why an oversized
+workbook is refused outright rather than shown in part.
+
 ### Key bindings
 
 | Key | Action | Key | Action |
 | --- | --- | --- | --- |
 | `Tab` | switch active pane | `F1` | help |
 | `↑`/`↓` `j`/`k` | move cursor | `F2` | open / connect location |
-| `PgUp`/`PgDn` | page | `F3` | view file |
+| `PgUp`/`PgDn` | page | `F3` | view file (grid for `.xlsx`) |
 | `Home`/`End` | first / last | `F4` | edit file |
 | `Enter` / `→` | enter dir / view file | `F5` | copy to other pane |
 | `Backspace` / `←` | parent directory | `F6` | move to other pane |
@@ -239,6 +284,12 @@ a context menu of actions.
 In the **viewer**: `/` (or F7) searches — smart case (a lowercase pattern is
 case-insensitive), matches highlighted, `n`/`N` next/previous with wrap-around;
 `l` toggles line numbers, `W` toggles wrap, arrows/PgUp/PgDn scroll, `Q` quits.
+In the **spreadsheet grid**: arrows/`hjkl` move a cell at a time, `PgUp`/`PgDn`
+page, `g`/`G` jump to the first/last row, `Home`/`End` to the first/last column,
+`Tab`/`Shift-Tab` (or `]`/`[`) change sheet, `/` searches the sheet with the
+same smart case and `n`/`N`, `w` cycles the column-width limit, `q` quits. The
+footer shows the cursor's cell reference and its value in full, which is where
+to look when a column is too narrow for what is in it.
 In the **editor**: `F2` / `Ctrl-S` / `Ctrl-O` save, `F10` / `Ctrl-Q` quit,
 `Ctrl-Y` / `Ctrl-K` delete a line, `Ctrl-L` toggles line numbers. Esc does
 not quit — only `q`-style keys and `F10` leave the app, so a stray Esc never
@@ -383,7 +434,8 @@ the sync engine are written once and work across any pair of backends.
 | `config.py` | `config.ini` handling (per-plug-in sections, plug-in dirs) |
 | `presets.py` | saved locations: `presets.ini` load/save, live-connection reuse |
 | `panel.py` | one pane's listing, cursor, selection, sorting |
-| `viewer.py` / `editor.py` | file viewer and editor |
+| `viewer.py` / `editor.py` | file viewer and editor (`viewer_for` picks by type) |
+| `xlsx.py` / `sheetview.py` | stdlib `.xlsx` reader and the full-screen grid |
 | `dialogs.py` | prompts, menus, confirmations, progress bars |
 | `app.py` | curses UI, key bindings, orchestration |
 
@@ -438,6 +490,9 @@ How the awkward parts are reached:
   ftplib-shaped stand-ins, so the full fallback chains — `cat`/`dd`/scp,
   `MLSD`/`LIST`, ProxyJump tunnels — are exercised without a network.
 - **The local terminal** really forks a shell on a real pty.
+- **Spreadsheets** are built as real zip archives with the part layout a
+  producer writes, so the reader is tested against the format rather than a
+  stand-in — including damaged parts, oversized parts and the caps.
 
 `tests/support.py` holds the shared harness and `tests/conftest.py` the
 fixtures; the guiding rule is that only the terminal and the blocking dialogs

@@ -390,7 +390,7 @@ def test_view_opens_the_file_under_the_cursor(app, tmp_path, monkeypatch):
         def run(self, stdscr):
             return None
 
-    monkeypatch.setattr(app_mod, "Viewer", _Viewer)
+    monkeypatch.setattr(app_mod, "viewer_for", _Viewer)
     monkeypatch.setattr(curses, "curs_set", lambda n: None)
     app._view()
     assert opened == [str(tmp_path / "left" / "readme")]
@@ -417,7 +417,7 @@ def test_a_viewer_that_fails_is_reported(app, tmp_path, monkeypatch):
         def __init__(self, fs, path):
             raise OSError("cannot read")
 
-    monkeypatch.setattr(app_mod, "Viewer", _Broken)
+    monkeypatch.setattr(app_mod, "viewer_for", _Broken)
     monkeypatch.setattr(curses, "curs_set", lambda n: None)
     scripted = _ScriptedDialogs(monkeypatch)
     app._view()
@@ -559,7 +559,7 @@ def test_activating_a_file_views_it(app, tmp_path, monkeypatch):
         def run(self, stdscr):
             return None
 
-    monkeypatch.setattr(app_mod, "Viewer", _Viewer)
+    monkeypatch.setattr(app_mod, "viewer_for", _Viewer)
     monkeypatch.setattr(curses, "curs_set", lambda n: None)
     app._activate_entry()
     assert opened
