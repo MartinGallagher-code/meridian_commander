@@ -402,3 +402,87 @@ def write_xlsx(path: str, sheets: dict) -> str:
     with open(path, "wb") as f:
         f.write(simple_xlsx(sheets))
     return path
+
+
+# -- document fixtures ---------------------------------------------------------
+DOCX_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def docx_p(text: str, style: str = "", num=None) -> str:
+    """A ``<w:p>``: optionally styled, optionally part of list ``(numId, ilvl)``."""
+    pr = ""
+    if style:
+        pr += f'<w:pStyle w:val="{escape(style)}"/>'
+    if num is not None:
+        num_id, level = num
+        pr += (f'<w:numPr><w:ilvl w:val="{level}"/>'
+               f'<w:numId w:val="{num_id}"/></w:numPr>')
+    pr = f"<w:pPr>{pr}</w:pPr>" if pr else ""
+    return f"<w:p>{pr}<w:r><w:t>{escape(text)}</w:t></w:r></w:p>"
+
+
+def docx_table(rows) -> str:
+    """A ``<w:tbl>`` from a list of row lists."""
+    out = []
+    for row in rows:
+        cells = "".join(
+            f"<w:tc><w:p><w:r><w:t>{escape(str(c))}</w:t></w:r></w:p></w:tc>"
+            for c in row)
+        out.append(f"<w:tr>{cells}</w:tr>")
+    return f"<w:tbl>{''.join(out)}</w:tbl>"
+
+
+def docx_numbering(definitions) -> str:
+    """``numbering.xml`` from ``{numId: [format per level]}``.
+
+    Each numId gets its own abstract definition, which is the shape Word
+    writes and the reason reading a list marker takes two hops.
+    """
+    abstracts, nums = [], []
+    for num_id, formats in definitions.items():
+        levels = "".join(
+            f'<w:lvl w:ilvl="{i}"><w:numFmt w:val="{f}"/></w:lvl>'
+            for i, f in enumerate(formats))
+        abstracts.append(
+            f'<w:abstractNum w:abstractNumId="A{num_id}">{levels}</w:abstractNum>')
+        nums.append(f'<w:num w:numId="{num_id}">'
+                    f'<w:abstractNumId w:val="A{num_id}"/></w:num>')
+    return (f'<?xml version="1.0"?><w:numbering xmlns:w="{DOCX_W}">'
+            f"{''.join(abstracts)}{''.join(nums)}</w:numbering>")
+
+
+def docx_parts(body: str, numbering: str = "") -> dict:
+    """The standard archive layout for a Word document."""
+    rels = ""
+    parts = {
+        "[Content_Types].xml":
+            f'<?xml version="1.0"?><Types xmlns="{XLSX_PKG}"/>',
+        "_rels/.rels":
+            f'<?xml version="1.0"?><Relationships xmlns="{XLSX_PKG}">'
+            f'<Relationship Id="rIdD" Type="{XLSX_REL}/officeDocument" '
+            f'Target="word/document.xml"/></Relationships>',
+        "word/document.xml":
+            f'<?xml version="1.0"?><w:document xmlns:w="{DOCX_W}" '
+            f'xmlns:r="{XLSX_REL}">'
+            f"<w:body>{body}</w:body></w:document>",
+    }
+    if numbering:
+        rels += (f'<Relationship Id="rIdN" Type="{XLSX_REL}/numbering" '
+                 f'Target="numbering.xml"/>')
+        parts["word/numbering.xml"] = numbering
+    parts["word/_rels/document.xml.rels"] = (
+        f'<?xml version="1.0"?><Relationships xmlns="{XLSX_PKG}">'
+        f"{rels}</Relationships>")
+    return parts
+
+
+def simple_docx(body: str, numbering: str = "") -> bytes:
+    return xlsx_bytes(docx_parts(body, numbering))
+
+
+def write_docx(path: str, body: str, numbering: str = "") -> str:
+    """Write a document to ``path`` and return the path."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(simple_docx(body, numbering))
+    return path

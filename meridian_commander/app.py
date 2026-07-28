@@ -8,7 +8,7 @@ Key bindings (also shown in the F1 help screen)::
 
     Tab            switch active pane          F1   help
     Up/Down        move cursor                 F2   open / connect location
-    PgUp/PgDn      page                        F3   view file (grid: .xlsx)
+    PgUp/PgDn      page                        F3   view (.xlsx grid, .docx)
     Home/End       first / last                F4   edit file
     Enter / Right  enter dir / view file       F5   copy  ->  other pane
     Backspace/Left parent directory            F6   move  ->  other pane
@@ -47,10 +47,10 @@ from .operations import (
     count_tree,
     move_path,
 )
+from .browsers import viewer_for
 from .panel import Panel
 from .sync import build_sync_plan, execute_sync_plan
 from .util import human_size, human_time, ljust, rjust
-from .viewer import viewer_for
 
 
 class App:
@@ -1226,6 +1226,7 @@ class App:
             "  p / F11        plug-in mode: run a plug-in in this pane\n"
             "  f              find files: browsable results (view/edit/goto)\n"
             "  F3 on .xlsx    spreadsheet grid: Tab sheet, / find, w width\n"
+            "  F3 on .docx    document view: headings, lists, tables, w wrap\n"
             "  C              configuration: edit config.ini / plug-ins\n"
             "\n"
             "  Function keys -- each also has digit and letter aliases,\n"

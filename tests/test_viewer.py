@@ -128,7 +128,8 @@ def test_searching_an_empty_file_finds_nothing(fs, tmp_path):
     path = tmp_path / "empty.txt"
     path.write_text("")
     view = Viewer(fs, str(path))
-    view.lines = []
+    # Searching works over the file's own lines, so that is the list to empty.
+    view.source = []
     view.set_search("anything")
     assert view.find_next(1) is None
 
@@ -374,3 +375,95 @@ def test_drawing_survives_a_window_that_refuses_the_text(sample):
         return True
 
     assert with_curses_screen(12, 42, draw) is True
+
+
+# -- wrapping ------------------------------------------------------------------
+
+@pytest.mark.parametrize("text, width, pieces", [
+    ("short", 10, ["short"]),
+    ("", 10, [""]),
+    ("exactly-10", 10, ["exactly-10"]),
+    ("one two three four", 8, ["one two", "three", "four"]),
+    ("supercalifragilistic", 8, ["supercal", "ifragili", "stic"]),
+    ("a verylongunbrokenword x", 6, ["a", "verylo", "ngunbr", "okenwo", "rd x"]),
+    ("  leading spaces kept", 10, ["  leading", "spaces", "kept"]),
+])
+def test_wrap_line(text, width, pieces):
+    assert viewer_mod.wrap_line(text, width) == pieces
+
+
+def test_wrapping_never_loses_characters():
+    text = "the quick brown fox jumps over the lazy dog"
+    for width in range(1, 20):
+        assert "".join(viewer_mod.wrap_line(text, width)).replace(" ", "") == \
+            text.replace(" ", "")
+
+
+@pytest.fixture
+def prose(fs, tmp_path):
+    write(str(tmp_path / "prose.txt"),
+          "one two three four five six seven eight\nshort\n")
+    return Viewer(fs, str(tmp_path / "prose.txt"))
+
+
+def test_wrapping_off_leaves_the_lines_alone(prose):
+    assert prose.wrap is False
+    assert prose.lines is prose.source
+
+
+def test_wrapping_on_breaks_a_long_line_into_rows(prose):
+    prose.wrap = True
+    prose._reflow(12)
+    assert prose.lines[:4] == ["one two", "three four", "five six", "seven eight"]
+    # The file still has three lines however many rows they occupy.
+    assert len(prose.source) == 3
+
+
+def test_a_wrapped_line_keeps_one_number(monkeypatch, prose):
+    prose.wrap = True
+    prose._reflow(12)
+    assert prose.origin[:4] == [0, 0, 0, 0]
+    assert prose.first_row == [0, 4, 5]
+
+
+def test_reflowing_is_skipped_when_nothing_changed(prose):
+    prose.wrap = True
+    prose._reflow(12)
+    before = prose.lines
+    prose._reflow(12)
+    assert prose.lines is before
+
+
+def test_a_search_match_split_across_a_wrap_is_still_found(prose):
+    # "three four" straddles a row boundary at this width; searching the
+    # file's own lines is what makes it findable at all.
+    prose.wrap = True
+    prose._reflow(12)
+    prose.set_search("three four")
+    assert prose.find_next(1) == 0
+
+
+def test_toggling_wrap_keeps_the_reader_on_the_same_line(prose):
+    prose.wrap = True
+    prose._reflow(12)
+    prose.top = 4                      # the second file line, "short"
+    prose.toggle_wrap()
+    assert prose.wrap is False
+    assert prose.origin[prose.top] <= 1
+    prose.toggle_wrap()
+    assert prose.wrap is True
+
+
+def test_toggling_wrap_on_a_file_that_would_not_open(fs, tmp_path):
+    view = Viewer(fs, str(tmp_path / "missing.txt"))
+    view.toggle_wrap()
+    assert view.top == 0 and view.lines == []
+
+
+def test_the_wrap_key_reflows_what_is_drawn(monkeypatch, fs, tmp_path):
+    write(str(tmp_path / "long.txt"), "word " * 40 + "\n")
+    view = Viewer(fs, str(tmp_path / "long.txt"))
+    window = _run(monkeypatch, view, [ord("w"), ord("q")], rows=10, cols=40)
+    assert view.wrap is True
+    # Every drawn row fits the screen, which is the whole point.
+    assert all(len(a[2]) <= 40 for a in window.drawn if len(a) > 2)

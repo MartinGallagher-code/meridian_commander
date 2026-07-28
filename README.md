@@ -52,6 +52,10 @@ and ships with a built-in file viewer and editor.
 - **File viewer** (`F3`) — scrollable, with **search** (`/`, smart case,
   highlighted matches, `n`/`N` next/previous with wrap-around), toggleable
   line numbers (`l`) and horizontal scrolling; works on remote files too.
+- **Document viewer** (`F3` on a `.docx`/`.docm`) — the Word document as text,
+  with headings ruled, bullets and numbered lists indented, and tables laid out
+  as aligned columns. Wrapped to the terminal, searchable like any other file,
+  and read with the **standard library alone**.
 - **Spreadsheet browser** (`F3` on an `.xlsx`/`.xlsm`) — a full-screen grid
   with row numbers, column letters, right-aligned numbers, dates rendered
   through the workbook's own number formats, `Tab` between sheets and the same
@@ -211,6 +215,43 @@ port = 22
 path = /srv/www
 ```
 
+### Documents
+
+`F3` on a `.docx` or `.docm` shows the document as text, wrapped to the
+terminal:
+
+```
+Quarterly Report
+================
+Revenue grew across every region this year, with the North
+leading and the South trailing behind.
+
+Detail
+------
+  * a bullet
+    * a nested one
+  1. then a numbered item
+
+  Region  Revenue
+  ------  -------
+  North   1234.5
+```
+
+Headings are ruled, list items indented by depth, and tables laid out as
+aligned columns — structure carried by layout, so the ordinary viewer's
+scrolling and smart-case search work on it unchanged.
+
+A list's marker comes from the document's `numbering.xml`, because in a real
+Word document a bullet and a numbered item are both style *ListParagraph* and
+nothing else tells them apart. The numbers themselves are this reader's own
+count: Word's restart rules depend on state a linear reader does not keep, so a
+list that restarts mid-document is numbered straight through here.
+
+Headers, footers, footnotes, comments and tracked changes are skipped, and
+character formatting is dropped — this shows what the document *says*. Legacy
+`.doc`, like `.xls`, is a different format entirely and stays in the text
+viewer.
+
 ### Spreadsheets
 
 `F3` on a file whose name ends `.xlsx` or `.xlsm` opens a full-screen grid
@@ -257,7 +298,7 @@ workbook is refused outright rather than shown in part.
 | --- | --- | --- | --- |
 | `Tab` | switch active pane | `F1` | help |
 | `↑`/`↓` `j`/`k` | move cursor | `F2` | open / connect location |
-| `PgUp`/`PgDn` | page | `F3` | view file (grid for `.xlsx`) |
+| `PgUp`/`PgDn` | page | `F3` | view file (grid `.xlsx`, doc `.docx`) |
 | `Home`/`End` | first / last | `F4` | edit file |
 | `Enter` / `→` | enter dir / view file | `F5` | copy to other pane |
 | `Backspace` / `←` | parent directory | `F6` | move to other pane |
@@ -283,7 +324,9 @@ a context menu of actions.
 
 In the **viewer**: `/` (or F7) searches — smart case (a lowercase pattern is
 case-insensitive), matches highlighted, `n`/`N` next/previous with wrap-around;
-`l` toggles line numbers, `W` toggles wrap, arrows/PgUp/PgDn scroll, `Q` quits.
+`l` toggles line numbers, `w` toggles wrapping, arrows/PgUp/PgDn scroll, `Q`
+quits. Wrapping breaks at spaces and keeps the file's own line numbering, so a
+paragraph occupying six rows is still one numbered line to search and jump to.
 In the **spreadsheet grid**: arrows/`hjkl` move a cell at a time, `PgUp`/`PgDn`
 page, `g`/`G` jump to the first/last row, `Home`/`End` to the first/last column,
 `Tab`/`Shift-Tab` (or `]`/`[`) change sheet, `/` searches the sheet with the
@@ -434,8 +477,11 @@ the sync engine are written once and work across any pair of backends.
 | `config.py` | `config.ini` handling (per-plug-in sections, plug-in dirs) |
 | `presets.py` | saved locations: `presets.ini` load/save, live-connection reuse |
 | `panel.py` | one pane's listing, cursor, selection, sorting |
-| `viewer.py` / `editor.py` | file viewer and editor (`viewer_for` picks by type) |
+| `viewer.py` / `editor.py` | file viewer (scroll, search, wrap) and editor |
+| `browsers.py` | picks the browser for a file: grid, document or text |
+| `ooxml.py` | the Office Open XML package layer, shared by the readers |
 | `xlsx.py` / `sheetview.py` | stdlib `.xlsx` reader and the full-screen grid |
+| `docx.py` | stdlib `.docx` reader and the document viewer |
 | `dialogs.py` | prompts, menus, confirmations, progress bars |
 | `app.py` | curses UI, key bindings, orchestration |
 
@@ -490,8 +536,8 @@ How the awkward parts are reached:
   ftplib-shaped stand-ins, so the full fallback chains — `cat`/`dd`/scp,
   `MLSD`/`LIST`, ProxyJump tunnels — are exercised without a network.
 - **The local terminal** really forks a shell on a real pty.
-- **Spreadsheets** are built as real zip archives with the part layout a
-  producer writes, so the reader is tested against the format rather than a
+- **Office files** are built as real zip archives with the part layout a
+  producer writes, so the readers are tested against the format rather than a
   stand-in — including damaged parts, oversized parts and the caps.
 
 `tests/support.py` holds the shared harness and `tests/conftest.py` the

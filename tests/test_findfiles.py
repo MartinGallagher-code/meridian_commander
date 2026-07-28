@@ -215,7 +215,7 @@ def test_browser_views_a_file_in_place(monkeypatch, fs, haystack):
         def run(self, stdscr):
             return None
 
-    monkeypatch.setattr("meridian_commander.viewer.Viewer", _FakeViewer)
+    monkeypatch.setattr("meridian_commander.browsers.Viewer", _FakeViewer)
     browser = _browser(fs, haystack, "config")
     _run_browser(monkeypatch, browser, [ord("v"), ord("q")])
     assert opened == [str(haystack / "a" / "config.ini")]
@@ -259,7 +259,7 @@ def test_browser_reports_a_viewer_that_fails(monkeypatch, fs, haystack):
         def run(self, stdscr):
             raise OSError("cannot read that file")
 
-    monkeypatch.setattr("meridian_commander.viewer.Viewer", _BrokenViewer)
+    monkeypatch.setattr("meridian_commander.browsers.Viewer", _BrokenViewer)
     browser = _browser(fs, haystack, "config")
     _, window = _run_browser(monkeypatch, browser, [ord("v"), ord("q")])
     assert "cannot read that file" in window.text

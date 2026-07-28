@@ -17,41 +17,41 @@ dates rendered through the workbook's number formats.  Styling, charts,
 images and merged-cell geometry are ignored -- this is a reader for looking
 at data, not a renderer.
 
-Unlike a CSV, a spreadsheet cannot be read in part: the zip central directory
-lives at the *end* of the archive, so a truncated file does not parse at all.
-The size cap is therefore a refusal rather than a silent truncation, and the
-per-sheet row and column caps apply to parsing, not to the download.
+The package plumbing -- zip members, relationships, size caps -- is shared
+with the .docx and .pptx readers and lives in :mod:`meridian_commander.ooxml`.
+The row and column caps below apply to parsing, not to the download: a
+spreadsheet has to arrive whole before any of it can be shown.
 """
 
 from __future__ import annotations
 
 import datetime
-import io
-import posixpath
 import re
 import zipfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
+from . import ooxml
+from .ooxml import (
+    OoxmlError,
+    load_bytes,
+    local,
+    main_part,
+    open_package,
+    parse_part,
+    part_size,
+    rel_id,
+    related,
+    relationships,
+)
+
 SPREADSHEET_SUFFIXES = (".xlsx", ".xlsm")
 
-# The archive is read whole (see the module docstring), so this cap bounds the
-# memory a stray "view" on a huge workbook can cost.
-MAX_BYTES = 64 * 1024 * 1024
-# A part that inflates beyond this is refused unread: the compressed size in
-# the central directory says nothing about what a decompressor will produce.
-MAX_PART_BYTES = 256 * 1024 * 1024
 MAX_ROWS = 50_000
 MAX_COLS = 1024
 # One cell can legally hold 32k characters; nothing that long is readable in a
 # grid, and the browser shows the value again in its footer.
 MAX_CELL_CHARS = 1024
-
-_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-
-
-class XlsxError(Exception):
-    """A workbook could not be read."""
 
 
 @dataclass
@@ -86,16 +86,6 @@ def is_spreadsheet(name: str) -> bool:
 
 
 # -- helpers ----------------------------------------------------------------
-def _local(tag: str) -> str:
-    """Local name of an element tag, discarding the namespace.
-
-    Matching on the local name means a producer that declares the schema under
-    a different (or no) namespace still parses, which costs nothing here: no
-    two parts of the format reuse a name with a different meaning.
-    """
-    return tag.rpartition("}")[2]
-
-
 def column_index(ref: str) -> int | None:
     """Column number of a cell reference: ``A1`` -> 0, ``AA7`` -> 26.
 
@@ -119,70 +109,6 @@ def column_name(index: int) -> str:
         index, rem = divmod(index - 1, 26)
         name = chr(65 + rem) + name
     return name
-
-
-def _read_part(zf: zipfile.ZipFile, name: str) -> bytes | None:
-    """Read one archive member, or ``None`` if absent or implausibly large."""
-    try:
-        info = zf.getinfo(name)
-    except KeyError:
-        return None
-    if info.file_size > MAX_PART_BYTES:
-        raise XlsxError(f"{name} is too large to read "
-                        f"({info.file_size} bytes)")
-    try:
-        return zf.read(name)
-    except (zipfile.BadZipFile, OSError, RuntimeError) as exc:
-        raise XlsxError(f"cannot read {name}: {exc}") from exc
-
-
-def _parse_xml(data: bytes, name: str):
-    try:
-        return ET.fromstring(data)
-    except ET.ParseError as exc:
-        raise XlsxError(f"{name} is not valid XML: {exc}") from exc
-
-
-def _resolve(base_part: str, target: str) -> str:
-    """Turn a relationship target into an archive member name."""
-    if target.startswith("/"):
-        return target[1:]
-    base_dir = posixpath.dirname(base_part)
-    if not base_dir:
-        return target
-    return posixpath.normpath(posixpath.join(base_dir, target))
-
-
-def _relationships(zf: zipfile.ZipFile, part: str) -> dict[str, tuple[str, str]]:
-    """``{rId: (type, member)}`` for the part's ``.rels`` companion."""
-    base_dir = posixpath.dirname(part)
-    rels_name = posixpath.join(base_dir, "_rels",
-                               posixpath.basename(part) + ".rels")
-    data = _read_part(zf, rels_name)
-    if data is None:
-        return {}
-    root = _parse_xml(data, rels_name)
-    out = {}
-    for node in root:
-        if _local(node.tag) != "Relationship":
-            continue
-        rid = node.get("Id")
-        target = node.get("Target")
-        if not rid or not target:
-            continue
-        # An external relationship (a link to another workbook) has no member
-        # in this archive, so there is nothing here to resolve it against.
-        if node.get("TargetMode") == "External":
-            continue
-        out[rid] = (node.get("Type", ""), _resolve(part, target))
-    return out
-
-
-def _by_type(rels: dict, suffix: str) -> str | None:
-    for _rid, (rtype, member) in rels.items():
-        if rtype.rsplit("/", 1)[-1] == suffix:
-            return member
-    return None
 
 
 # -- number formats ---------------------------------------------------------
@@ -229,17 +155,16 @@ def _format_kind(code: str) -> str | None:
 
 def _style_kinds(zf: zipfile.ZipFile, member: str) -> list[str | None]:
     """Date/time kind per cell-format index, as cells reference it with ``s``."""
-    data = _read_part(zf, member)
-    if data is None:
+    root = parse_part(zf, member)
+    if root is None:
         return []
-    root = _parse_xml(data, member)
     custom: dict[int, str] = {}
     kinds: list[str | None] = []
     for node in root:
-        tag = _local(node.tag)
+        tag = local(node.tag)
         if tag == "numFmts":
             for fmt in node:
-                if _local(fmt.tag) != "numFmt":
+                if local(fmt.tag) != "numFmt":
                     continue
                 try:
                     fid = int(fmt.get("numFmtId", ""))
@@ -250,7 +175,7 @@ def _style_kinds(zf: zipfile.ZipFile, member: str) -> list[str | None]:
             # cellStyleXfs holds <xf> too, and cells never point at it, so the
             # list has to come from this element rather than a tree-wide search.
             for xf in node:
-                if _local(xf.tag) != "xf":
+                if local(xf.tag) != "xf":
                     continue
                 try:
                     fid = int(xf.get("numFmtId", "0"))
@@ -321,23 +246,22 @@ def _join(date_text: str, seconds: int, kind: str) -> str:
 
 # -- parts ------------------------------------------------------------------
 def _shared_strings(zf: zipfile.ZipFile, member: str) -> list[str]:
-    data = _read_part(zf, member)
-    if data is None:
+    root = parse_part(zf, member)
+    if root is None:
         return []
-    root = _parse_xml(data, member)
     out = []
     for si in root:
-        if _local(si.tag) != "si":
+        if local(si.tag) != "si":
             continue
         parts = []
         for node in si:
-            tag = _local(node.tag)
+            tag = local(node.tag)
             if tag == "t":
                 parts.append(node.text or "")
             elif tag == "r":
                 # A rich-text run: the styling is dropped, the text kept.
                 for sub in node:
-                    if _local(sub.tag) == "t":
+                    if local(sub.tag) == "t":
                         parts.append(sub.text or "")
             # rPh (a phonetic guide) also holds <t>, but it is an annotation
             # rather than the cell's text, so it stays out.
@@ -350,10 +274,10 @@ def _cell_text(cell, shared: list[str], kinds: list[str | None],
     ctype = cell.get("t") or "n"
     if ctype == "inlineStr":
         return "".join(node.text or ""
-                       for node in cell.iter() if _local(node.tag) == "t")
+                       for node in cell.iter() if local(node.tag) == "t")
     raw = None
     for child in cell:
-        if _local(child.tag) == "v":
+        if local(child.tag) == "v":
             raw = child.text
             break
     if raw is None:
@@ -390,13 +314,12 @@ def _read_sheet(zf: zipfile.ZipFile, member: str, name: str,
                 shared: list[str], kinds: list[str | None],
                 date1904: bool) -> Sheet:
     sheet = Sheet(name)
-    try:
-        info = zf.getinfo(member)
-    except KeyError:
+    size = part_size(zf, member)
+    if size is None:
         return sheet
-    if info.file_size > MAX_PART_BYTES:
-        raise XlsxError(f"sheet '{name}' is too large to read "
-                        f"({info.file_size} bytes)")
+    if size > ooxml.MAX_PART_BYTES:
+        raise OoxmlError(f"sheet '{name}' is too large to read "
+                         f"({size} bytes)")
     expected = 0
     with zf.open(member) as stream:
         # iterparse rather than a whole-tree parse: a sheet is by far the
@@ -404,7 +327,7 @@ def _read_sheet(zf: zipfile.ZipFile, member: str, name: str,
         try:
             events = ET.iterparse(stream, events=("end",))
             for _event, elem in events:
-                if _local(elem.tag) != "row":
+                if local(elem.tag) != "row":
                     continue
                 index = _row_index(elem, expected)
                 if index >= MAX_ROWS:
@@ -419,11 +342,11 @@ def _read_sheet(zf: zipfile.ZipFile, member: str, name: str,
                 expected = index + 1
                 elem.clear()
         except ET.ParseError as exc:
-            raise XlsxError(f"sheet '{name}' is not valid XML: {exc}") from exc
+            raise OoxmlError(f"sheet '{name}' is not valid XML: {exc}") from exc
         except (zipfile.BadZipFile, OSError) as exc:
             # The part is decompressed as it is parsed, so damage shows up
             # here rather than when the archive was opened.
-            raise XlsxError(f"cannot read sheet '{name}': {exc}") from exc
+            raise OoxmlError(f"cannot read sheet '{name}': {exc}") from exc
     return sheet
 
 
@@ -442,7 +365,7 @@ def _read_row(elem, sheet: Sheet, shared: list[str],
               kinds: list[str | None], date1904: bool) -> list[str]:
     cells: list[str] = []
     for cell in elem:
-        if _local(cell.tag) != "c":
+        if local(cell.tag) != "c":
             continue
         index = column_index(cell.get("r", ""))
         if index is None:
@@ -461,39 +384,31 @@ def _read_row(elem, sheet: Sheet, shared: list[str],
 
 # -- entry points -----------------------------------------------------------
 def parse_workbook(data: bytes, name: str = "workbook") -> Workbook:
-    """Parse workbook bytes.  Raises :class:`XlsxError` on anything unreadable."""
-    try:
-        zf = zipfile.ZipFile(io.BytesIO(data))
-    except zipfile.BadZipFile as exc:
-        raise XlsxError(f"not a readable .xlsx archive: {exc}") from exc
-    with zf:
-        # The package's own relationships live in "_rels/.rels", which is what
-        # the naming rule produces for the empty (root) part name.
-        root_rels = _relationships(zf, "")
-        part = _by_type(root_rels, "officeDocument") or "xl/workbook.xml"
-        book_data = _read_part(zf, part)
-        if book_data is None:
-            raise XlsxError("no workbook part in the archive")
-        book = _parse_xml(book_data, part)
-        rels = _relationships(zf, part)
+    """Parse workbook bytes.  Raises :class:`OoxmlError` on anything unreadable."""
+    with open_package(data) as zf:
+        part = main_part(zf, "xl/workbook.xml")
+        book = parse_part(zf, part)
+        if book is None:
+            raise OoxmlError("no workbook part in the archive")
+        rels = relationships(zf, part)
 
         date1904 = False
         entries: list[tuple[str, str | None]] = []
         for node in book:
-            tag = _local(node.tag)
+            tag = local(node.tag)
             if tag == "workbookPr":
                 date1904 = (node.get("date1904") or "").lower() in ("1", "true")
             elif tag == "sheets":
                 for item in node:
-                    if _local(item.tag) != "sheet":
+                    if local(item.tag) != "sheet":
                         continue
-                    rid = item.get(f"{{{_REL_NS}}}id") or item.get("id")
+                    rid = rel_id(item)
                     member = rels.get(rid, ("", None))[1] if rid else None
                     entries.append((item.get("name", "Sheet"), member))
 
-        shared_member = _by_type(rels, "sharedStrings")
+        shared_member = related(rels, "sharedStrings")
         shared = _shared_strings(zf, shared_member) if shared_member else []
-        styles_member = _by_type(rels, "styles")
+        styles_member = related(rels, "styles")
         kinds = _style_kinds(zf, styles_member) if styles_member else []
 
         workbook = Workbook(name)
@@ -507,22 +422,8 @@ def parse_workbook(data: bytes, name: str = "workbook") -> Workbook:
             workbook.sheets.append(
                 _read_sheet(zf, member, sheet_name, shared, kinds, date1904))
         if not workbook.sheets:
-            raise XlsxError("the workbook declares no sheets")
+            raise OoxmlError("the workbook declares no sheets")
         return workbook
-
-
-def load_bytes(fs, path: str) -> bytes:
-    """Read a whole workbook through any backend, refusing oversized files."""
-    stream = fs.open_read(path)
-    try:
-        data = stream.read(MAX_BYTES + 1)
-    finally:
-        stream.close()
-    if len(data) > MAX_BYTES:
-        raise XlsxError(
-            f"file is larger than {MAX_BYTES // (1024 * 1024)} MiB; a "
-            "spreadsheet cannot be read in part")
-    return data
 
 
 def read_workbook(fs, path: str) -> Workbook:
