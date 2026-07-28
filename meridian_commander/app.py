@@ -8,7 +8,7 @@ Key bindings (also shown in the F1 help screen)::
 
     Tab            switch active pane          F1   help
     Up/Down        move cursor                 F2   open / connect location
-    PgUp/PgDn      page                        F3   view (.xlsx grid, .docx)
+    PgUp/PgDn      page                        F3   view (xlsx/docx/pptx)
     Home/End       first / last                F4   edit file
     Enter / Right  enter dir/archive/view      F5   copy  ->  other pane
     Backspace/Left parent directory            F6   move  ->  other pane
@@ -1266,6 +1266,7 @@ class App:
             "  f              find files: browsable results (view/edit/goto)\n"
             "  F3 on .xlsx    spreadsheet grid: Tab sheet, / find, w width\n"
             "  F3 on .docx    document view: headings, lists, tables, w wrap\n"
+            "  F3 on .pptx    slide browser: Tab slide, t notes, / find\n"
             "  C              configuration: edit config.ini / plug-ins\n"
             "\n"
             "  Function keys -- each also has digit and letter aliases,\n"

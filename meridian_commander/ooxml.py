@@ -31,6 +31,8 @@ MAX_BYTES = 64 * 1024 * 1024
 # the central directory says nothing about what a decompressor will produce.
 MAX_PART_BYTES = 256 * 1024 * 1024
 
+REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
 
 class OoxmlError(Exception):
     """An OOXML file could not be read."""
@@ -55,8 +57,16 @@ def attr(elem, name: str) -> str | None:
 
 
 def rel_id(elem) -> str | None:
-    """The ``r:id`` of an element: what it points at lives in the .rels file."""
-    return attr(elem, "id")
+    """The ``r:id`` of an element: what it points at lives in the .rels file.
+
+    The namespaced attribute is asked for by name rather than through
+    :func:`attr`, because an element can carry both: a ``<p:sldId>`` has a
+    plain ``id`` of its own -- the slide's number in the deck -- beside the
+    ``r:id`` that names its part.  Taking the wrong one finds no relationship
+    and the slide comes back empty.  The bare name is still accepted as a
+    fallback, for a producer that does not namespace it.
+    """
+    return elem.get(f"{{{REL_NS}}}id") or elem.get("id")
 
 
 # -- parts ------------------------------------------------------------------

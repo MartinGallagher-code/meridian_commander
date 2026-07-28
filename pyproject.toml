@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "meridian-commander"
 version = "1.1.0"
-description = "Two-pane terminal file manager (Midnight Commander style): local + SFTP/SSH/FTP panes, cross-location copy/move, bidirectional sync, in-pane terminal, viewer, editor, .xlsx grid and .docx document browsers, zip/tar archives browsable as directories, and plug-ins."
+description = "Two-pane terminal file manager (Midnight Commander style): local + SFTP/SSH/FTP panes, cross-location copy/move, bidirectional sync, in-pane terminal, viewer, editor, .xlsx grid, .docx document and .pptx slide browsers, zip/tar archives browsable as directories, and plug-ins."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "GPL-3.0-or-later" }
@@ -18,7 +18,7 @@ authors = [{ name = "Martin Gallagher" }]
 keywords = [
     "file-manager", "tui", "curses", "terminal", "two-pane",
     "midnight-commander", "sftp", "ssh", "ftp", "sync",
-    "xlsx", "spreadsheet", "docx", "word", "zip", "tar", "archive",
+    "xlsx", "spreadsheet", "docx", "word", "pptx", "powerpoint", "zip", "tar", "archive",
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",

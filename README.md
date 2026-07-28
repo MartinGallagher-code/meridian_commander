@@ -60,6 +60,10 @@ and ships with a built-in file viewer and editor.
   with headings ruled, bullets and numbered lists indented, and tables laid out
   as aligned columns. Wrapped to the terminal, searchable like any other file,
   and read with the **standard library alone**.
+- **Slide browser** (`F3` on a `.pptx`/`.pptm`) — one slide per screen with
+  its title, bullets at their outline levels and tables; `Tab` between slides,
+  `t` for the speaker notes, `/` to search the whole deck. Standard library
+  alone, like the others.
 - **Spreadsheet browser** (`F3` on an `.xlsx`/`.xlsm`) — a full-screen grid
   with row numbers, column letters, right-aligned numbers, dates rendered
   through the workbook's own number formats, `Tab` between sheets and the same
@@ -295,6 +299,41 @@ character formatting is dropped — this shows what the document *says*. Legacy
 `.doc`, like `.xls`, is a different format entirely and stays in the text
 viewer.
 
+### Presentations
+
+`F3` on a `.pptx` or `.pptm` shows one slide per screen:
+
+```
+ Slides: deck.pptx -- 2/3
+Agenda
+======
+  * Why panes
+    * Remote locations
+      * Plug-ins, café — dash
+
+Notes
+-----
+  Mention the grid browser.
+
+ Agenda  Tab slide  [t]notes  [/]find  n/N  [q]uit
+```
+
+Slides are discrete, so this is paged rather than scrolled: moving between
+slides is the main gesture and scrolling only matters for a slide with more on
+it than fits. Titles are ruled, bullets indented by their outline level,
+tables laid out as aligned columns, and long lines wrapped to the terminal.
+
+**Slide order comes from the deck, not the file names.** A presentation stores
+its running order in `sldIdLst`; reordering slides in PowerPoint leaves
+`slide1.xml` where it always was. Reading by file name would show a reordered
+deck in the wrong order.
+
+Placeholder text inherited from a layout or master is not pulled in, so a slide
+shows what was typed on *it*, and slide numbers and dates — fields rather than
+content — stay out of the notes. Images, charts, animations and geometry are
+ignored. Shapes are read in the order the file lists them, which is usually but
+not always reading order; there is no layout engine here to do better.
+
 ### Spreadsheets
 
 `F3` on a file whose name ends `.xlsx` or `.xlsm` opens a full-screen grid
@@ -341,7 +380,7 @@ workbook is refused outright rather than shown in part.
 | --- | --- | --- | --- |
 | `Tab` | switch active pane | `F1` | help |
 | `↑`/`↓` `j`/`k` | move cursor | `F2` | open / connect location |
-| `PgUp`/`PgDn` | page | `F3` | view file (grid `.xlsx`, doc `.docx`) |
+| `PgUp`/`PgDn` | page | `F3` | view (`.xlsx` grid, `.docx`, `.pptx`) |
 | `Home`/`End` | first / last | `F4` | edit file |
 | `Enter` / `→` | enter dir / view file | `F5` | copy to other pane |
 | `Backspace` / `←` | parent directory | `F6` | move to other pane |
@@ -370,6 +409,10 @@ case-insensitive), matches highlighted, `n`/`N` next/previous with wrap-around;
 `l` toggles line numbers, `w` toggles wrapping, arrows/PgUp/PgDn scroll, `Q`
 quits. Wrapping breaks at spaces and keeps the file's own line numbering, so a
 paragraph occupying six rows is still one numbered line to search and jump to.
+In the **slide browser**: `Tab`/`Shift-Tab` (or `←`/`→`, `[`/`]`, Space)
+change slide, arrows/PgUp/PgDn scroll a slide that overflows, `t` shows the
+speaker notes, `/` searches every slide's title, body and notes with `n`/`N`,
+`q` quits.
 In the **spreadsheet grid**: arrows/`hjkl` move a cell at a time, `PgUp`/`PgDn`
 page, `g`/`G` jump to the first/last row, `Home`/`End` to the first/last column,
 `Tab`/`Shift-Tab` (or `]`/`[`) change sheet, `/` searches the sheet with the
@@ -526,6 +569,7 @@ the sync engine are written once and work across any pair of backends.
 | `ooxml.py` | the Office Open XML package layer, shared by the readers |
 | `xlsx.py` / `sheetview.py` | stdlib `.xlsx` reader and the full-screen grid |
 | `docx.py` | stdlib `.docx` reader and the document viewer |
+| `pptx.py` | stdlib `.pptx` reader and the slide browser |
 | `dialogs.py` | prompts, menus, confirmations, progress bars |
 | `app.py` | curses UI, key bindings, orchestration |
 
