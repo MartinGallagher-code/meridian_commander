@@ -18,6 +18,9 @@ Key bindings (also shown in the F1 help screen)::
     Ctrl-R         reload both panes           F10  quit
     Ctrl-G         go to path
     Ctrl-T         change sort order
+    ~              home directory (this pane)
+    =              other pane: same location as this one
+    b              presets: saved locations to return to
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ import os
 import shlex
 import subprocess
 
-from . import dialogs
+from . import dialogs, presets
 from .editor import Editor
 from .filesystems import (
     FileSystem,
@@ -337,6 +340,12 @@ class App:
             self._set_message("Reloaded")
         elif key == 7:  # Ctrl-G go to path
             self._go_to_path()
+        elif key == ord("~"):  # home directory of this pane's filesystem
+            self._go_home()
+        elif key == ord("="):  # other pane: same location as this one
+            self._mirror_to_other_pane()
+        elif key == ord("b"):  # presets: saved locations
+            self._presets_menu()
         elif key == 20:  # Ctrl-T sort
             self._sort_menu()
         elif key == ord("."):  # toggle hidden files in the active pane
@@ -629,10 +638,12 @@ class App:
 
         labels = ["View", "Edit", "Copy to other pane", "Move to other pane",
                   "Rename", "Delete", "Tag / untag", "New directory",
-                  "Find files here", "Terminal in this pane",
-                  "Full-screen shell", "Cancel"]
+                  "Home directory", "Same location in other pane",
+                  "Presets (go to / save)", "Find files here",
+                  "Terminal in this pane", "Full-screen shell", "Cancel"]
         actions = ["view", "edit", "copy", "move", "rename", "delete",
-                   "tag", "mkdir", "find", "terminal", "shell", None]
+                   "tag", "mkdir", "home", "mirror", "presets", "find",
+                   "terminal", "shell", None]
         choice = dialogs.menu(self.stdscr, header[:40], labels)
         if choice is None:
             return
@@ -653,6 +664,12 @@ class App:
             panel.toggle_select()
         elif action == "mkdir":
             self._mkdir()
+        elif action == "home":
+            self._go_home()
+        elif action == "mirror":
+            self._mirror_to_other_pane()
+        elif action == "presets":
+            self._presets_menu()
         elif action == "find":
             self._find_files()
         elif action == "terminal":
@@ -731,6 +748,50 @@ class App:
             dialogs.message(self.stdscr, "Error",
                             f"Cannot open:\n{target}", error=True)
 
+    def _go_home(self) -> None:
+        """Jump the active pane to its own filesystem's home directory.
+
+        On a remote pane that is the remote account's home, so the key means
+        the same thing wherever the pane happens to be pointing.
+        """
+        panel = self.active
+        try:
+            home = panel.fs.home()
+        except Exception as exc:
+            dialogs.message(self.stdscr, "Error",
+                            f"Cannot determine the home directory:\n{exc}",
+                            error=True)
+            return
+        if panel.chdir(home):
+            self._set_message(f"Home: {panel.fs.label()}:{panel.path}")
+        else:
+            dialogs.message(self.stdscr, "Error",
+                            f"Cannot open home directory:\n{home}", error=True)
+
+    def _mirror_to_other_pane(self) -> None:
+        """Show this pane's location in the other pane as well.
+
+        The panes then share one live connection, so a remote location is not
+        dialled (or authenticated) a second time and a move between the two
+        panes is a cheap same-server rename.  The other pane's own view
+        settings (sort order, hidden files) are left alone.
+        """
+        panel = self.active
+        other = self.other
+        if other.plugin is not None:
+            self._set_message("Other pane is busy -- close its plug-in "
+                              "or terminal first")
+            return
+        if other.fs is panel.fs and other.path == panel.path:
+            self._set_message("Both panes already show this location")
+            return
+        if not other.set_location(panel.fs, panel.path):
+            dialogs.message(self.stdscr, "Error",
+                            f"Cannot open in the other pane:\n{panel.path}",
+                            error=True)
+            return
+        self._set_message(f"Other pane: {other.fs.label()}:{other.path}")
+
     def _sort_menu(self) -> None:
         options = ["Name", "Extension", "Size", "Modify time"]
         keys = ["name", "ext", "size", "mtime"]
@@ -739,31 +800,37 @@ class App:
             self.active.set_sort(keys[choice])
             self._set_message(f"Sorted by {options[choice].lower()}")
 
+    def _connect(self, info: dict) -> FileSystem:
+        """Open the backend described by a connect-dialog/preset dict.
+
+        Raises whatever the backend raises; callers report it.
+        """
+        if info["scheme"] == "local":
+            return LocalFileSystem()
+        if info["scheme"] == "sftp":
+            return SFTPFileSystem(
+                host=info["host"], username=info["username"],
+                password=info.get("password"), port=info["port"],
+                key_filename=info.get("key_filename"),
+            )
+        if info["scheme"] == "ssh":
+            return SSHFileSystem(
+                host=info["host"], username=info["username"],
+                password=info.get("password"), port=info["port"],
+                key_filename=info.get("key_filename"),
+            )
+        return FTPFileSystem(
+            host=info["host"], username=info["username"] or "anonymous",
+            password=info.get("password") or "", port=info["port"],
+        )
+
     def _open_location(self) -> None:
         info = dialogs.connect_dialog(self.stdscr)
         if not info:
             return
         panel = self.active
         try:
-            if info["scheme"] == "local":
-                fs: FileSystem = LocalFileSystem()
-            elif info["scheme"] == "sftp":
-                fs = SFTPFileSystem(
-                    host=info["host"], username=info["username"],
-                    password=info.get("password"), port=info["port"],
-                    key_filename=info.get("key_filename"),
-                )
-            elif info["scheme"] == "ssh":
-                fs = SSHFileSystem(
-                    host=info["host"], username=info["username"],
-                    password=info.get("password"), port=info["port"],
-                    key_filename=info.get("key_filename"),
-                )
-            else:
-                fs = FTPFileSystem(
-                    host=info["host"], username=info["username"],
-                    password=info.get("password", ""), port=info["port"],
-                )
+            fs = self._connect(info)
         except FileSystemError as exc:
             dialogs.message(self.stdscr, "Connection failed", str(exc), error=True)
             return
@@ -781,6 +848,130 @@ class App:
         panel.clear_selection()
         panel.refresh()
         self._set_message(f"Connected: {fs.label()}")
+
+    # -- presets (saved locations) ------------------------------------------
+    def _presets_menu(self) -> None:
+        """List the saved locations, and offer to save or delete one."""
+        items = presets.load()
+        labels = [f"{p.name}  --  {p.label()}"[:60] for p in items]
+        extras = ["Save this location as a preset...",
+                  "Delete a preset...", "Cancel"]
+        choice = dialogs.menu(self.stdscr, "Presets", labels + extras)
+        if choice is None or choice == len(labels) + 2:
+            return
+        if choice < len(labels):
+            self._open_preset(items[choice])
+        elif choice == len(labels):
+            self._save_preset()
+        else:
+            self._delete_preset(items)
+
+    def _open_preset(self, preset: presets.Preset) -> None:
+        """Point the active pane at a saved location."""
+        panel = self.active
+        fs = self._live_fs_for(preset) or self._connect_preset(preset)
+        if fs is None:
+            return
+        if panel.set_location(fs, preset.path):
+            self._set_message(f"{preset.name}: {fs.label()}:{panel.path}")
+            return
+        # The connection is good but the directory has gone: land on the
+        # location's home rather than leaving the pane where it was.
+        if panel.set_location(fs, fs.home()):
+            self._set_message(f"'{preset.name}': {preset.path} is gone -- "
+                              f"opened {panel.path}")
+        else:
+            dialogs.message(self.stdscr, "Preset",
+                            f"Cannot open:\n{preset.label()}", error=True)
+
+    def _live_fs_for(self, preset: presets.Preset) -> FileSystem | None:
+        """An open backend the preset can reuse, newest first, or None.
+
+        Reusing the connection a pane already holds means a saved remote
+        location opens instantly and without a second authentication.
+        """
+        candidates = [self.active.fs, self.other.fs] + list(
+            reversed(self._backends))
+        for fs in candidates:
+            if preset.matches(fs):
+                return fs
+        return None
+
+    def _connect_preset(self, preset: presets.Preset) -> FileSystem | None:
+        """Dial a preset's location, asking for a password only if needed."""
+        info = preset.connect_info()
+        try:
+            fs = self._connect(info)
+        except Exception as exc:
+            # Presets deliberately store no password, so the first attempt
+            # goes through the agent and default keys, like ssh itself.  Give
+            # the user a chance to supply one before giving up.
+            password = dialogs.prompt(
+                self.stdscr, f"Connect to {preset.host}",
+                "Password (Esc/blank = give up):", is_password=True)
+            if not password:
+                dialogs.message(self.stdscr, "Connection failed",
+                                f"{preset.label()}\n\n{exc}", error=True)
+                return None
+            info["password"] = password
+            try:
+                fs = self._connect(info)
+            except Exception as exc2:
+                dialogs.message(self.stdscr, "Connection failed",
+                                f"{preset.label()}\n\n{exc2}", error=True)
+                return None
+        self._backends.append(fs)
+        return fs
+
+    def _save_preset(self) -> None:
+        """Save the active pane's location under a name."""
+        panel = self.active
+        default = panel.fs.basename(panel.path) or panel.fs.label()
+        name = dialogs.prompt(self.stdscr, "Save preset",
+                              f"Name for {panel.fs.label()}:{panel.path}",
+                              default=default)
+        if name is None:
+            return
+        name = name.strip()
+        if not presets.valid_name(name):
+            dialogs.message(self.stdscr, "Save preset",
+                            "A preset name cannot be empty, contain [ or ],\n"
+                            "or be called DEFAULT.", error=True)
+            return
+        items = presets.load()
+        if any(p.name == name for p in items):
+            if not dialogs.confirm(self.stdscr, "Save preset",
+                                   f"'{name}' already exists.\nReplace it?"):
+                return
+        preset = presets.from_location(name, panel.fs, panel.path)
+        try:
+            presets.save(presets.add(preset, items))
+        except OSError as exc:
+            dialogs.message(self.stdscr, "Save preset",
+                            f"Could not write presets:\n{exc}", error=True)
+            return
+        note = "" if preset.scheme == "local" else " (no password stored)"
+        self._set_message(f"Preset '{name}' saved -- press b to return{note}")
+
+    def _delete_preset(self, items: list[presets.Preset]) -> None:
+        if not items:
+            dialogs.message(self.stdscr, "Presets", "No presets saved yet.")
+            return
+        labels = [f"{p.name}  --  {p.label()}"[:60] for p in items]
+        choice = dialogs.menu(self.stdscr, "Delete preset", labels + ["Cancel"])
+        if choice is None or choice == len(items):
+            return
+        victim = items[choice]
+        if not dialogs.confirm(self.stdscr, "Delete preset",
+                               f"Delete '{victim.name}'?\n{victim.label()}"):
+            return
+        try:
+            presets.save(presets.remove(victim.name, items))
+        except OSError as exc:
+            dialogs.message(self.stdscr, "Delete preset",
+                            f"Could not write presets:\n{exc}", error=True)
+            return
+        self._set_message(f"Preset '{victim.name}' deleted")
 
     def _view(self) -> None:
         panel = self.active
@@ -1027,6 +1218,9 @@ class App:
             "  Insert / Space tag file    +/-  tag all / untag all\n"
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
             "  Ctrl-G         go to path   Ctrl-T  sort order\n"
+            "  ~              home directory of this pane's location\n"
+            "  =              other pane: same directory and connection\n"
+            "  b              presets: go to / save / delete a location\n"
             "  .              show/hide hidden files (this pane)\n"
             "  t              terminal in this pane (Ctrl-] switch, F10 close)\n"
             "  !              full-screen shell (for vim/htop etc.)\n"

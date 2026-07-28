@@ -182,7 +182,7 @@ class FileSystem(abc.ABC):
     def rename(self, src: str, dst: str) -> None:
         """Rename within the same filesystem (used for same-fs moves)."""
 
-    def close(self) -> None:  # pragma: no cover - trivial default
+    def close(self) -> None:
         """Release any resources (network connections)."""
 
 
@@ -372,7 +372,7 @@ def _resolve_ssh_connection(
 
         try:
             resolved["username"] = getpass.getuser()
-        except Exception:  # pragma: no cover - exotic environments
+        except Exception:
             resolved["username"] = "root"
     if not resolved["port"]:
         resolved["port"] = 22
@@ -507,7 +507,7 @@ def _open_ssh_client(
     """
     try:
         import paramiko
-    except ImportError as exc:  # pragma: no cover - environment dependent
+    except ImportError as exc:
         raise FileSystemError(
             "SSH/SFTP support requires the 'paramiko' package "
             "(pip install paramiko)."
@@ -967,7 +967,7 @@ class _FTPReader:
         def worker() -> None:
             try:
                 ftp.retrbinary(f"RETR {path}", self._queue.put, blocksize=CHUNK_SIZE)
-            except Exception as exc:  # pragma: no cover - network dependent
+            except Exception as exc:
                 self._error = exc
             finally:
                 self._queue.put(None)
@@ -1010,14 +1010,10 @@ class _FTPWriter:
         self._error: Exception | None = None
         self._queue: "queue.Queue[bytes | None]" = queue.Queue(maxsize=16)
 
-        def reader() -> bytes:
-            chunk = self._queue.get()
-            return chunk if chunk is not None else b""
-
         def worker() -> None:
             try:
                 ftp.storbinary(f"STOR {path}", _QueueFile(self._queue))
-            except Exception as exc:  # pragma: no cover - network dependent
+            except Exception as exc:
                 self._error = exc
 
         self._thread = threading.Thread(target=worker, daemon=True)
@@ -1203,7 +1199,7 @@ class SSHFileSystem(FileSystem):
                               else f"{tmpl.split()[0]}: failed")
             except FileSystemError as exc:
                 errors.append(str(exc))
-            except Exception as exc:  # pragma: no cover - network dependent
+            except Exception as exc:
                 errors.append(f"{type(exc).__name__}: {exc}")
         detail = "; ".join(dict.fromkeys(errors)) or "no transfer method worked"
         raise FileSystemError(

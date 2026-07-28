@@ -141,9 +141,41 @@ class Panel:
         self.cursor = 0
         self.top = 0
         self.refresh(keep_name=keep_name)
-        if self.error and not self.entries:
-            # Failed to open; roll back so the user is not stranded.
+        if self.error:
+            # Failed to open; roll back so the user is not stranded.  The
+            # listing is never empty on success (a readable directory still
+            # carries the ".." entry), so the error alone is the signal.
             self.path = old
+            self.refresh()
+            return False
+        return True
+
+    def go_home(self) -> bool:
+        """Jump to the home directory of *this pane's* filesystem.
+
+        For a remote pane that is the remote account's home, not the local
+        one, so the key does the obvious thing on either side.
+        """
+        return self.chdir(self.fs.home())
+
+    def set_location(self, fs: FileSystem, path: str) -> bool:
+        """Point this panel at ``path`` on ``fs``, which may be another backend.
+
+        Passing a live :class:`FileSystem` (rather than connection details)
+        lets two panes share one connection, so a remote location is never
+        dialled -- or authenticated -- twice.  As with :meth:`chdir` the
+        previous location is restored if the new one cannot be listed.
+        """
+        old_fs, old_path = self.fs, self.path
+        self.fs = fs
+        self.path = fs.normpath(path)
+        self.selected.clear()
+        self.cursor = 0
+        self.top = 0
+        self.refresh()
+        if self.error:
+            self.fs = old_fs
+            self.path = old_path
             self.refresh()
             return False
         return True

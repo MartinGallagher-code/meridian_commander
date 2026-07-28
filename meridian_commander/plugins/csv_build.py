@@ -239,6 +239,11 @@ class CsvBuild(InputOutputPlugin):
         text, truncated = tabular.read_text(
             fs, path, encoding=self.config["encoding"] or "utf-8",
             max_bytes=int(self.config["max_bytes"]))
+        if truncated:
+            # The byte cap cuts mid-record, so the last line is a fragment that
+            # will not parse.  Drop it rather than failing the whole file; the
+            # summary says the source was truncated.
+            text = text[: text.rfind("\n") + 1]
         header, rows = tabular.from_jsonl(text)
         out = self._write(f"{_stem(entry.name)}.csv", header, rows)
         msg = f"from-jsonl {len(rows)} row(s) -> {out}"
@@ -309,7 +314,11 @@ def _aggregate_pandas(table: tabular.Table, ki: int, vi, agg: str):
     raw = [row[vi] if vi < len(row) else "" for row in table.rows]
     nums = pd.to_numeric(pd.Series(raw), errors="coerce")
     df = pd.DataFrame({"k": key, "v": nums})
-    grouped = getattr(df.groupby("k", sort=False)["v"], agg)()
+    group = df.groupby("k", sort=False)["v"]
+    # pandas sums an all-null group to 0, where the stdlib path reports it as
+    # blank (no numbers to add).  min_count=1 makes it NaN so both engines
+    # agree, which is the whole point of sharing the output format.
+    grouped = group.sum(min_count=1) if agg == "sum" else getattr(group, agg)()
     rows = []
     for k, v in grouped.items():
         rows.append([k, "" if pd.isna(v) else tabular.format_number(float(v))])

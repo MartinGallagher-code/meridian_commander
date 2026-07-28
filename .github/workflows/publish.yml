@@ -28,7 +28,24 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[dev]"
       - name: Run tests
-        run: pytest -q
+        run: python -m coverage run -m pytest -q
+      - name: Coverage
+        # Prints the per-module table and fails below fail_under (100) from
+        # pyproject.toml.
+        #
+        # Except on 3.9, where the total is enforced but not the gate: precise
+        # line events arrived with PEP 626 in 3.10, and before that the tracer
+        # does not record a "break" that follows an if-block ending in its own
+        # jump, even though the statement runs. Two such statements exist here
+        # (editor.py's quit path, the FTP reader's EOF), so 3.9 tops out at
+        # 99.9%. The report is still printed there, so a genuine regression is
+        # visible in the log.
+        run: |
+          if [ "${{ matrix.python-version }}" = "3.9" ]; then
+            python -m coverage report --fail-under=0
+          else
+            python -m coverage report
+          fi
 
   build:
     needs: test

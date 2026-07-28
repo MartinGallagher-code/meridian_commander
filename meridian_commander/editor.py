@@ -58,9 +58,9 @@ class Editor:
             data = data[:MAX_EDIT_BYTES]
         text = data.decode("utf-8", errors="replace")
         text = text.replace("\r\n", "\n").replace("\r", "\n")
-        self.lines = text.split("\n") or [""]
-        if not self.lines:
-            self.lines = [""]
+        # split() always yields at least one element, so the buffer is never
+        # empty and always has a line for the cursor to sit on.
+        self.lines = text.split("\n")
 
     # -- persistence ------------------------------------------------------
     def save(self) -> bool:
@@ -307,7 +307,12 @@ class Editor:
         height, width = win.getmaxyx()
         prompt = " Unsaved changes. Discard? (y/n) "
         win.attrset(curses.A_REVERSE)
-        win.addstr(height - 1, 0, prompt.ljust(width)[:width])
+        try:
+            # Filling the last row writes into the bottom-right cell, which
+            # curses always refuses; the prompt is still readable without it.
+            win.addstr(height - 1, 0, prompt.ljust(width)[:width])
+        except curses.error:
+            pass
         win.attrset(curses.A_NORMAL)
         win.refresh()
         while True:
