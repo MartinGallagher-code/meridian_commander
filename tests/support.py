@@ -539,3 +539,105 @@ class _NoLocalPath(LocalFileSystem):
 
     def label(self) -> str:
         return "sftp://elsewhere"
+
+
+# -- presentation fixtures -----------------------------------------------------
+PPTX_P = "http://schemas.openxmlformats.org/presentationml/2006/main"
+PPTX_A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+
+
+def pptx_p(text: str, level: int = 0) -> str:
+    """An ``<a:p>`` at an outline level, its text split across two runs.
+
+    Split deliberately: DrawingML breaks a line wherever formatting changes,
+    so a reader that takes only the first run loses half of every sentence.
+    """
+    head, _, tail = text.partition(" ")
+    pr = f'<a:pPr lvl="{level}"/>' if level else ""
+    runs = f"<a:r><a:t>{escape(head)}</a:t></a:r>"
+    if tail:
+        runs += f"<a:r><a:t> {escape(tail)}</a:t></a:r>"
+    return f"<a:p>{pr}{runs}</a:p>"
+
+
+def pptx_shape(paragraphs: str, placeholder: str = "") -> str:
+    """A ``<p:sp>`` text shape, optionally a placeholder of the given type."""
+    ph = f'<p:ph type="{placeholder}"/>' if placeholder else ""
+    return (f"<p:sp><p:nvSpPr><p:nvPr>{ph}</p:nvPr></p:nvSpPr>"
+            f"<p:txBody>{paragraphs}</p:txBody></p:sp>")
+
+
+def pptx_table(rows) -> str:
+    """A ``<p:graphicFrame>`` holding an ``<a:tbl>``."""
+    body = ""
+    for row in rows:
+        cells = "".join(
+            f"<a:tc><a:txBody><a:p><a:r><a:t>{escape(str(c))}</a:t>"
+            f"</a:r></a:p></a:txBody></a:tc>" for c in row)
+        body += f"<a:tr>{cells}</a:tr>"
+    return f"<p:graphicFrame><a:graphic><a:tbl>{body}</a:tbl></a:graphic></p:graphicFrame>"
+
+
+def slide_xml(shapes: str) -> str:
+    return (f'<?xml version="1.0"?><p:sld xmlns:p="{PPTX_P}" '
+            f'xmlns:a="{PPTX_A}"><p:cSld><p:spTree>{shapes}'
+            "</p:spTree></p:cSld></p:sld>")
+
+
+def notes_xml(paragraphs: str) -> str:
+    return (f'<?xml version="1.0"?><p:notes xmlns:p="{PPTX_P}" '
+            f'xmlns:a="{PPTX_A}"><p:cSld><p:spTree><p:sp><p:txBody>'
+            f"{paragraphs}</p:txBody></p:sp></p:spTree></p:cSld></p:notes>")
+
+
+def pptx_parts(slides, notes=None, order=None) -> dict:
+    """The standard archive layout for a deck.
+
+    ``slides`` is a list of worksheet-style slide XML; ``order`` gives the
+    ``sldIdLst`` order as zero-based indices, which is how a reordered deck is
+    built -- the parts keep their original names.
+    """
+    notes = notes or {}
+    order = list(range(len(slides))) if order is None else order
+    ids = "".join(
+        f'<p:sldId id="{256 + n}" r:id="rIdS{i}"/>' for n, i in enumerate(order))
+    rels = "".join(
+        f'<Relationship Id="rIdS{i}" Type="{XLSX_REL}/slide" '
+        f'Target="slides/slide{i + 1}.xml"/>' for i in range(len(slides)))
+    parts = {
+        "[Content_Types].xml":
+            f'<?xml version="1.0"?><Types xmlns="{XLSX_PKG}"/>',
+        "_rels/.rels":
+            f'<?xml version="1.0"?><Relationships xmlns="{XLSX_PKG}">'
+            f'<Relationship Id="rIdP" Type="{XLSX_REL}/officeDocument" '
+            f'Target="ppt/presentation.xml"/></Relationships>',
+        "ppt/presentation.xml":
+            f'<?xml version="1.0"?><p:presentation xmlns:p="{PPTX_P}" '
+            f'xmlns:r="{XLSX_REL}"><p:sldIdLst>{ids}</p:sldIdLst>'
+            "</p:presentation>",
+        "ppt/_rels/presentation.xml.rels":
+            f'<?xml version="1.0"?><Relationships xmlns="{XLSX_PKG}">'
+            f"{rels}</Relationships>",
+    }
+    for i, xml in enumerate(slides):
+        parts[f"ppt/slides/slide{i + 1}.xml"] = xml
+        slide_rels = ""
+        if i in notes:
+            parts[f"ppt/notesSlides/notesSlide{i + 1}.xml"] = notes[i]
+            slide_rels = (f'<Relationship Id="rIdN" Type="{XLSX_REL}/notesSlide"'
+                          f' Target="../notesSlides/notesSlide{i + 1}.xml"/>')
+        parts[f"ppt/slides/_rels/slide{i + 1}.xml.rels"] = (
+            f'<?xml version="1.0"?><Relationships xmlns="{XLSX_PKG}">'
+            f"{slide_rels}</Relationships>")
+    return parts
+
+
+def simple_pptx(slides, notes=None, order=None) -> bytes:
+    return xlsx_bytes(pptx_parts(slides, notes, order))
+
+
+def write_pptx(path: str, slides, notes=None, order=None) -> str:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(simple_pptx(slides, notes, order))
+    return path
