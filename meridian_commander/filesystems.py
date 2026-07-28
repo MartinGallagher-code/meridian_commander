@@ -197,6 +197,16 @@ class LocalFileSystem(FileSystem):
     def label(self) -> str:
         return "local"
 
+    def local_path(self, path: str) -> str:
+        """The real path of ``path`` on this machine.
+
+        Only the local backend has one.  Callers that can work far more
+        cheaply against a real file -- the archive reader, which would
+        otherwise hold the whole thing in memory -- ask for it with getattr
+        and fall back to streaming when it is not there.
+        """
+        return path
+
     # Use the host's native path semantics.
     @property
     def sep(self) -> str:

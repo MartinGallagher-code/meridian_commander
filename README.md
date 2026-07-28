@@ -52,6 +52,10 @@ and ships with a built-in file viewer and editor.
 - **File viewer** (`F3`) — scrollable, with **search** (`/`, smart case,
   highlighted matches, `n`/`N` next/previous with wrap-around), toggleable
   line numbers (`l`) and horizontal scrolling; works on remote files too.
+- **Archives as directories** — press Enter on a `.zip`, `.tar`, `.tar.gz`
+  (or `.jar`, `.whl`, `.tgz`, `.tar.bz2`, `.tar.xz`) and the pane goes *into*
+  it. Browse, tag and copy files out with `F5` exactly as from a directory;
+  Backspace at the top comes back out. Read-only, and stdlib-only.
 - **Document viewer** (`F3` on a `.docx`/`.docm`) — the Word document as text,
   with headings ruled, bullets and numbered lists indented, and tables laid out
   as aligned columns. Wrapped to the terminal, searchable like any other file,
@@ -214,6 +218,45 @@ username = deploy
 port = 22
 path = /srv/www
 ```
+
+### Archives
+
+Press **Enter** on an archive and the pane goes into it:
+
+```
++- zip:project.zip:/src -----------+- local:/home/user/out -----------+
+| Name                Size  Modify | Name                Size  Modify |
+| ..                               | ..                               |
+| main.py               9  Jul 28  |                                  |
+| util.py               4  Jul 28  |                                  |
++----------------------------------+----------------------------------+
+ zip:project.zip -- read-only; Backspace to leave
+```
+
+It is not a viewer but a **read-only filesystem**, so everything that already
+works between panes keeps working: list, sort, tag, and `F5` files or whole
+subtrees out to the other pane — local or remote. Backspace at the archive's
+root steps back out to the directory holding it, with the cursor on the file.
+
+`.zip`, `.jar`, `.whl`, `.egg`, and `.tar` with any of gzip, bzip2 or xz
+compression. A bare `.gz` is one compressed file rather than a tree, so it is
+left alone.
+
+**Writing is refused, not half-done.** Copying *into* an archive reports that
+it is read-only rather than appearing to work.
+
+Two details worth knowing:
+
+- **Directories are implied.** An archive stores paths, not a tree, and often
+  holds `a/b/c.txt` with no entry for `a/`. The missing directories are
+  reconstructed from the member names.
+- **Unsafe members are refused.** A member whose name contains `..` would
+  escape the destination when copied out, so it is dropped — and *counted in
+  the pane header*, rather than disappearing quietly.
+
+A local archive is opened in place, so browsing a multi-gigabyte tar costs
+nothing; one on a remote pane has to be fetched whole first (both formats need
+to seek), which is capped and refused with a message above the cap.
 
 ### Documents
 
@@ -477,6 +520,7 @@ the sync engine are written once and work across any pair of backends.
 | `config.py` | `config.ini` handling (per-plug-in sections, plug-in dirs) |
 | `presets.py` | saved locations: `presets.ini` load/save, live-connection reuse |
 | `panel.py` | one pane's listing, cursor, selection, sorting |
+| `archive.py` | zip/tar archives as a read-only `FileSystem` |
 | `viewer.py` / `editor.py` | file viewer (scroll, search, wrap) and editor |
 | `browsers.py` | picks the browser for a file: grid, document or text |
 | `ooxml.py` | the Office Open XML package layer, shared by the readers |

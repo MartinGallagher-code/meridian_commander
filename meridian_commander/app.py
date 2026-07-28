@@ -10,7 +10,7 @@ Key bindings (also shown in the F1 help screen)::
     Up/Down        move cursor                 F2   open / connect location
     PgUp/PgDn      page                        F3   view (.xlsx grid, .docx)
     Home/End       first / last                F4   edit file
-    Enter / Right  enter dir / view file       F5   copy  ->  other pane
+    Enter / Right  enter dir/archive/view      F5   copy  ->  other pane
     Backspace/Left parent directory            F6   move  ->  other pane
     Insert / Space tag file                    F7   make directory
     + / -          tag all / untag all         F8   delete
@@ -47,6 +47,7 @@ from .operations import (
     count_tree,
     move_path,
 )
+from .archive import is_archive, open_archive
 from .browsers import viewer_for
 from .panel import Panel
 from .sync import build_sync_plan, execute_sync_plan
@@ -324,7 +325,8 @@ class App:
         elif key in (curses.KEY_ENTER, 10, 13, curses.KEY_RIGHT):
             self._activate_entry()
         elif key in (curses.KEY_BACKSPACE, 127, 8, curses.KEY_LEFT):
-            panel.go_parent()
+            if not panel.go_parent():
+                self._leave_archive()
         elif key in (curses.KEY_IC, ord(" ")):
             panel.toggle_select()
             panel.move(1)
@@ -399,8 +401,45 @@ class App:
             return
         if entry.is_dir:
             panel.enter()
+        elif is_archive(entry.name):
+            self._enter_archive()
         else:
             self._view()
+
+    def _enter_archive(self) -> None:
+        """Open the highlighted archive as though it were a directory."""
+        panel = self.active
+        target = panel.current_path()
+        try:
+            fs = open_archive(panel.fs, target)
+        except Exception as exc:
+            self._set_message(f"Cannot open archive: {exc}")
+            return
+        if not panel.set_location(fs, "/"):
+            fs.close()
+            self._set_message(f"Cannot read {panel.fs.basename(target)}")
+            return
+        # Registered so it is closed with everything else on the way out.
+        self._backends.append(fs)
+        self._set_message(f"{fs.label()} -- read-only; Backspace to leave")
+
+    def _leave_archive(self) -> None:
+        """Step back out of an archive to the directory that holds it.
+
+        Only reached at the archive's root, where there is no parent inside it
+        to go to; anywhere else go_parent() has already moved.
+        """
+        panel = self.active
+        fs = panel.fs
+        host = getattr(fs, "host_fs", None)
+        if host is None:
+            return
+        name = host.basename(fs.archive_path)
+        panel.set_location(host, host.dirname(fs.archive_path))
+        panel.refresh(keep_name=name)
+        if fs in self._backends:
+            self._backends.remove(fs)
+        fs.close()
 
     def _swap_panes(self) -> None:
         self.left, self.right = self.right, self.left
@@ -1212,7 +1251,7 @@ class App:
             "  Tab            switch active pane\n"
             "  Up/Down j/k    move cursor      PgUp/PgDn  page\n"
             "  Home/End       first / last\n"
-            "  Enter / Right  enter dir / view file\n"
+            "  Enter / Right  enter dir / archive (zip, tar) / view file\n"
             "  Backspace/Left parent directory\n"
             "  Insert / Space tag file    +/-  tag all / untag all\n"
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
