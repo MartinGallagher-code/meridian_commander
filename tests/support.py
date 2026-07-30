@@ -12,8 +12,10 @@ import curses
 import io
 import os
 import pty
+import struct
 import tarfile
 import zipfile
+import zlib
 from xml.sax.saxutils import escape
 
 import pytest
@@ -641,3 +643,162 @@ def write_pptx(path: str, slides, notes=None, order=None) -> str:
     with open(path, "wb") as f:
         f.write(simple_pptx(slides, notes, order))
     return path
+
+
+# -- image fixtures ------------------------------------------------------------
+#
+# Built by hand rather than by an imaging library, for the same reason the
+# OOXML fixtures above are: the project takes no dependency it does not need,
+# and a fixture written out byte by byte is a second, independent statement of
+# what the format actually says. The decoders were separately checked against
+# files produced by Pillow; these keep that honest without importing it.
+
+def png_chunk(kind: bytes, payload: bytes) -> bytes:
+    return (struct.pack(">I", len(payload)) + kind + payload
+            + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF))
+
+
+def png_bytes(width: int, height: int, rows, *, depth: int = 8,
+              colour: int = 2, palette: bytes = b"", trans: bytes = b"",
+              interlace: int = 0, filters=None, extra: bytes = b"") -> bytes:
+    """A PNG from already-packed scanlines.
+
+    ``rows`` are the raw bytes of each scanline *before* filtering; ``filters``
+    picks the filter byte per row (all 0 -- None -- by default), so the
+    unfilter loop can be exercised one case at a time.
+    """
+    header = struct.pack(">IIBBBBB", width, height, depth, colour, 0, 0,
+                         interlace)
+    if filters is None:
+        filters = [0] * len(rows)
+    raw = b"".join(bytes([f]) + bytes(r) for f, r in zip(filters, rows))
+    out = [b"\x89PNG\r\n\x1a\n", png_chunk(b"IHDR", header)]
+    if palette:
+        out.append(png_chunk(b"PLTE", palette))
+    if trans:
+        out.append(png_chunk(b"tRNS", trans))
+    out.append(extra)
+    out.append(png_chunk(b"IDAT", zlib.compress(raw)))
+    out.append(png_chunk(b"IEND", b""))
+    return b"".join(out)
+
+
+def rgb_png(width: int, height: int, pixels) -> bytes:
+    """An 8-bit truecolour PNG from a flat list of ``(r, g, b)`` tuples."""
+    rows = [bytes(c for x in range(width)
+                  for c in pixels[y * width + x]) for y in range(height)]
+    return png_bytes(width, height, rows)
+
+
+def bmp_bytes(width: int, height: int, rows, *, depth: int = 24,
+              palette: bytes = b"", compression: int = 0,
+              masks=None, top_down: bool = False, core: bool = False,
+              header_size: int = 40) -> bytes:
+    """A BMP from packed scanlines, given bottom-up unless ``top_down``.
+
+    ``header_size`` picks the header vintage.  At 40 (BITMAPINFOHEADER) any
+    bitfield masks sit in the gap *after* the header, which is where pre-v4
+    writers put them; at 108 or more (BITMAPV4HEADER and later) they live
+    inside the header itself, and a fourth mask for alpha becomes available.
+    """
+    stride = ((width * depth + 31) // 32) * 4
+    body = b"".join(bytes(r).ljust(stride, b"\x00") for r in rows)
+    if core:
+        header = struct.pack("<IHHHH", 12, width, height, 1, depth)
+    else:
+        header = struct.pack("<IiiHHIIiiII", header_size, width,
+                             -height if top_down else height, 1, depth,
+                             compression, len(body), 2835, 2835,
+                             len(palette) // (3 if core else 4), 0)
+        if masks:
+            fields = tuple(masks) + (0,) * (4 - len(masks))
+            if header_size >= 56:
+                header += struct.pack("<IIII", *fields)
+            else:
+                header += struct.pack("<III", *fields[:3])
+        header = header.ljust(header_size, b"\x00")
+    offset = 14 + len(header) + len(palette)
+    return (b"BM" + struct.pack("<IHHI", offset + len(body), 0, 0, offset)
+            + header + palette + body)
+
+
+def pnm_bytes(magic: bytes, width: int, height: int, body, *, top: int = 255,
+              comment: bytes = b"") -> bytes:
+    head = magic + b"\n" + comment + b"%d %d\n" % (width, height)
+    if magic not in (b"P1", b"P4"):
+        head += b"%d\n" % top
+    if isinstance(body, (bytes, bytearray)):
+        return head + bytes(body)
+    return head + b" ".join(b"%d" % v for v in body) + b"\n"
+
+
+def gif_lzw(indices, min_code_size: int) -> bytes:
+    """Encode indices as GIF LZW using literals only.
+
+    A literal-only stream is valid LZW and much easier to be sure of than a
+    real compressor: emit a clear code, then one code per pixel, clearing
+    again before the table would force the code width up. That deliberately
+    exercises the decoder's table-reset path on every fixture.
+    """
+    clear = 1 << min_code_size
+    code_size = min_code_size + 1
+    bits, out, count = [], bytearray(), 0
+
+    def put(code):
+        for i in range(code_size):
+            bits.append((code >> i) & 1)
+
+    put(clear)
+    for index in indices:
+        # After the clear the table regrows one entry per emitted code; reset
+        # before it reaches the width boundary so code_size never changes.
+        if count >= clear - 2:
+            put(clear)
+            count = 0
+        put(index)
+        count += 1
+    put(clear + 1)                      # end of information
+    while len(bits) % 8:
+        bits.append(0)
+    for i in range(0, len(bits), 8):
+        out.append(sum(b << n for n, b in enumerate(bits[i:i + 8])))
+    return bytes(out)
+
+
+def gif_sub_blocks(data: bytes) -> bytes:
+    out = bytearray()
+    for i in range(0, len(data), 255):
+        piece = data[i:i + 255]
+        out.append(len(piece))
+        out += piece
+    out.append(0)
+    return bytes(out)
+
+
+def gif_frame(indices, width: int, height: int, *, left: int = 0, top: int = 0,
+              min_code_size: int = 2, interlaced: bool = False,
+              local: bytes = b"", delay: int = 0, transparent=None,
+              disposal: int = 0) -> bytes:
+    """One GIF frame, with its graphic-control extension when it needs one."""
+    out = bytearray()
+    if delay or transparent is not None or disposal:
+        flags = (disposal << 2) | (1 if transparent is not None else 0)
+        out += (b"\x21\xf9\x04" + bytes([flags])
+                + struct.pack("<H", delay) + bytes([transparent or 0]) + b"\x00")
+    packed = (0x40 if interlaced else 0)
+    if local:
+        packed |= 0x80 | ((len(local) // 3).bit_length() - 2)
+    out += b"\x2c" + struct.pack("<HHHHB", left, top, width, height, packed)
+    out += local
+    out += bytes([min_code_size]) + gif_sub_blocks(gif_lzw(indices,
+                                                           min_code_size))
+    return bytes(out)
+
+
+def gif_bytes(width: int, height: int, frames, *, palette: bytes = b"",
+              version: bytes = b"GIF89a") -> bytes:
+    packed = 0
+    if palette:
+        packed = 0x80 | ((len(palette) // 3).bit_length() - 2)
+    return (version + struct.pack("<HHBBB", width, height, packed, 0, 0)
+            + palette + b"".join(frames) + b"\x3b")
