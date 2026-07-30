@@ -18,6 +18,18 @@ from .filesystems import FileSystem
 
 MAX_VIEW_BYTES = 16 * 1024 * 1024  # 16 MiB safety cap
 
+#: What each style code means on screen.  Only monochrome attributes are used:
+#: they need no colour pairs and so no initialised screen, and they work on a
+#: terminal with no colour at all.  A_ITALIC is not in every ncurses build, and
+#: underline reads as emphasis where it is missing.
+STYLE_ATTRS = {
+    "B": curses.A_BOLD,                                   # **strong**
+    "I": getattr(curses, "A_ITALIC", curses.A_UNDERLINE),  # *emphasis*
+    "C": curses.A_REVERSE,                                # `code`
+    "D": curses.A_DIM,                                    # rules, quotes, URLs
+    "U": curses.A_UNDERLINE,                              # link text
+}
+
 
 class Viewer:
     def __init__(self, fs: FileSystem, path: str) -> None:
@@ -33,6 +45,13 @@ class Viewer:
         self.search = ""
         self.cur_match: int | None = None
         self.notice = ""
+        #: One style code per character, per source line, or "" for a line
+        #: that is all plain.  Empty overall for an ordinary text file, which
+        #: keeps that case exactly as cheap as it was before styling existed.
+        self.styles: list[str] = []
+        #: Source lines that must not be wrapped -- a table or a code block
+        #: is a shape, and reflowing it destroys the thing being shown.
+        self.nowrap: set[int] = set()
         #: The file's own lines.  Searching and line numbering work in this
         #: space, so a wrapped paragraph stays one line to jump to and keeps
         #: one number however many screen rows it happens to occupy.
@@ -59,6 +78,12 @@ class Viewer:
         return text.split("\n")
 
     # -- line flow --------------------------------------------------------
+    def _style_of(self, index: int) -> str:
+        return self.styles[index] if index < len(self.styles) else ""
+
+    def _row_style(self, row: int) -> str:
+        return self.row_styles[row] if row < len(self.row_styles) else ""
+
     def _reflow(self, width: int) -> None:
         """Rebuild the display lines for a text area ``width`` columns wide.
 
@@ -71,19 +96,34 @@ class Viewer:
         self._flow = (self.wrap, width)
         if not self.wrap:
             self.lines = self.source
+            self.row_styles = self.styles
             # Each source line is its own single display row.
             self.first_row = list(range(len(self.source)))
             self.origin = list(range(len(self.source)))
             return
+        styled = bool(self.styles)
         lines: list[str] = []
+        styles: list[str] = []
         origin: list[int] = []
         first: list[int] = []
         for index, line in enumerate(self.source):
             first.append(len(lines))
-            for piece in wrap_line(line, width):
-                lines.append(piece)
+            style = self._style_of(index)
+            if index in self.nowrap or len(line) <= width:
+                lines.append(line)
                 origin.append(index)
+                if styled:
+                    styles.append(style)
+                continue
+            for start, end in wrap_spans(line, width):
+                lines.append(line[start:end])
+                origin.append(index)
+                if styled:
+                    # The style is cut at the same points as the text, which
+                    # is the whole reason wrap_spans hands back indices.
+                    styles.append(style[start:end])
         self.lines, self.origin, self.first_row = lines, origin, first
+        self.row_styles = styles
 
     def toggle_wrap(self) -> None:
         """Turn wrapping on or off, keeping the cursor on the same line."""
@@ -171,15 +211,21 @@ class Viewer:
         height, width = win.getmaxyx()
         body_h = height - 2
 
-        title = f" View: {self.name} "
+        title = self._title()
         if self.truncated:
             title += "[truncated] "
         win.attrset(curses.A_REVERSE)
-        win.addstr(0, 0, title.ljust(width)[:width])
+        try:
+            win.addstr(0, 0, title.ljust(width)[:width])
+        except curses.error:
+            pass
         win.attrset(curses.A_NORMAL)
 
         if self.error:
-            win.addstr(2, 2, f"Cannot open file: {self.error}"[: width - 4])
+            try:
+                win.addstr(2, 2, f"Cannot open file: {self.error}"[: width - 4])
+            except curses.error:
+                pass
             self._draw_footer(win, height, width)
             win.noutrefresh()
             return
@@ -201,8 +247,12 @@ class Viewer:
                 win.attrset(curses.A_NORMAL)
             line = self.lines[idx]
             visible = line[self.left : self.left + (width - gutter)]
+            style = self._row_style(idx)[self.left : self.left + len(visible)]
             try:
-                win.addstr(y, gutter, visible)
+                if style.strip():
+                    self._draw_styled(win, y, gutter, visible, style)
+                else:
+                    win.addstr(y, gutter, visible)
             except curses.error:
                 pass
             if self.search:
@@ -210,6 +260,28 @@ class Viewer:
 
         self._draw_footer(win, height, width)
         win.noutrefresh()
+
+    def _title(self) -> str:
+        """The title bar's text.  Subclasses say what they are showing."""
+        return f" View: {self.name} "
+
+    def _hints(self) -> str:
+        """The key reminders in the footer."""
+        return "[/]find  n/N next/prev  [l]#  [w]rap  [q]uit"
+
+    def _other_key(self, key: int) -> None:
+        """A key this viewer does not handle.  Subclasses may claim it."""
+
+    def _draw_styled(self, win, y: int, x: int, text: str, style: str) -> None:
+        """Draw one row as runs of equal style, one write per run."""
+        style = style.ljust(len(text))
+        start = 0
+        for index in range(1, len(text) + 1):
+            if index < len(text) and style[index] == style[start]:
+                continue
+            win.addstr(y, x + start, text[start:index],
+                       STYLE_ATTRS.get(style[start], curses.A_NORMAL))
+            start = index
 
     def _highlight_matches(self, win, y: int, line: str, gutter: int,
                            width: int) -> None:
@@ -239,7 +311,7 @@ class Viewer:
             parts.append(f"/{self.search}")
         if self.notice:
             parts.append(self.notice)
-        parts.append("[/]find  n/N next/prev  [l]#  [w]rap  [q]uit")
+        parts.append(self._hints())
         hint = "  ".join(parts)
         win.attrset(curses.A_REVERSE)
         try:
@@ -297,30 +369,46 @@ class Viewer:
                 self.show_line_numbers = not self.show_line_numbers
             elif key in (ord("w"), ord("W")):
                 self.toggle_wrap()
+            else:
+                self._other_key(key)
 
     def _scroll(self, delta: int, body_h: int) -> None:
         self.notice = ""
         self.top = max(0, min(self.top + delta, max(0, len(self.lines) - 1)))
 
 
-def wrap_line(text: str, width: int) -> list[str]:
-    """Break one line into pieces no wider than ``width`` columns.
+def wrap_spans(text: str, width: int) -> list[tuple[int, int]]:
+    """Where to cut ``text`` into pieces no wider than ``width`` columns.
 
-    Breaks at a space where there is one, and mid-word only when a single word
-    is wider than the screen -- the alternative there is losing characters off
-    the edge, which is the thing wrapping exists to stop.  An empty line stays
-    one empty piece, so blank lines keep their place in the text.
+    Returns half-open ``(start, end)`` index pairs rather than the pieces
+    themselves, so a caller holding something parallel to the text -- an
+    attribute per character, say -- can cut that the same way and stay in
+    step.  Breaks at a space where there is one, and mid-word only when a
+    single word is wider than the screen: the alternative there is losing
+    characters off the edge, which is the thing wrapping exists to stop.
     """
+    spans = []
+    length = len(text)
+    start = 0
+    while length - start > width:
+        # Search from start + 1 so a leading space can never give a
+        # zero-width piece, which would never finish.
+        cut = text.rfind(" ", start + 1, start + width + 1)
+        if cut <= start:
+            cut = start + width
+        end = cut
+        while end > start and text[end - 1] == " ":
+            end -= 1                       # no trailing space on a piece
+        spans.append((start, end))
+        start = cut
+        while start < length and text[start] == " ":
+            start += 1                     # nor a leading one on the next
+    spans.append((start, length))
+    return spans
+
+
+def wrap_line(text: str, width: int) -> list[str]:
+    """Break one line into pieces no wider than ``width`` columns."""
     if len(text) <= width:
         return [text]
-    out = []
-    while len(text) > width:
-        # Search from index 1 so a leading space can never give a zero-width
-        # piece, which would leave the text the same length and never finish.
-        cut = text.rfind(" ", 1, width + 1)
-        if cut <= 0:
-            cut = width
-        out.append(text[:cut].rstrip())
-        text = text[cut:].lstrip(" ")
-    out.append(text)
-    return out
+    return [text[a:b] for a, b in wrap_spans(text, width)]

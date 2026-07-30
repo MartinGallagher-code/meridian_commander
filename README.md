@@ -56,6 +56,10 @@ and ships with a built-in file viewer and editor.
   (or `.jar`, `.whl`, `.tgz`, `.tar.bz2`, `.tar.xz`) and the pane goes *into*
   it. Browse, tag and copy files out with `F5` exactly as from a directory;
   Backspace at the top comes back out. Read-only, and stdlib-only.
+- **Markdown viewer** (`F3` on a `.md`) — rendered rather than raw: markers
+  gone, **bold** and *italic* and `code` shown with real terminal attributes,
+  headings ruled, lists and quotes laid out, tables aligned, links numbered
+  with a reference list at the end. `r` shows the source instead.
 - **Document viewer** (`F3` on a `.docx`/`.docm`) — the Word document as text,
   with headings ruled, bullets and numbered lists indented, and tables laid out
   as aligned columns. Wrapped to the terminal, searchable like any other file,
@@ -299,6 +303,59 @@ character formatting is dropped — this shows what the document *says*. Legacy
 `.doc`, like `.xls`, is a different format entirely and stays in the text
 viewer.
 
+### Markdown
+
+`F3` on a `.md` shows it rendered rather than raw:
+
+```
+Meridian Commander
+==================
+
+[image: PyPI][1] [image: CI][2]
+
+A two-pane terminal file manager, in pure Python with no required
+dependencies.  Press F3 to view a file, and see the website[3].
+
+  • Local and remote panes
+    • SFTP, SSH shell and FTP
+  • ☑ archives browsable as directories
+
+│ Nothing is deleted; you get a preview first.
+
+  Format  Reader
+  ──────  ───────
+  xlsx    xlsx.py
+
+Links
+  [1] https://pypi.org/project/meridian-commander/
+```
+
+Three things do the work, in order of how much they contribute: **the markers
+go away** (`**bold**` becoming bold text is most of the effect); **terminal
+attributes** carry inline emphasis — bold, italic, reverse for code, dim for
+struck-out text and underline for link text; and **layout** carries structure.
+
+**Links are numbered, not inlined.** A URL in the middle of a sentence is
+unreadable, and there is no way to make text clickable that curses can drive,
+so the destinations are listed at the end the way `lynx` and `w3m` do it.
+Reference definitions (`[label]: url`) resolve, and a linked badge —
+`[![alt](img)](url)`, the commonest thing in a README — reads as one item.
+
+**Press `r` for the source.** A renderer you cannot turn off is one you have
+to trust.
+
+Tables and code blocks keep their shape when wrapping is on: reflowing a
+table destroys the thing being shown, so those lines are left whole and
+horizontal scrolling reaches the rest.
+
+This is a **pragmatic subset, not CommonMark** — that specification is
+enormous because its edge cases are, and claiming compliance would be wrong in
+ways you would have to discover. Headings (both styles), lists including
+nested and task lists, blockquotes, fenced code, tables with alignment,
+thematic breaks, front matter, hard breaks, escapes and the inline spans are
+covered. Anything unrecognised is shown as the plain text it is, never
+swallowed.
+
 ### Presentations
 
 `F3` on a `.pptx` or `.pptm` shows one slide per screen:
@@ -380,7 +437,7 @@ workbook is refused outright rather than shown in part.
 | --- | --- | --- | --- |
 | `Tab` | switch active pane | `F1` | help |
 | `↑`/`↓` `j`/`k` | move cursor | `F2` | open / connect location |
-| `PgUp`/`PgDn` | page | `F3` | view (`.xlsx` grid, `.docx`, `.pptx`) |
+| `PgUp`/`PgDn` | page | `F3` | view (`.md`, `.xlsx`, `.docx`, `.pptx`) |
 | `Home`/`End` | first / last | `F4` | edit file |
 | `Enter` / `→` | enter dir / view file | `F5` | copy to other pane |
 | `Backspace` / `←` | parent directory | `F6` | move to other pane |
@@ -409,6 +466,8 @@ case-insensitive), matches highlighted, `n`/`N` next/previous with wrap-around;
 `l` toggles line numbers, `w` toggles wrapping, arrows/PgUp/PgDn scroll, `Q`
 quits. Wrapping breaks at spaces and keeps the file's own line numbering, so a
 paragraph occupying six rows is still one numbered line to search and jump to.
+In the **Markdown viewer**: everything the text viewer does, plus `r` to
+switch between the rendered view and the file as it was written.
 In the **slide browser**: `Tab`/`Shift-Tab` (or `←`/`→`, `[`/`]`, Space)
 change slide, arrows/PgUp/PgDn scroll a slide that overflows, `t` shows the
 speaker notes, `/` searches every slide's title, body and notes with `n`/`N`,
@@ -570,6 +629,7 @@ the sync engine are written once and work across any pair of backends.
 | `xlsx.py` / `sheetview.py` | stdlib `.xlsx` reader and the full-screen grid |
 | `docx.py` | stdlib `.docx` reader and the document viewer |
 | `pptx.py` | stdlib `.pptx` reader and the slide browser |
+| `markdown.py` | Markdown rendered to styled lines, and its viewer |
 | `dialogs.py` | prompts, menus, confirmations, progress bars |
 | `app.py` | curses UI, key bindings, orchestration |
 

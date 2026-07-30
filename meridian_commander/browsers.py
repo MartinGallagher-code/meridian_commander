@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from .docx import DocxView, is_document
 from .filesystems import FileSystem
+from .markdown import MarkdownView, is_markdown
 from .pptx import SlideView, is_presentation
 from .sheetview import SheetView
 from .viewer import Viewer
@@ -21,7 +22,7 @@ from .xlsx import is_spreadsheet
 
 
 def viewer_for(fs: FileSystem, path: str):
-    """The browser for ``path``: a grid, a document, a deck, or plain text."""
+    """The browser for ``path``: a grid, document, deck, page, or plain text."""
     name = fs.basename(path)
     if is_spreadsheet(name):
         return SheetView(fs, path)
@@ -29,4 +30,6 @@ def viewer_for(fs: FileSystem, path: str):
         return DocxView(fs, path)
     if is_presentation(name):
         return SlideView(fs, path)
+    if is_markdown(name):
+        return MarkdownView(fs, path)
     return Viewer(fs, path)
