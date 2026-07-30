@@ -310,16 +310,43 @@ def test_preset_load_missing_file_is_empty(tmp_path):
     assert presets.load(str(tmp_path / "nothing.ini")) == []
 
 
-def test_preset_add_replaces_in_place_and_remove():
+def test_preset_add_replaces_and_remove():
     a = presets.Preset(name="a", path="/a")
     b = presets.Preset(name="b", path="/b")
     items = [a, b]
     updated = presets.add(presets.Preset(name="a", path="/moved"), items)
     assert [p.name for p in updated] == ["a", "b"]      # keeps its position
     assert updated[0].path == "/moved"
-    added = presets.add(presets.Preset(name="c", path="/c"), items)
-    assert [p.name for p in added] == ["a", "b", "c"]
+    # A new name lands in its alphabetical place, not at the end.
+    added = presets.add(presets.Preset(name="aa", path="/aa"), items)
+    assert [p.name for p in added] == ["a", "aa", "b"]
     assert [p.name for p in presets.remove("a", items)] == ["b"]
+
+
+def test_presets_are_kept_in_alphabetical_order(tmp_path):
+    """Name order, not save order -- in the file and back out of it."""
+    path = str(tmp_path / "presets.ini")
+    saved = [presets.Preset(name=n, path="/" + n)
+             for n in ("www", "backup", "Archive", "etc")]
+    presets.save(saved, path)
+
+    # The file itself is ordered, so hand-editing it stays pleasant.
+    with open(path) as f:
+        sections = [line[1:-2] for line in f if line.startswith("[")]
+    assert sections == ["Archive", "backup", "etc", "www"]
+    assert [p.name for p in presets.load(path)] == \
+        ["Archive", "backup", "etc", "www"]
+
+
+def test_preset_order_is_case_insensitive_but_settled():
+    """"Web" sorts beside "web1", and same-name-different-case is decided."""
+    names = ["web1", "Web", "apache", "Zulu", "beta"]
+    items = [presets.Preset(name=n) for n in names]
+    assert [p.name for p in presets.in_order(items)] == \
+        ["apache", "beta", "Web", "web1", "Zulu"]
+    pair = [presets.Preset(name="b"), presets.Preset(name="B")]
+    assert [p.name for p in presets.in_order(pair)] == ["B", "b"]
+    assert [p.name for p in presets.in_order(pair[::-1])] == ["B", "b"]
 
 
 def test_preset_valid_name():

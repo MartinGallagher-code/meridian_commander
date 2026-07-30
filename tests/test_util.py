@@ -8,8 +8,8 @@ import time
 
 import pytest
 
-from meridian_commander import config, util
-from meridian_commander.filesystems import LocalFileSystem
+from meridian_commander import config, sync, util
+from meridian_commander.filesystems import DirEntry, LocalFileSystem
 from meridian_commander.operations import (
     OperationCancelled,
     copy_file,
@@ -204,6 +204,89 @@ def test_execute_sync_plan_stops_when_cancelled(fs, tmp_path):
     plan = _three_file_plan(fs, tmp_path)
     assert execute_sync_plan(plan, fs, fs, cancel=lambda: True) == 0
     assert list((tmp_path / "r").iterdir()) == []
+
+
+# -- sync: the scan reports in, and can be got out of --------------------------
+
+def test_scan_can_be_cancelled(fs, tmp_path):
+    """The slow half of a sync is interruptible -- the point of the exercise."""
+    write(str(tmp_path / "l" / "a.txt"), "a")
+    (tmp_path / "r").mkdir()
+    with pytest.raises(OperationCancelled):
+        build_sync_plan(fs, str(tmp_path / "l"), fs, str(tmp_path / "r"),
+                        cancel=lambda: True)
+
+
+def test_scan_reports_progress_while_it_walks(fs, tmp_path):
+    """Counts arrive during the walk, not only at the end."""
+    for i in range(5):
+        write(str(tmp_path / "l" / "sub" / f"f{i}.txt"), "x")
+    (tmp_path / "r").mkdir()
+    seen = []
+    build_sync_plan(fs, str(tmp_path / "l"), fs, str(tmp_path / "r"),
+                    progress=lambda cur, total, label: seen.append(
+                        (cur, total, label)))
+    # A scan has no denominator, which is what tells the dialog to draw an
+    # indeterminate bar rather than a bar pinned at zero.
+    assert seen and all(total == 0 for _cur, total, _label in seen)
+    assert any(label.startswith("left: ") for _c, _t, label in seen)
+    assert any(label.startswith("right: ") for _c, _t, label in seen)
+    assert any("comparing" in label for _c, _t, label in seen)
+
+
+def test_scan_reports_within_one_large_directory(fs, tmp_path, monkeypatch):
+    """A single huge directory reports as it goes, not once at the end."""
+    monkeypatch.setattr(sync, "SCAN_REPORT_EVERY", 2)
+    for i in range(6):
+        write(str(tmp_path / "l" / f"f{i}.txt"), "x")
+    (tmp_path / "r").mkdir()
+    counts = []
+    build_sync_plan(fs, str(tmp_path / "l"), fs, str(tmp_path / "r"),
+                    progress=lambda cur, total, label: counts.append(cur))
+    # 6 files at one report per 2 means the count climbs mid-directory.
+    assert sorted(set(counts)) == [0, 2, 4, 6]
+
+
+def test_scan_skips_unreadable_directories(fs, tmp_path):
+    """One denied subdirectory must not cost the whole sync."""
+
+    class _DeniedSubdir(LocalFileSystem):
+        def listdir(self, path):
+            if path.endswith("locked"):
+                raise PermissionError("nope")
+            return super().listdir(path)
+
+    write(str(tmp_path / "l" / "keep.txt"), "keep")
+    (tmp_path / "l" / "locked").mkdir()
+    write(str(tmp_path / "l" / "locked" / "hidden.txt"), "hidden")
+    (tmp_path / "r").mkdir()
+    plan = build_sync_plan(_DeniedSubdir(), str(tmp_path / "l"),
+                           fs, str(tmp_path / "r"))
+    assert [a.rel for a in plan.actions] == ["keep.txt"]
+
+
+def test_scan_handles_a_tree_deeper_than_the_recursion_limit(fs, tmp_path):
+    """The walk is a stack, so depth costs heap rather than interpreter stack.
+
+    Synthesised rather than made on disk: Linux gives up at PATH_MAX long
+    before Python would give up at its recursion limit, so a real directory
+    this deep cannot be created to test against.
+    """
+    depth = sys.getrecursionlimit() + 50
+
+    class _DeepFS(LocalFileSystem):
+        """One directory inside the next, ``depth`` times, then one file."""
+
+        def listdir(self, path):
+            level = path.count("/d")
+            if level >= depth:
+                return [DirEntry("bottom.txt", is_dir=False, size=8, mtime=1.0)]
+            return [DirEntry("d", is_dir=True)]
+
+    (tmp_path / "r").mkdir()
+    plan = build_sync_plan(_DeepFS(), "/root", fs, str(tmp_path / "r"))
+    assert len(plan.actions) == 1
+    assert plan.actions[0].rel == "/".join(["d"] * depth + ["bottom.txt"])
 
 
 # -- operations: the failure corners of copy -----------------------------------

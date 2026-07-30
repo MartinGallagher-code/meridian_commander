@@ -9,6 +9,7 @@ import pytest
 from meridian_commander import app as app_mod
 from meridian_commander import dialogs
 from meridian_commander.filesystems import LocalFileSystem
+from meridian_commander.operations import OperationCancelled
 
 from support import _ScriptedDialogs, read, write
 
@@ -352,6 +353,35 @@ def test_the_sync_preview_lists_the_actions_and_truncates(app, tmp_path,
     assert "file(s)" in preview
     assert "and " in preview and "more" in preview
     assert "'->' copy left->right" in preview
+
+
+def test_the_scan_is_shown_and_can_be_cancelled(app, tmp_path, monkeypatch,
+                                                _quiet_progress):
+    """The slow half reports in, and Esc during it stops the whole sync."""
+    _files(app, tmp_path, only_left="payload")
+    _ScriptedDialogs(monkeypatch, confirm=[True])
+    app._sync()
+
+    scan = _quiet_progress[0]
+    assert scan.title == "Scanning for differences"
+    assert scan.closed
+    # It counted out loud while walking, with no denominator to divide by.
+    assert scan.updates and all(total == 0 for _cur, total, _label in scan.updates)
+    assert any("files" in label for _c, _t, label in scan.updates)
+
+
+def test_a_scan_cancelled_by_the_user_copies_nothing(app, tmp_path, monkeypatch):
+    def give_up(*args, **kwargs):
+        raise OperationCancelled()
+
+    _files(app, tmp_path, only_left="payload")
+    monkeypatch.setattr(app_mod, "build_sync_plan", give_up)
+    scripted = _ScriptedDialogs(monkeypatch, confirm=[True])
+    app._sync()
+    # Cancelling is not an error: no dialog, just the status line.
+    assert app.message == "Sync cancelled"
+    assert scripted.messages == []
+    assert not (tmp_path / "right" / "only_left").exists()
 
 
 def test_a_sync_that_cannot_scan_is_reported(app, monkeypatch):

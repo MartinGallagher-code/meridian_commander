@@ -18,6 +18,13 @@ The file is separate from ``config.ini`` because the application rewrites it
 (and rewriting the main config would throw away its explanatory comments).  It
 is plain text and safe to edit by hand.
 
+Presets are kept in alphabetical order, both in the menu and in the file.
+Ordering by name rather than by when they were saved means a preset is always
+in the same place in the list: the menu is picked from by eye, and a list that
+grows at the bottom moves every entry the moment one is re-saved.  Sorting
+happens on the way in *and* on the way out, so a hand-edited file is tidied
+the next time the application writes it.
+
 **Passwords are never stored.**  A remote preset reconnects the way the
 ``ssh`` command would -- your agent, ``~/.ssh/config`` and default keys -- and
 the application asks for a password only if that fails.
@@ -44,6 +51,21 @@ _BAD_NAME_CHARS = "[]\n\r"
 
 def presets_path() -> str:
     return os.path.join(config_dir(), "presets.ini")
+
+
+def _by_name(preset: "Preset") -> tuple[str, str]:
+    """Sort key: case-insensitive, with the exact name breaking ties.
+
+    Case-insensitive because "Web" belongs next to "web1", not in a separate
+    block of capitals ahead of everything else; the exact name second so that
+    two presets differing only in case still have one settled order.
+    """
+    return (preset.name.lower(), preset.name)
+
+
+def in_order(items: list["Preset"]) -> list["Preset"]:
+    """``items`` sorted by name, which is the order presets are shown in."""
+    return sorted(items, key=_by_name)
 
 
 def valid_name(name: str) -> bool:
@@ -146,14 +168,16 @@ def load(path: str | None = None) -> list[Preset]:
             port=port,
             key_filename=section.get("key_filename", "") or "",
         ))
-    return result
+    return in_order(result)
 
 
 def save(presets: list[Preset], path: str | None = None) -> str:
     """Write ``presets`` out, replacing the file.  Returns the path written."""
     target = path or presets_path()
     parser = configparser.ConfigParser()
-    for preset in presets:
+    # configparser writes sections in the order they are added, so sorting
+    # here is what keeps the file itself alphabetical.
+    for preset in in_order(presets):
         parser[preset.name] = {
             "scheme": preset.scheme,
             "path": preset.path,
@@ -172,18 +196,14 @@ def save(presets: list[Preset], path: str | None = None) -> str:
 
 
 def add(preset: Preset, presets: list[Preset]) -> list[Preset]:
-    """``presets`` with ``preset`` stored, replacing any entry of that name."""
-    result = [p for p in presets if p.name != preset.name]
-    # Replacing keeps the original position, so a rewritten preset does not
-    # jump to the bottom of the list.
-    for i, p in enumerate(presets):
-        if p.name == preset.name:
-            result.insert(i, preset)
-            return result
-    result.append(preset)
-    return result
+    """``presets`` with ``preset`` stored, replacing any entry of that name.
+
+    The result is in name order, so re-saving a preset leaves it exactly where
+    it already was in the menu rather than moving it to the end.
+    """
+    return in_order([p for p in presets if p.name != preset.name] + [preset])
 
 
 def remove(name: str, presets: list[Preset]) -> list[Preset]:
     """``presets`` without the entry called ``name``."""
-    return [p for p in presets if p.name != name]
+    return in_order([p for p in presets if p.name != name])

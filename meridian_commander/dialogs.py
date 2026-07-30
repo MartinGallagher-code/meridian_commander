@@ -260,6 +260,30 @@ def connect_dialog(stdscr) -> dict | None:
     return result
 
 
+#: Width of the travelling block in an indeterminate progress bar.
+MARCH_WIDTH = 8
+
+
+def _marching_bar(width: int, tick: int) -> str:
+    """An indeterminate bar: a block that bounces from end to end.
+
+    Bouncing rather than wrapping, because a block that vanishes off one edge
+    and reappears at the other reads as a redraw glitch, while one that turns
+    around reads as something still working.
+    """
+    if width <= 0:
+        return ""
+    block = min(MARCH_WIDTH, width)
+    span = width - block
+    if span <= 0:
+        return "#" * width
+    # A full cycle is out and back; fold the second half onto the first.
+    at = tick % (span * 2)
+    if at > span:
+        at = span * 2 - at
+    return "-" * at + "#" * block + "-" * (span - at)
+
+
 class ProgressDialog:
     """A cancellable progress window for long copy/move/sync operations.
 
@@ -277,6 +301,7 @@ class ProgressDialog:
         self.detail = ""
         self.cur = 0
         self.total = 0
+        self.ticks = 0          # advances the indeterminate bar
 
     def set_overall(self, text: str) -> None:
         self.overall = text
@@ -307,12 +332,18 @@ class ProgressDialog:
         win.addstr(2, 2, self.overall[: w - 4].ljust(w - 4))
         win.addstr(3, 2, self.detail[: w - 4].ljust(w - 4))
         bar_w = w - 6
-        frac = (self.cur / self.total) if self.total else 0.0
-        frac = max(0.0, min(1.0, frac))
-        filled = int(bar_w * frac)
-        bar = "#" * filled + "-" * (bar_w - filled)
+        if self.total > 0:
+            frac = max(0.0, min(1.0, self.cur / self.total))
+            filled = int(bar_w * frac)
+            bar = "#" * filled + "-" * (bar_w - filled)
+            pct = f"{int(frac * 100):3d}%"
+        else:
+            # No denominator -- a directory scan does not know how much is
+            # left until it is done. A bar stuck at 0% reads as a hang, so a
+            # block travels instead: motion is the message.
+            bar, pct = _marching_bar(bar_w, self.ticks), "    "
+        self.ticks += 1
         win.addstr(5, 2, f"[{bar}]"[: w - 2])
-        pct = f"{int(frac * 100):3d}%"
         win.addstr(5, w - 6, pct)
         win.addstr(6, 2, " Esc/Q = cancel ", curses.A_DIM)
         win.noutrefresh()
