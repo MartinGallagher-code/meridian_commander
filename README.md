@@ -332,6 +332,10 @@ pane along.
   a password only if that fails.
 - If a preset's directory has since disappeared, the pane opens that location's
   home directory instead of going nowhere.
+- The list is **alphabetical**, in the menu and in the file, so a preset stays
+  where you last saw it. Saving over an existing one leaves it in place rather
+  than moving it to the bottom, and a hand-edited file is re-sorted the next
+  time the app writes it.
 
 Presets live in `~/.config/meridian-commander/presets.ini` (one section each,
 `$XDG_CONFIG_HOME` honoured), which is plain text and safe to edit by hand:
@@ -722,6 +726,14 @@ than by hand, which is why they are not part of `config.ini`.
 
 You see the full list of planned copies and the total byte count before
 confirming, and the operation can be cancelled mid-way.
+
+**Both halves are interruptible.** The scan is the slow one on a large tree —
+it produces nothing until it has walked both sides to the bottom, and on a
+remote pane every directory is a network round trip — so it shows a running
+file count and takes **Esc** or **q** to abandon it. Nothing has been copied at
+that point, so cancelling a scan costs you nothing but the wait. The walk is
+iterative rather than recursive, so tree depth is bounded by the filesystem
+rather than by Python's recursion limit.
 
 ## Architecture
 

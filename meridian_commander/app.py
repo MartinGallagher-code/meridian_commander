@@ -1189,13 +1189,24 @@ class App:
 
     def _sync(self) -> None:
         left, right = self.left, self.right
-        self._set_message("Scanning for differences ...")
-        self.draw()
+        # The scan gets its own progress dialog. It is the slow half on a big
+        # tree -- and the half with nothing to show for itself -- so it needs
+        # the escape hatch more than the copying that follows does.
+        scan = dialogs.ProgressDialog(self.stdscr, "Scanning for differences")
+        scan.set_overall("Comparing the two directories ...")
         try:
-            plan = build_sync_plan(left.fs, left.path, right.fs, right.path)
+            plan = build_sync_plan(left.fs, left.path, right.fs, right.path,
+                                   progress=scan.update, cancel=scan.cancelled)
+        except OperationCancelled:
+            scan.close()
+            self._set_message("Sync cancelled")
+            return
         except Exception as exc:
+            scan.close()
             dialogs.message(self.stdscr, "Sync error", str(exc), error=True)
             return
+        finally:
+            scan.close()
 
         if not plan:
             dialogs.message(self.stdscr, "Synchronize",

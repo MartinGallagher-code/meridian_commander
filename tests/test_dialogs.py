@@ -393,15 +393,40 @@ def test_progress_draws_a_bar_and_a_percentage():
     assert "Esc/Q = cancel" in rendered
 
 
-def test_progress_with_no_total_shows_an_empty_bar():
-    def run(stdscr):
-        progress = dialogs.ProgressDialog(stdscr, "Copying")
-        progress.update(0, 0, "counting...")
-        rendered = progress.win.instr(5, 0, 58).decode()
-        progress.close()
-        return rendered
+def test_progress_with_no_total_marches_instead_of_sitting_at_zero():
+    """A directory scan has no denominator; a bar pinned at 0% reads as a hang."""
 
-    assert "  0%" in with_curses_screen(20, 70, run)
+    def run(stdscr):
+        progress = dialogs.ProgressDialog(stdscr, "Scanning")
+        frames = []
+        for _ in range(4):
+            progress.update(0, 0, "left: 1,000 files")
+            frames.append(progress.win.instr(5, 0, 58).decode())
+        progress.close()
+        return frames
+
+    frames = with_curses_screen(20, 70, run)
+    # No percentage -- there is nothing to be a percentage of ...
+    assert not any("%" in f for f in frames)
+    # ... and the block is somewhere different each time, which is the signal
+    # that something is still happening.
+    assert len({f.index("#") for f in frames}) == len(frames)
+
+
+@pytest.mark.parametrize("width, tick, expected", [
+    (0, 0, ""),                       # no room at all
+    (4, 0, "####"),                   # narrower than the block: fill it
+    (8, 3, "########"),
+    (12, 0, "########----"),
+    (12, 2, "--########--"),
+    (12, 4, "----########"),          # at the far end
+    (12, 5, "---########-"),          # and turns around rather than wrapping
+    (12, 8, "########----"),          # back to the start: one full cycle
+])
+def test_marching_bar(width, tick, expected):
+    assert dialogs._marching_bar(width, tick) == expected
+    if width:
+        assert len(dialogs._marching_bar(width, tick)) == width
 
 
 def test_progress_clamps_an_over_long_count():

@@ -8,6 +8,14 @@ modification time) wins and is copied over the older one.
 The plan is computed first (:func:`build_sync_plan`) so the UI can show the user
 exactly what will happen and how many bytes will move before anything is
 touched; :func:`execute_sync_plan` then carries it out.
+
+Both halves take ``progress`` and ``cancel`` callbacks, and the scan needs them
+more than the copying does.  Copying a large tree at least looks busy, but the
+scan produces nothing until it has walked both sides to the bottom -- and on a
+remote pane every directory is a network round trip, so a tree with a lot of
+files can take minutes during which the application has nothing to say.  Left
+silent and uninterruptible that is indistinguishable from a hang, which is
+exactly what it was mistaken for.
 """
 
 from __future__ import annotations
@@ -16,12 +24,25 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .filesystems import DirEntry, FileSystem
-from .operations import CancelCB, ProgressCB, _noop_cancel, _noop_progress, copy_file
+from .operations import (
+    CancelCB,
+    OperationCancelled,
+    ProgressCB,
+    _noop_cancel,
+    _noop_progress,
+    copy_file,
+)
 
 # Modification times from different systems (and filesystems with coarse
 # granularity, e.g. FAT) rarely match to the second.  Treat files whose mtimes
 # are within this tolerance as identical in age to avoid pointless back-copies.
 MTIME_TOLERANCE = 2.0
+
+# How often the scan reports in and looks for a cancel key.  Every file would
+# be correct and far too slow -- each report polls the keyboard and redraws --
+# while once per directory leaves a single huge directory silent for as long as
+# it takes to read.  Doing both bounds the wait either way.
+SCAN_REPORT_EVERY = 250
 
 
 @dataclass
@@ -51,28 +72,54 @@ class SyncPlan:
         return bool(self.actions)
 
 
-def _index_tree(fs: FileSystem, root: str) -> dict[str, DirEntry]:
+def _index_tree(
+    fs: FileSystem,
+    root: str,
+    side: str = "",
+    progress: ProgressCB = _noop_progress,
+    cancel: CancelCB = _noop_cancel,
+) -> dict[str, DirEntry]:
     """Map every file's relative path (POSIX separators) to its entry.
 
     Directories are walked but only files are recorded -- directories are
     created implicitly as their files are copied.
+
+    The walk is a stack rather than recursion.  Partly so a deep tree cannot
+    exhaust the interpreter's stack, but mostly because a loop has somewhere
+    obvious to check for a cancel key: the scan is the slowest part of a sync
+    and the part that used to be impossible to get out of.
     """
     index: dict[str, DirEntry] = {}
+    stack = [(root, "")]
+    since_report = 0
 
-    def walk(path: str, rel: str) -> None:
+    def report() -> None:
+        # total 0 -- a scan has no denominator until it has finished, which is
+        # the whole problem; the dialog draws this as an indeterminate bar.
+        progress(len(index), 0, f"{side}{len(index):,} files")
+        if cancel():
+            raise OperationCancelled()
+
+    while stack:
+        path, rel = stack.pop()
+        report()
         try:
             entries = fs.listdir(path)
         except Exception:
-            return
+            # An unreadable directory is skipped rather than fatal: one denied
+            # subdirectory should not cost the user the whole sync.
+            continue
         for entry in entries:
             child_rel = f"{rel}/{entry.name}" if rel else entry.name
             child_path = fs.join(path, entry.name)
             if entry.is_dir and not entry.is_symlink:
-                walk(child_path, child_rel)
+                stack.append((child_path, child_rel))
             else:
                 index[child_rel] = entry
-
-    walk(root, "")
+                since_report += 1
+                if since_report >= SCAN_REPORT_EVERY:
+                    since_report = 0
+                    report()
     return index
 
 
@@ -81,11 +128,18 @@ def build_sync_plan(
     left_root: str,
     right_fs: FileSystem,
     right_root: str,
+    progress: ProgressCB = _noop_progress,
+    cancel: CancelCB = _noop_cancel,
 ) -> SyncPlan:
-    """Compare two trees and return the list of copies needed to reconcile them."""
-    left = _index_tree(left_fs, left_root)
-    right = _index_tree(right_fs, right_root)
+    """Compare two trees and return the list of copies needed to reconcile them.
 
+    Raises :class:`~meridian_commander.operations.OperationCancelled` if
+    ``cancel`` returns true while either side is being scanned.
+    """
+    left = _index_tree(left_fs, left_root, "left: ", progress, cancel)
+    right = _index_tree(right_fs, right_root, "right: ", progress, cancel)
+
+    progress(0, 0, f"comparing {len(set(left) | set(right)):,} paths")
     actions: list[SyncAction] = []
     for rel in sorted(set(left) | set(right)):
         l = left.get(rel)
