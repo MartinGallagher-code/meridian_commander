@@ -125,6 +125,61 @@ pip install ".[ssh]"
 This installs the `meridian-commander` command and its short alias
 `meridian`.
 
+**Recommended: [pipx](https://pipx.pypa.io/).** It puts the commands somewhere
+on your `PATH` and keeps the app in its own environment, which avoids the
+problem below entirely:
+
+```bash
+pipx install "meridian-commander[ssh]"
+```
+
+### If `meridian` is "command not found" after installing
+
+The package installed correctly; `pip` just put the commands somewhere your
+shell does not look. This happens whenever pip cannot write to the
+interpreter's own directory — no virtualenv, not root, or a Python that is
+"externally managed" (Debian/Ubuntu 23.04+, Fedora 38+, Homebrew), in which
+case pip falls back to a **per-user** scripts directory. It does warn, in the
+middle of the install output:
+
+```
+WARNING: The scripts meridian and meridian-commander are installed in
+'/home/you/.local/bin' which is not on PATH.
+```
+
+**It always works as a module**, whatever `PATH` is doing — same program, same
+arguments:
+
+```bash
+python -m meridian_commander
+```
+
+To get the short command back, find the directory and add it to `PATH`:
+
+```bash
+python -m site --user-base        # scripts are in the "bin" under this
+                                  # ("Scripts" on Windows)
+```
+
+Typically `~/.local/bin` on Linux, `~/Library/Python/3.x/bin` on macOS, and
+`%APPDATA%\Python\Python3xx\Scripts` on Windows. Add it in your shell's
+startup file (`~/.bashrc`, `~/.zshrc`):
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Then `hash -r` (or open a new terminal) — a shell that has already failed to
+find a command may have cached that fact.
+
+Two other things worth ruling out:
+
+- **`pip` and `python` disagreeing.** If `pip` belongs to a different
+  interpreter than the `python` you run, the package lands somewhere unrelated.
+  Use `python -m pip install ...` so both are the same one.
+- **A virtualenv that is not active.** Installing into a venv puts the
+  commands in *its* `bin/`, reachable only while it is activated.
+
 For development use an **editable** install from the repo root, so your code
 changes take effect without reinstalling:
 
@@ -136,7 +191,8 @@ pip install -e ".[ssh]"
 (Older pip versions answer `-e` with `file 'setup.py' not found`; upgrading
 pip inside the virtualenv fixes it.)
 
-You can also run it straight from the source tree without installing:
+You can also run it straight from the source tree without installing — and
+this same form works for an installed copy whose commands are not on `PATH`:
 
 ```bash
 python -m meridian_commander
