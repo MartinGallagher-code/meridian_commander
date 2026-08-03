@@ -54,6 +54,20 @@ from .sync import build_sync_plan, execute_sync_plan, survey_directory
 from .util import human_size, human_time, ljust, rjust
 
 
+def _cwd(fs: FileSystem) -> str:
+    """The directory the command was run from, or the backend's home.
+
+    A working directory can be deleted out from under a running shell, in which
+    case asking for it raises rather than answering.  Falling back to home keeps
+    that from being a crash on startup, which would be an absurd way to lose an
+    application over a directory the user was not going to look at anyway.
+    """
+    try:
+        return os.getcwd()
+    except OSError:
+        return fs.home()
+
+
 class App:
     def __init__(self, stdscr, left_path: str | None = None,
                  right_path: str | None = None) -> None:
@@ -63,7 +77,12 @@ class App:
         left_fs = LocalFileSystem()
         right_fs = LocalFileSystem()
         self._backends += [left_fs, right_fs]
-        self.left = Panel(left_fs, left_fs.normpath(left_path or left_fs.home()))
+        # With no paths given, the left pane opens where the command was run
+        # from: you cd somewhere, type meridian, and the directory you were
+        # already thinking about is the one under the cursor.  The right pane
+        # stays at home, so the pair is "here" and "somewhere to put things"
+        # rather than the same directory twice.
+        self.left = Panel(left_fs, left_fs.normpath(left_path or _cwd(left_fs)))
         self.right = Panel(right_fs, right_fs.normpath(right_path or right_fs.home()))
         self.active = self.left
         self.message = "F1/? Help   Tab switch   F9/s Sync   F10/q Quit   right-click: menu"
@@ -1402,9 +1421,11 @@ def main(argv: list[str] | None = None) -> int:
         "There is NO WARRANTY, to the extent permitted by law."
     )
     parser.add_argument("left", nargs="?", default=None,
-                        help="starting directory for the left pane")
+                        help="starting directory for the left pane "
+                             "(default: the current directory)")
     parser.add_argument("right", nargs="?", default=None,
-                        help="starting directory for the right pane")
+                        help="starting directory for the right pane "
+                             "(default: your home directory)")
     parser.add_argument("-V", "--version", action="version",
                         version=version_text)
     args = parser.parse_args(argv)

@@ -18,7 +18,7 @@ from meridian_commander.filesystems import (
     SFTPFileSystem,
 )
 
-from support import _FakeRemoteBackend, _ScriptedDialogs, read, write
+from support import _FakeRemoteBackend, _ScriptedDialogs, _StubScreen, read, write
 
 
 class _RemoteLike:
@@ -944,6 +944,49 @@ def test_main_reports_its_version(capsys):
     printed = capsys.readouterr().out
     assert "meridian-commander" in printed
     assert "GPLv3+" in printed
+
+
+# -- where the panes open ------------------------------------------------------
+
+@pytest.fixture
+def _two_dirs(tmp_path, monkeypatch):
+    """A home directory and a working directory that are not the same place."""
+    home, work = tmp_path / "home", tmp_path / "work"
+    home.mkdir()
+    work.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(work)
+    return home, work
+
+
+def test_the_left_pane_opens_where_the_command_was_run(_two_dirs):
+    home, work = _two_dirs
+    app = App(_StubScreen())
+    assert app.left.path == str(work)
+    # The right pane is the other half of the pair, and stays at home.
+    assert app.right.path == str(home)
+
+
+def test_a_path_on_the_command_line_still_wins(_two_dirs, tmp_path):
+    home, _work = _two_dirs
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    app = App(_StubScreen(), str(elsewhere))
+    assert app.left.path == str(elsewhere)
+    assert app.right.path == str(home)
+
+
+def test_a_working_directory_that_is_gone_falls_back_to_home(_two_dirs,
+                                                             monkeypatch):
+    """A directory can be deleted under a running shell; that is not a crash."""
+    home, _work = _two_dirs
+
+    def deleted():
+        raise FileNotFoundError("no such directory")
+
+    monkeypatch.setattr(os, "getcwd", deleted)
+    app = App(_StubScreen())
+    assert app.left.path == str(home)
 
 
 # -- the context menu ----------------------------------------------------------

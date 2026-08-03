@@ -277,9 +277,17 @@ python -m meridian_commander
 ## Usage
 
 ```bash
-meridian-commander                 # both panes start in your home directory
+meridian-commander                 # left pane here, right pane in your home directory
 meridian-commander /etc /var/log   # left pane in /etc, right pane in /var/log
+meridian-commander /etc            # left pane in /etc, right pane in your home directory
 ```
+
+With no arguments the **left pane opens in the current directory** — you `cd`
+somewhere, type `meridian`, and the directory you were already thinking about is
+the one under the cursor. The right pane starts at your home directory, so the
+pair is "here" and "somewhere to put things" rather than the same directory
+twice. Press **`~`** in either pane to send it home, and **`Ctrl-G`** to go to a
+path you type.
 
 ### Connecting to a remote location
 
