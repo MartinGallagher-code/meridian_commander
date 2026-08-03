@@ -225,4 +225,18 @@ $restored were present -- the bundle file is truncated (partial download?)" >&2
 fi
 
 echo "Expanded $in into $dest: $restored entr(y/ies), $verified checksum(s) OK, $errors error(s)"
+
+# A bundle split by "merge.sh --max-size" says which part it is. Expanding
+# one part on its own leaves a tree that looks complete and is not, so say
+# so -- the entry-count check above cannot catch this, since each part
+# honestly declares its own count.
+part_line=$(head -n 5 "$in" \
+    | sed -n 's/^# bundle part: \([0-9][0-9]*\) of \([0-9][0-9]*\)$/\1 \2/p' \
+    | head -n 1)
+if [ -n "$part_line" ]; then
+    set -- $part_line
+    echo "split.sh: this is part $1 of $2 -- expand the other $(($2 - 1)) \
+into $dest as well, or the tree will be incomplete" >&2
+fi
+
 [ "$errors" -eq 0 ] || exit 1

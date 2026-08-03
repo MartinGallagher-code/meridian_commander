@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # merge.sh -- bundle a directory tree into a single text file.
 #
-# Usage: merge.sh [OUTPUT] [SOURCE_DIR]
-#   OUTPUT      bundle file to write   (default: bundle.txt)
-#   SOURCE_DIR  directory to bundle    (default: current directory)
+# Usage: merge.sh [-m SIZE] [OUTPUT] [SOURCE_DIR]
+#   OUTPUT        bundle file to write   (default: bundle.txt)
+#   SOURCE_DIR    directory to bundle    (default: current directory)
+#   -m, --max-size SIZE
+#                 split the bundle into parts no larger than SIZE, named
+#                 bundle-part1-of-N.txt and so on.  SIZE takes a K, M or G
+#                 suffix (400K, 2M) or a plain byte count.  Expand the parts
+#                 into the same directory, in any order, to get the tree back.
 #
 # Companion of split.sh, which expands the bundle again.
 #
@@ -31,15 +36,53 @@
 #   * per-file sha256 recorded when a checksum tool is available, so
 #     split.sh can verify integrity
 #   * deterministic entry order (LC_ALL=C sort) -- same tree, same bundle
+#   * parts are cut only at section boundaries, so each one is a valid
+#     bundle in its own right and split.sh needs no special handling; each
+#     carries its own entry count, so a truncated part is still caught
 
 set -euo pipefail
 export LC_ALL=C
 
 usage() {
-    sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
-[ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] && usage 0
+
+# Parse SIZE: a byte count, optionally with a K, M or G suffix.
+parse_size() {
+    case "$1" in
+        *[!0-9KMGkmg]*|"") return 1 ;;
+    esac
+    local number="${1%[KMGkmg]}" unit="${1#"${1%?}"}"
+    case "$number" in ""|*[!0-9]*) return 1 ;; esac
+    case "$unit" in
+        [Kk]) echo $((number * 1024)) ;;
+        [Mm]) echo $((number * 1024 * 1024)) ;;
+        [Gg]) echo $((number * 1024 * 1024 * 1024)) ;;
+        *)    echo "$number" ;;
+    esac
+}
+
+max_size=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage 0 ;;
+        -m|--max-size)
+            [ $# -ge 2 ] || { echo "merge.sh: $1 needs a size" >&2; exit 2; }
+            max_size=$(parse_size "$2") || {
+                echo "merge.sh: not a size: $2" >&2; exit 2; }
+            [ "$max_size" -gt 0 ] || {
+                echo "merge.sh: size must be more than zero" >&2; exit 2; }
+            shift 2 ;;
+        --max-size=*)
+            max_size=$(parse_size "${1#*=}") || {
+                echo "merge.sh: not a size: ${1#*=}" >&2; exit 2; }
+            shift ;;
+        --) shift; break ;;
+        -*) echo "merge.sh: unknown option: $1" >&2; usage 2 ;;
+        *) break ;;
+    esac
+done
 
 out="${1:-bundle.txt}"
 src="${2:-.}"
@@ -173,16 +216,119 @@ trap 'rm -f "$tmp_abs" "$body_abs"' EXIT
     )
 } > "$body_abs"
 
-{
-    printf '# bundle format v2 (merge.sh) -- expand with split.sh\n'
-    printf '# bundle entries: %s\n' $((files + dirs + links))
-    cat "$body_abs"
-} > "$tmp_abs"
-rm -f "$body_abs"
+entries=$((files + dirs + links))
 
-mv "$tmp_abs" "$out_abs"
+# Name for part N of M, with the number worked into the output file name
+# before its extension: bundle.txt -> bundle-part2-of-5.txt.
+part_name() {  # $1=index $2=total
+    case "$out" in
+        *.*) printf '%s-part%s-of%s.%s\n' "${out%.*}" "$1" "$2" "${out##*.}" ;;
+        *)   printf '%s-part%s-of%s\n' "$out" "$1" "$2" ;;
+    esac
+}
+
+if [ "$max_size" -eq 0 ]; then
+    {
+        printf '# bundle format v2 (merge.sh) -- expand with split.sh\n'
+        printf '# bundle entries: %s\n' "$entries"
+        cat "$body_abs"
+    } > "$tmp_abs"
+    rm -f "$body_abs"
+    mv "$tmp_abs" "$out_abs"
+    trap - EXIT
+    total_lines=$(($(wc -l < "$out_abs")))
+    echo "Wrote $out: $files file(s) ($b64s base64), $dirs empty dir(s), \
+$links symlink(s), $skipped skipped, $total_lines lines"
+    exit 0
+fi
+
+# -- splitting ---------------------------------------------------------------
+#
+# Cut only between sections: a part that ended mid-section would not be a
+# bundle at all, and split.sh would rightly refuse it.  The first pass just
+# measures, so the total is known before any part is named -- the names carry
+# "of N", and N cannot be guessed at.
+
+# Every part carries its own header, which has to come out of its budget.
+# The entry count stands in for all three numbers, since neither the part
+# index nor the part count can exceed it -- so this is an upper bound.
+header_bytes=$(printf \
+    '# bundle format v2 (merge.sh) -- expand with split.sh\n# bundle entries: %s\n# bundle part: %s of %s\n' \
+    "$entries" "$entries" "$entries" | wc -c)
+header_bytes=$((header_bytes))
+
+plan_abs="$tmp_abs.plan"
+trap 'rm -f "$tmp_abs" "$body_abs" "$plan_abs"' EXIT
+
+# One line per part: "first-line last-line entry-count byte-count".
+awk -v max="$max_size" -v head="$header_bytes" '
+    BEGIN { start = 1; bytes = 0; count = 0; sec_bytes = 0; sec_lines = 0 }
+    {
+        sec_bytes += length($0) + 1
+        sec_lines += 1
+        if ($0 != "===END===") next
+        # A section bigger than the limit on its own still has to go
+        # somewhere; it gets a part to itself rather than being cut.
+        if (count > 0 && bytes + sec_bytes + head > max) {
+            printf "%d %d %d %d\n", start, NR - sec_lines, count, bytes
+            start = NR - sec_lines + 1
+            bytes = 0; count = 0
+        }
+        bytes += sec_bytes
+        count += 1
+        sec_bytes = 0; sec_lines = 0
+    }
+    END {
+        if (count > 0 || NR == 0)
+            printf "%d %d %d %d\n", start, NR, count, bytes
+    }
+' "$body_abs" > "$plan_abs"
+
+parts=$(wc -l < "$plan_abs")
+parts=$((parts))
+if [ "$parts" -le 1 ]; then
+    # It fits: write the ordinary single bundle under the name asked for.
+    {
+        printf '# bundle format v2 (merge.sh) -- expand with split.sh\n'
+        printf '# bundle entries: %s\n' "$entries"
+        cat "$body_abs"
+    } > "$tmp_abs"
+    mv "$tmp_abs" "$out_abs"
+    rm -f "$body_abs" "$plan_abs"
+    trap - EXIT
+    echo "Wrote $out: $files file(s) ($b64s base64), $dirs empty dir(s), \
+$links symlink(s), $skipped skipped, $(($(wc -l < "$out_abs"))) lines"
+    exit 0
+fi
+
+index=0
+oversize=0
+while read -r first last count bytes; do
+    index=$((index + 1))
+    name=$(part_name "$index" "$parts")
+    piece="$tmp_abs.part"
+    {
+        printf '# bundle format v2 (merge.sh) -- expand with split.sh\n'
+        printf '# bundle entries: %s\n' "$count"
+        printf '# bundle part: %s of %s\n' "$index" "$parts"
+        sed -n "${first},${last}p" "$body_abs"
+    } > "$piece"
+    mv "$piece" "$(abspath "$name")"
+    size=$(wc -c < "$(abspath "$name")")
+    size=$((size))
+    [ "$size" -gt "$max_size" ] && oversize=$((oversize + 1))
+    echo "Wrote $name: $count entr(y/ies), $size bytes"
+done < "$plan_abs"
+
+rm -f "$body_abs" "$plan_abs"
 trap - EXIT
 
-total_lines=$(($(wc -l < "$out_abs")))
-echo "Wrote $out: $files file(s) ($b64s base64), $dirs empty dir(s), \
-$links symlink(s), $skipped skipped, $total_lines lines"
+echo "Split $files file(s) ($b64s base64), $dirs empty dir(s), \
+$links symlink(s), $skipped skipped into $parts part(s)"
+if [ "$oversize" -gt 0 ]; then
+    echo "merge.sh: $oversize part(s) exceed the limit: a single entry is \
+larger than $max_size bytes and cannot be divided" >&2
+fi
+echo "Expand them into one directory, in any order:"
+echo "  for p in $(part_name 1 "$parts" | sed "s/part1-of$parts/part*-of$parts/"); \
+do ./split.sh \"\$p\" DEST; done"
