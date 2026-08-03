@@ -17,6 +17,7 @@ from .filesystems import FileSystem
 from .image import is_image
 from .imageview import ImageView
 from .markdown import MarkdownView, is_markdown
+from .pdf import PdfView, is_pdf
 from .pptx import SlideView, is_presentation
 from .sheetview import SheetView
 from .viewer import Viewer
@@ -36,4 +37,6 @@ def viewer_for(fs: FileSystem, path: str):
         return MarkdownView(fs, path)
     if is_image(name):
         return ImageView(fs, path)
+    if is_pdf(name):
+        return PdfView(fs, path)
     return Viewer(fs, path)

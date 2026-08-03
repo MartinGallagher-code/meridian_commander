@@ -178,12 +178,13 @@ def fit(image_w: int, image_h: int, cols: int, rows: int,
 class ImageView:
     """A full-screen image browser: half-block colour, panning and zoom."""
 
-    def __init__(self, fs: FileSystem, path: str) -> None:
+    def __init__(self, fs: FileSystem, path: str,
+                 image: Image | None = None, name: str | None = None) -> None:
         self.fs = fs
         self.path = path
-        self.name = fs.basename(path)
+        self.name = name or fs.basename(path)
         self.error: str | None = None
-        self.image: Image | None = None
+        self.image: Image | None = image
         self.frame = 0
         self.zoom = 0                   # index into ZOOM_STEPS
         self.off_x = 0
@@ -191,7 +192,10 @@ class ImageView:
         self.colour = True
         self.notice = ""
         self.pairs: Pairs | None = None
-        self._load()
+        # An already-decoded image is handed in when the picture came from
+        # inside another file -- a PDF page, say -- rather than off disk.
+        if image is None:
+            self._load()
 
     def _load(self) -> None:
         try:
