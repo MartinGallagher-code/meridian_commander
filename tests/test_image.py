@@ -775,30 +775,10 @@ def test_the_video_codec_formats_are_named_but_not_decoded(brand, kind):
     assert "no standard-library decoder" in image.note
 
 
-def test_jpeg_is_measured_from_its_frame_header():
-    data = (b"\xff\xd8"
-            + b"\xff\xe0" + struct.pack(">H", 16) + b"JFIF\x00" + b"\x00" * 9
-            + b"\xff\xc0" + struct.pack(">HBHHB", 17, 8, 480, 640, 3)
-            + b"\x00" * 10)
-    image = decode(data)
-    assert (image.kind, image.width, image.height) == ("JPEG", 640, 480)
-    assert "Huffman" in image.note
+def test_a_jpeg_is_handed_to_the_jpeg_decoder():
+    """decode() is the front door; JPEG is the one format it delegates."""
+    from support import jpeg_bytes
 
-
-def test_jpeg_restart_and_standalone_markers_are_stepped_over():
-    data = (b"\xff\xd8" + b"\xff\x01" + b"\xff\xd0"
-            + b"\xff\xc2" + struct.pack(">HBHHB", 17, 8, 100, 200, 3)
-            + b"\x00" * 4)
-    assert (decode(data).width, decode(data).height) == (200, 100)
-
-
-def test_a_jpeg_with_no_frame_header_is_still_named():
-    image = decode(b"\xff\xd8" + b"\xff\xd9")
+    image = decode(jpeg_bytes(8, 8, [[80]]))
     assert image.kind == "JPEG"
-    assert (image.width, image.height) == (0, 0)
-
-
-def test_a_jpeg_that_stops_looking_like_one_is_still_named():
-    """A byte that is not 0xFF where a marker belongs ends the search."""
-    image = decode(b"\xff\xd8" + b"\x00\x00\x00\x00")
-    assert (image.kind, image.width) == ("JPEG", 0)
+    assert image.frames                     # decoded, not merely measured
