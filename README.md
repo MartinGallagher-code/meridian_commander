@@ -39,8 +39,9 @@ and ships with a built-in file viewer and editor.
   to the top of the listing. The same holds whenever an entry disappears from
   under the bar: the pane keeps its position instead of losing your place.
 - **Presets** (`b`) — save the places you keep coming back to, local or remote,
-  and reopen one from a list. A preset stores the connection *and* the
-  directory (never a password) and reuses a connection that is already open.
+  and reopen one with a single letter from the list. A preset stores the
+  connection *and* the directory (never a password) and reuses a connection
+  that is already open.
 - **Local and networked locations** — each pane can point at the local disk, an
   **SFTP** server, an **SSH (shell)** host, or an **FTP** server. Press `F2` to
   open a location. The **SSH (shell)** mode lists and transfers files by running
@@ -350,6 +351,28 @@ often is two keystrokes away instead of a trip through the connect dialog.
 Choosing one points the active pane at it; combine with `=` to bring the other
 pane along.
 
+- **Every preset has a letter**, shown down the left of the list. Pressing it
+  opens that preset there and then — no arrowing down, no Enter — so a saved
+  location really is `b` and one keystroke:
+
+  ```
+  ┌───────────────── Presets ──────────────────┐
+  │ p  photos    --  local:/srv/photos         │
+  │ w  work      --  sftp://deploy@web1:/srv   │
+  │ a  www-logs  --  sftp://deploy@web1:/log   │
+  │ s  Save this location as a preset...       │
+  │ d  Delete a preset...                      │
+  │ c  Cancel                                  │
+  └────────────────────────────────────────────┘
+  ```
+
+  The letter is the preset's own initial wherever that is free — `w` for
+  `work` — and the next free letter otherwise, which is why `www-logs` above
+  answers to `a`. `j` and `k` are never handed out, because they still move the
+  highlight, and `s`/`d`/`c` are reserved so **Save**, **Delete** and **Cancel**
+  keep their letters whatever your presets are called. Arrow keys and Enter work
+  as before, and a list longer than the alphabet leaves the last few without a
+  letter rather than giving one to two of them.
 - Opening a preset **reuses a connection that is already open** in either pane,
   so a saved remote location appears instantly and without authenticating a
   second time.

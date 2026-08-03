@@ -909,12 +909,21 @@ class App:
 
     # -- presets (saved locations) ------------------------------------------
     def _presets_menu(self) -> None:
-        """List the saved locations, and offer to save or delete one."""
+        """List the saved locations, and offer to save or delete one.
+
+        Every preset answers to a letter, so returning to a saved place is
+        ``b`` and one keystroke rather than a walk down the list -- which is
+        the point of having saved it.  The three fixed actions keep their own
+        initials whatever the presets are called, so ``s`` is always Save and
+        ``d`` always Delete; the presets are assigned around them.
+        """
         items = presets.load()
         labels = [f"{p.name}  --  {p.label()}"[:60] for p in items]
         extras = ["Save this location as a preset...",
                   "Delete a preset...", "Cancel"]
-        choice = dialogs.menu(self.stdscr, "Presets", labels + extras)
+        keys = dialogs.accelerators([p.name for p in items], reserved="sdc")
+        choice = dialogs.menu(self.stdscr, "Presets", labels + extras,
+                              keys=keys + ["s", "d", "c"])
         if choice is None or choice == len(labels) + 2:
             return
         if choice < len(labels):
@@ -1016,7 +1025,9 @@ class App:
             dialogs.message(self.stdscr, "Presets", "No presets saved yet.")
             return
         labels = [f"{p.name}  --  {p.label()}"[:60] for p in items]
-        choice = dialogs.menu(self.stdscr, "Delete preset", labels + ["Cancel"])
+        keys = dialogs.accelerators([p.name for p in items], reserved="c")
+        choice = dialogs.menu(self.stdscr, "Delete preset", labels + ["Cancel"],
+                              keys=keys + ["c"])
         if choice is None or choice == len(items):
             return
         victim = items[choice]

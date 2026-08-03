@@ -84,6 +84,7 @@ class _ScriptedDialogs:
         self.prompt_answers = list(prompt)
         self.confirm_answers = list(confirm)
         self.menus: list[tuple] = []
+        self.menu_keys: list[list] = []   # shortcut letters each menu offered
         self.prompts: list[str] = []
         self.messages: list[tuple] = []
         monkeypatch.setattr(dialogs, "menu", self._menu)
@@ -91,8 +92,9 @@ class _ScriptedDialogs:
         monkeypatch.setattr(dialogs, "confirm", self._confirm)
         monkeypatch.setattr(dialogs, "message", self._message)
 
-    def _menu(self, stdscr, title, options):
+    def _menu(self, stdscr, title, options, keys=None):
         self.menus.append((title, list(options)))
+        self.menu_keys.append(list(keys) if keys else [])
         answer = self.menu_answers.pop(0)
         if isinstance(answer, str):
             return next(i for i, o in enumerate(options) if answer in o)
@@ -277,11 +279,16 @@ def scripted_menu(monkeypatch, keys, fail_draws=False):
     return captured
 
 
-def run_menu(monkeypatch, rows, options, keys, fail_draws=False, title="Presets"):
-    """Drive ``dialogs.menu`` on an ``rows``-high screen; return (choice, draws)."""
+def run_menu(monkeypatch, rows, options, keys, fail_draws=False, title="Presets",
+             accel=None):
+    """Drive ``dialogs.menu`` on an ``rows``-high screen; return (choice, draws).
+
+    ``keys`` are the keystrokes typed at it; ``accel`` is the list of shortcut
+    letters the menu is built with, if any.
+    """
     captured = scripted_menu(monkeypatch, keys, fail_draws)
     choice = with_curses_screen(
-        rows, 60, lambda stdscr: dialogs.menu(stdscr, title, options))
+        rows, 60, lambda stdscr: dialogs.menu(stdscr, title, options, accel))
     return choice, captured["window"].drawn
 
 

@@ -1365,6 +1365,45 @@ def test_preset_saved_then_returned_to(app, tmp_path, monkeypatch):
     assert app.active.path == target
 
 
+def _save_presets(app, monkeypatch, *names):
+    """Save the active pane's location under each name in turn."""
+    for name in names:
+        _ScriptedDialogs(monkeypatch, menu=["Save this location"],
+                         prompt=[name])
+        app.handle_key(ord("b"))
+
+
+def test_the_presets_menu_offers_a_letter_per_preset(app, monkeypatch):
+    _save_presets(app, monkeypatch, "work", "photos")
+    scripted = _ScriptedDialogs(monkeypatch, menu=[None])
+    app.handle_key(ord("b"))
+
+    keys = scripted.menu_keys[-1]
+    # Presets are listed in name order, so "photos" then "work": a letter each
+    # from the preset's own name, then the three fixed actions.
+    assert keys == ["p", "w", "s", "d", "c"]
+
+
+def test_the_fixed_actions_keep_their_letters_whatever_presets_are_called(
+        app, monkeypatch):
+    """'s' is always Save and 'd' always Delete, even next to a "save" preset."""
+    _save_presets(app, monkeypatch, "scratch", "downloads")
+    scripted = _ScriptedDialogs(monkeypatch, menu=[None])
+    app.handle_key(ord("b"))
+
+    keys = scripted.menu_keys[-1]
+    assert keys[-3:] == ["s", "d", "c"]
+    assert not {"s", "d", "c"} & set(keys[:2])
+    assert len(set(keys)) == len(keys)
+
+
+def test_the_delete_preset_menu_offers_letters_too(app, monkeypatch):
+    _save_presets(app, monkeypatch, "work", "photos")
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Delete a preset", None])
+    app.handle_key(ord("b"))
+    assert scripted.menu_keys[-1] == ["p", "w", "c"]
+
+
 def test_presets_menu_can_be_cancelled(app, monkeypatch):
     before = app.active.path
     for answer in ("Cancel", None):

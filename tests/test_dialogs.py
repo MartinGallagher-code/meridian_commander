@@ -280,6 +280,89 @@ def test_menu_ignores_keys_it_does_not_handle(monkeypatch):
     assert choice == 1
 
 
+# -- menu shortcut letters -----------------------------------------------------
+
+def test_a_shortcut_letter_chooses_without_pressing_enter(monkeypatch):
+    """One keystroke, no Enter -- the whole point of the letter."""
+    choice, _ = run_menu(monkeypatch, 24, ["alpha", "beta", "gamma"],
+                         [ord("g")], accel=["a", "b", "g"])
+    assert choice == 2
+
+
+def test_a_shortcut_letter_answers_in_either_case(monkeypatch):
+    choice, _ = run_menu(monkeypatch, 24, ["alpha", "beta"],
+                         [ord("B")], accel=["a", "b"])
+    assert choice == 1
+
+
+def test_the_letters_are_drawn_beside_their_options(monkeypatch):
+    _choice, drawn = run_menu(monkeypatch, 24, ["work", "photos"],
+                              [27], accel=["w", "p"])
+    assert any("w  work" in str(d) for d in drawn)
+    assert any("p  photos" in str(d) for d in drawn)
+
+
+def test_an_option_without_a_letter_still_lines_up(monkeypatch):
+    """A blank gutter, so one shortcut-less row does not shift the column."""
+    _choice, drawn = run_menu(monkeypatch, 24, ["work", "nameless"],
+                              [27], accel=["w", None])
+    assert any("w  work" in str(d) for d in drawn)
+    assert any("   nameless" in str(d) for d in drawn)
+
+
+def test_a_letter_nobody_was_given_does_nothing(monkeypatch):
+    choice, _ = run_menu(monkeypatch, 24, ["alpha", "beta"],
+                         [ord("z"), curses.KEY_DOWN, 10], accel=["a", "b"])
+    assert choice == 1
+
+
+def test_j_and_k_still_move_when_letters_are_offered(monkeypatch):
+    """Navigation keeps its keys; that is why they are never handed out."""
+    choice, _ = run_menu(monkeypatch, 24, ["alpha", "beta", "gamma"],
+                         [ord("j"), ord("j"), ord("k"), 10],
+                         accel=["a", "b", "g"])
+    assert choice == 1
+
+
+# -- assigning the letters -----------------------------------------------------
+
+def test_a_name_gets_its_own_initial():
+    assert dialogs.accelerators(["work", "photos", "music"]) == ["w", "p", "m"]
+
+
+def test_a_taken_initial_falls_back_to_the_alphabet():
+    keys = dialogs.accelerators(["alpha", "avocado"])
+    assert keys[0] == "a"
+    assert keys[1] not in (None, "a")
+
+
+def test_initials_are_handed_out_before_any_fallback():
+    """A name with no usable initial cannot take one another name is named for."""
+    keys = dialogs.accelerators(["1st", "alpha"])
+    assert keys[1] == "a"
+    assert keys[0] not in (None, "a")
+
+
+def test_the_navigation_keys_are_never_handed_out():
+    keys = dialogs.accelerators(["jam", "kite"])
+    assert "j" not in keys and "k" not in keys
+    assert None not in keys
+
+
+def test_reserved_letters_are_left_alone():
+    keys = dialogs.accelerators(["scratch", "downloads"], reserved="sdc")
+    assert not {"s", "d", "c"} & set(keys)
+
+
+def test_a_list_longer_than_the_alphabet_runs_out_honestly():
+    """24 letters to give (j and k are spoken for); the rest get none."""
+    keys = dialogs.accelerators([f"item{i}" for i in range(30)])
+    assert len([k for k in keys if k]) == 24
+    assert keys[-6:] == [None] * 6
+    given = [k for k in keys if k]
+    assert len(set(given)) == len(given)     # and never the same letter twice
+
+
 # -- connect dialog ------------------------------------------------------------
 
 class _Answers:
