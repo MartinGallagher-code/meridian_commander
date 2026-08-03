@@ -145,12 +145,23 @@ class _FakeRemoteBackend(LocalFileSystem):
 # overflowing it produces, so only a real window can catch a regression in the
 # code that guards against them.
 
-def with_curses_screen(rows: int, cols: int, fn):
-    """Run ``fn(stdscr)`` on a real curses screen ``rows`` x ``cols``."""
+def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
+    """Run ``fn(stdscr)`` on a real curses screen ``rows`` x ``cols``.
+
+    The terminal type is fixed at ``xterm-256color`` for every screen, because
+    curses reads terminfo once per process: whichever screen initialises first
+    decides the colour count for every screen after it, so a test that asked
+    for a different one would pass or fail on its position in the run.
+
+    ``colours`` overrides the reported ``curses.COLORS`` for the duration, for
+    code that only *consults* the count.  It cannot conjure colours that are
+    not there -- ``init_pair`` still answers to the real terminal -- so it is
+    only useful for the paths that check the count and then decline to use it.
+    """
     master, slave = pty.openpty()
     saved_out, saved_in = os.dup(1), os.dup(0)
     saved_term = os.environ.get("TERM")
-    os.environ["TERM"] = "xterm"
+    os.environ["TERM"] = "xterm-256color"
     os.dup2(slave, 1)
     os.dup2(slave, 0)
     started = False
@@ -161,6 +172,9 @@ def with_curses_screen(rows: int, cols: int, fn):
             pytest.skip(f"curses screen unavailable: {exc}")
         started = True
         curses.start_color()
+        if colours is not None:
+            saved_colours = getattr(curses, "COLORS", 8)
+            curses.COLORS = colours
         curses.resizeterm(rows, cols)
         # curses keeps one screen per process, so wipe whatever an earlier
         # test left behind: every caller expects a blank terminal.
@@ -168,6 +182,8 @@ def with_curses_screen(rows: int, cols: int, fn):
         return fn(stdscr)
     finally:
         if started:
+            if colours is not None:
+                curses.COLORS = saved_colours
             curses.endwin()
         os.dup2(saved_out, 1)
         os.dup2(saved_in, 0)

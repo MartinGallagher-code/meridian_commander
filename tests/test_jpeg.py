@@ -37,7 +37,9 @@ def grey(value: int) -> int:
 def test_a_single_block_becomes_a_single_pixel():
     image = decode(jpeg_bytes(8, 8, [[80]]))
     assert (image.width, image.height, image.kind) == (1, 1, "JPEG")
-    assert image.detail == "baseline, 1 component, DC only (8x8 at 1/8)"
+    assert image.detail == "baseline, 1 component"
+    # The frames are the thumbnail; "size" reports the file itself.
+    assert image.size == (8, 8) and image.reduced
     assert px(image) == (grey(80),) * 3
 
 

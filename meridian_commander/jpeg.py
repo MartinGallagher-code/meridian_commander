@@ -461,8 +461,11 @@ def read_jpeg(data: bytes) -> Image:
         pixels, out_w, out_h = _turn(pixels, out_w, out_h, quarters, mirrored)
     detail = f"{kind}, {len(components)} component"
     detail += "s" if len(components) != 1 else ""
-    detail += f", DC only ({width}x{height} at 1/8)"
-    return Image(out_w, out_h, "JPEG", detail, [Frame(pixels)])
+    # The frames are one eighth of the file's size; "full" carries the real
+    # one so the title reports the image rather than the thumbnail.
+    turned = quarters % 2 == 1
+    return Image(out_w, out_h, "JPEG", detail, [Frame(pixels)],
+                 full=(height, width) if turned else (width, height))
 
 
 def _prepare_scan(payload: bytes, components, quant):

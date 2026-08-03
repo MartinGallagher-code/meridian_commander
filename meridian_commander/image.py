@@ -75,10 +75,23 @@ class Image:
     frames: list[Frame] = field(default_factory=list)
     truncated: bool = False     # more frames existed than MAX_FRAMES
     note: str = ""              # why there are no pixels, when there are none
+    # The file's real pixel size, when the frames are at a reduced scale.
+    # JPEG sets this: its frames are one eighth of the size the file claims,
+    # and the reader wants to be told what the file is, not what we kept.
+    full: tuple[int, int] | None = None
 
     @property
     def animated(self) -> bool:
         return len(self.frames) > 1
+
+    @property
+    def size(self) -> tuple[int, int]:
+        """The size to report to the reader: the file's own, if it differs."""
+        return self.full or (self.width, self.height)
+
+    @property
+    def reduced(self) -> bool:
+        return self.full is not None and self.full != (self.width, self.height)
 
 
 def is_image(name: str) -> bool:

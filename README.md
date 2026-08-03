@@ -56,6 +56,12 @@ and ships with a built-in file viewer and editor.
   (or `.jar`, `.whl`, `.tgz`, `.tar.bz2`, `.tar.xz`) and the pane goes *into*
   it. Browse, tag and copy files out with `F5` exactly as from a directory;
   Backspace at the top comes back out. Read-only, and stdlib-only.
+- **Image viewer** (`F3` on a `.png`, `.jpg`, `.gif`, `.bmp`, `.pnm`) — the
+  picture itself, in colour, drawn as half-block characters so each cell shows
+  two pixels. Pan, zoom, step through GIF frames, or drop to an ASCII
+  luminance ramp. `.webp`/`.avif`/`.heic`/`.tiff` are named and measured
+  rather than drawn — their pixels need a video codec the standard library
+  does not ship.
 - **Markdown viewer** (`F3` on a `.md`) — rendered rather than raw: markers
   gone, **bold** and *italic* and `code` shown with real terminal attributes,
   headings ruled, lists and quotes laid out, tables aligned, links numbered
@@ -425,6 +431,40 @@ character formatting is dropped — this shows what the document *says*. Legacy
 `.doc`, like `.xls`, is a different format entirely and stays in the text
 viewer.
 
+### Images
+
+`F3` on an image draws it. A terminal cell is about twice as tall as it is
+wide, so one cell means one squashed pixel; writing `▀` (upper half block)
+instead gives **two** pixels per cell — the foreground paints the top half and
+the background the bottom. An 80×24 terminal becomes 80×48 square pixels.
+
+Colours are quantised to the xterm-256 palette (the 6×6×6 cube plus its 24
+greys — the greys matter, or midtones visibly step), and curses colour pairs
+are allocated lazily as the picture needs them. On a terminal without 256
+colours it falls back to a ten-step luminance ramp, which reads line art,
+diagrams and screenshots perfectly well.
+
+| Format | How |
+| --- | --- |
+| PNG | full decode: every colour type and bit depth, Adam7 interlace, alpha |
+| GIF | full decode, including animation — `n`/`p` step the frames |
+| BMP, PNM | full decode |
+| JPEG | **DC coefficients only**, giving the image at 1/8 scale |
+| WebP, AVIF, HEIC, TIFF, ICO | named and measured, not drawn |
+
+The JPEG approach is worth explaining. A full decoder in pure Python runs an
+inverse DCT per 8×8 block per component — three million of them for a 12
+megapixel photo — to produce an image the terminal then throws 99% of away.
+Each block's DC coefficient *is* that block's mean, so reading DC alone gives
+the picture at exactly 1/8 scale with no IDCT at all, which is still more
+pixels than a terminal can show. Baseline, extended sequential and progressive
+files all work, as do restart markers, chroma subsampling, CMYK, and EXIF
+orientation (phone photos are rarely stored upright).
+
+Transparency is composited against a checkerboard, the way image editors show
+it. Keys: arrows or `hjkl` pan, `+`/`-` zoom (up to 8×), `f` fits, `n`/`p`
+step animation frames, `c` toggles colour and ASCII, `q` quits.
+
 ### Markdown
 
 `F3` on a `.md` shows it rendered rather than raw:
@@ -590,6 +630,9 @@ quits. Wrapping breaks at spaces and keeps the file's own line numbering, so a
 paragraph occupying six rows is still one numbered line to search and jump to.
 In the **Markdown viewer**: everything the text viewer does, plus `r` to
 switch between the rendered view and the file as it was written.
+In the **image viewer**: arrows or `hjkl` pan, `+`/`-` zoom and `f` fits,
+`n`/`p` (or Space) step animation frames, `c` switches between colour
+half-blocks and the ASCII ramp, `q` quits.
 In the **slide browser**: `Tab`/`Shift-Tab` (or `←`/`→`, `[`/`]`, Space)
 change slide, arrows/PgUp/PgDn scroll a slide that overflows, `t` shows the
 speaker notes, `/` searches every slide's title, body and notes with `n`/`N`,
@@ -754,12 +797,14 @@ the sync engine are written once and work across any pair of backends.
 | `panel.py` | one pane's listing, cursor, selection, sorting |
 | `archive.py` | zip/tar archives as a read-only `FileSystem` |
 | `viewer.py` / `editor.py` | file viewer (scroll, search, wrap) and editor |
-| `browsers.py` | picks the browser for a file: grid, document or text |
+| `browsers.py` | picks the browser for a file: grid, document, image or text |
 | `ooxml.py` | the Office Open XML package layer, shared by the readers |
 | `xlsx.py` / `sheetview.py` | stdlib `.xlsx` reader and the full-screen grid |
 | `docx.py` | stdlib `.docx` reader and the document viewer |
 | `pptx.py` | stdlib `.pptx` reader and the slide browser |
 | `markdown.py` | Markdown rendered to styled lines, and its viewer |
+| `image.py` / `jpeg.py` | stdlib PNG/GIF/BMP/Netpbm decoders, and JPEG |
+| `imageview.py` | colour quantising, half-block drawing, the image browser |
 | `dialogs.py` | prompts, menus, confirmations, progress bars |
 | `app.py` | curses UI, key bindings, orchestration |
 
