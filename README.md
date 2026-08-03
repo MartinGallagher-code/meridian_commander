@@ -902,41 +902,29 @@ the sync engine are written once and work across any pair of backends.
 
 ## Utility scripts
 
-`scripts/merge.sh` bundles a directory tree into a single text file and
-`scripts/split.sh` expands it again:
+The bundle utilities — `merge.sh`, which packs a directory tree into a single
+text file, and `split.sh`, which expands it again — live in the
+[shared_tools](https://github.com/MartinGallagher-code/shared_tools)
+repository rather than here. This repository used to carry its own copy; the
+two drifted apart, each growing a feature the other lacked, so the copy was
+deleted and the features merged upstream.
 
 ```bash
-scripts/merge.sh bundle.txt some/dir     # bundle a tree (default: current dir)
-scripts/split.sh bundle.txt restored/    # expand it (default: current dir)
+shared_tools/scripts/merge.sh bundle.txt some/dir   # bundle a tree
+shared_tools/scripts/split.sh bundle.txt restored/  # expand it again
 ```
 
-**Splitting.** Some places that accept a text file will not accept a large
-one. `-m`/`--max-size` writes a set of parts instead of one file:
+To bundle this repository, exclude `docs/` — the screenshots in `docs/assets`
+are the bulk of the bytes and base64 badly:
 
 ```bash
-scripts/merge.sh -m 240K bundle.txt some/dir
-# Wrote bundle-part1-of3.txt: 16 entr(y/ies), 195497 bytes
-# Wrote bundle-part2-of3.txt: 11 entr(y/ies), 243471 bytes
-# Wrote bundle-part3-of3.txt: 20 entr(y/ies), 173311 bytes
-
-for p in bundle-part*-of3.txt; do scripts/split.sh "$p" restored/; done
+git archive HEAD | tar -x -C /tmp/tree && rm -rf /tmp/tree/docs
+shared_tools/scripts/merge.sh bundle.txt /tmp/tree
 ```
 
-Parts are cut **only at section boundaries**, so each one is a valid bundle in
-its own right — `split.sh` needs no special handling and the parts can be
-expanded in any order. Each carries its own entry count, so a truncated part
-is still caught, and each says which part it is, so expanding one on its own
-warns rather than leaving a tree that looks complete and is not. A single
-entry larger than the limit cannot be divided; it gets a part to itself and
-`merge.sh` says so. If everything fits, the plain single file is written under
-the name you asked for.
-
-The bundle format inlines text files verbatim and base64-encodes binaries
-(and any text file whose content would collide with the section markers).
-Permissions, symlinks, empty directories and missing trailing newlines are
-preserved; every file carries a sha256 that `split.sh` verifies on expansion.
-`split.sh` refuses bundles containing absolute or `..` paths and never passes
-bundle-controlled strings to a shell.
+Some places that accept a text file will not accept a large one, so
+`-m`/`--max-size` writes a set of parts instead; expand them all into one
+directory, in any order.
 
 ## Development
 

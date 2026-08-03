@@ -61,5 +61,6 @@ pip install -i https://test.pypi.org/simple/ meridian-commander
   remote in-pane terminal and the SSH plug-ins.
 - The app needs the `curses` module, so wheels are pure-Python but the tool
   targets POSIX systems (Linux, macOS). On Windows it runs under WSL.
-- `scripts/merge.sh` / `scripts/split.sh` are repo utilities and ship in the
-  sdist only, not in the wheel.
+- The bundle utilities (`merge.sh` / `split.sh`) live in the **shared_tools**
+  repository and are not part of this package at all — neither the sdist nor
+  the wheel ships them.

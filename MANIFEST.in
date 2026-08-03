@@ -3,4 +3,3 @@ include README.md
 include PUBLISHING.md
 include requirements.txt
 recursive-include tests *.py
-recursive-include scripts *.sh
