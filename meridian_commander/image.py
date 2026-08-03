@@ -4,11 +4,12 @@ Every format handled here decompresses with something already in Python:
 PNG is zlib plus a five-case filter loop, GIF is LZW, BMP and the Netpbm
 family are barely compressed at all.
 
-Everything else is *identified and measured* rather than decoded, which is
-still worth doing -- telling the reader "WebP, 1920x1080, VP8-coded" is more
-use than refusing to open the file.  JPEG is in that group for now because it
-needs a Huffman decoder; the formats built on video codecs (WebP, AVIF, HEIC)
-are there permanently, because no standard library ships one.
+JPEG needs a Huffman decoder and lives in :mod:`meridian_commander.jpeg`.
+
+The formats built on video codecs -- WebP, AVIF, HEIC -- are *identified and
+measured* rather than decoded, because no standard library ships the codec.
+That is still worth doing: telling the reader "WebP, 1920x1080, VP8-coded" is
+more use than refusing to open the file.
 
 The output is deliberately dumb: one ``bytearray`` of RGB triples per frame,
 row-major, no alpha.  Transparency is composited here, against a checkerboard,
@@ -74,10 +75,23 @@ class Image:
     frames: list[Frame] = field(default_factory=list)
     truncated: bool = False     # more frames existed than MAX_FRAMES
     note: str = ""              # why there are no pixels, when there are none
+    # The file's real pixel size, when the frames are at a reduced scale.
+    # JPEG sets this: its frames are one eighth of the size the file claims,
+    # and the reader wants to be told what the file is, not what we kept.
+    full: tuple[int, int] | None = None
 
     @property
     def animated(self) -> bool:
         return len(self.frames) > 1
+
+    @property
+    def size(self) -> tuple[int, int]:
+        """The size to report to the reader: the file's own, if it differs."""
+        return self.full or (self.width, self.height)
+
+    @property
+    def reduced(self) -> bool:
+        return self.full is not None and self.full != (self.width, self.height)
 
 
 def is_image(name: str) -> bool:
@@ -803,15 +817,12 @@ def read_measured(data: bytes, kind: str) -> Image:
         "HEIF": "HEIF pixels are HEVC-coded; no standard-library decoder exists",
         "TIFF": "TIFF allows a dozen codecs; none are handled here",
         "ICO": "an icon file is a container of other images",
-        "JPEG": "JPEG needs a Huffman decoder, which is not in this module",
     }[kind]
     try:
         if kind == "WEBP":
             width, height = _webp_size(data)
         elif kind == "TIFF":
             width, height = _tiff_size(data)
-        elif kind == "JPEG":
-            width, height = _jpeg_size(data)
         elif kind == "ICO":
             # Sizes of 0 mean 256 in the ICO directory.
             width = data[6] or 256
@@ -838,23 +849,13 @@ def decode(data: bytes) -> Image:
         return read_bmp(data)
     if kind == "PNM":
         return read_pnm(data)
+    if kind == "JPEG":
+        # Imported here rather than at the top: the jpeg module imports this
+        # one for Image and the size guard, so a top-level import would be a
+        # cycle. This is the only direction that needs breaking.
+        from .jpeg import read_jpeg
+
+        return read_jpeg(data)
     return read_measured(data, kind)
 
 
-def _jpeg_size(data: bytes) -> tuple[int, int]:
-    """Height and width out of a JPEG start-of-frame marker."""
-    at = 2
-    while at + 4 <= len(data):
-        if data[at] != 0xFF:
-            break
-        marker = data[at + 1]
-        if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
-            at += 2
-            continue
-        (length,) = struct.unpack(">H", data[at + 2:at + 4])
-        # Any SOFn except the four that are not frame headers.
-        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
-            height, width = struct.unpack(">HH", data[at + 5:at + 9])
-            return width, height
-        at += 2 + length
-    raise ImageError("JPEG has no frame header")

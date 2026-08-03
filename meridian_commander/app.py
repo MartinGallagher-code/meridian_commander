@@ -1279,6 +1279,7 @@ class App:
             "  F3 on .docx    document view: headings, lists, tables, w wrap\n"
             "  F3 on .pptx    slide browser: Tab slide, t notes, / find\n"
             "  F3 on .md      markdown rendered; r shows the source\n"
+            "  F3 on an image arrows pan, +/- zoom, c colour/ASCII, n frame\n"
             "  C              configuration: edit config.ini / plug-ins\n"
             "\n"
             "  Function keys -- each also has digit and letter aliases,\n"

@@ -145,12 +145,23 @@ class _FakeRemoteBackend(LocalFileSystem):
 # overflowing it produces, so only a real window can catch a regression in the
 # code that guards against them.
 
-def with_curses_screen(rows: int, cols: int, fn):
-    """Run ``fn(stdscr)`` on a real curses screen ``rows`` x ``cols``."""
+def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
+    """Run ``fn(stdscr)`` on a real curses screen ``rows`` x ``cols``.
+
+    The terminal type is fixed at ``xterm-256color`` for every screen, because
+    curses reads terminfo once per process: whichever screen initialises first
+    decides the colour count for every screen after it, so a test that asked
+    for a different one would pass or fail on its position in the run.
+
+    ``colours`` overrides the reported ``curses.COLORS`` for the duration, for
+    code that only *consults* the count.  It cannot conjure colours that are
+    not there -- ``init_pair`` still answers to the real terminal -- so it is
+    only useful for the paths that check the count and then decline to use it.
+    """
     master, slave = pty.openpty()
     saved_out, saved_in = os.dup(1), os.dup(0)
     saved_term = os.environ.get("TERM")
-    os.environ["TERM"] = "xterm"
+    os.environ["TERM"] = "xterm-256color"
     os.dup2(slave, 1)
     os.dup2(slave, 0)
     started = False
@@ -161,6 +172,9 @@ def with_curses_screen(rows: int, cols: int, fn):
             pytest.skip(f"curses screen unavailable: {exc}")
         started = True
         curses.start_color()
+        if colours is not None:
+            saved_colours = getattr(curses, "COLORS", 8)
+            curses.COLORS = colours
         curses.resizeterm(rows, cols)
         # curses keeps one screen per process, so wipe whatever an earlier
         # test left behind: every caller expects a blank terminal.
@@ -168,6 +182,8 @@ def with_curses_screen(rows: int, cols: int, fn):
         return fn(stdscr)
     finally:
         if started:
+            if colours is not None:
+                curses.COLORS = saved_colours
             curses.endwin()
         os.dup2(saved_out, 1)
         os.dup2(saved_in, 0)
@@ -802,3 +818,129 @@ def gif_bytes(width: int, height: int, frames, *, palette: bytes = b"",
         packed = 0x80 | ((len(palette) // 3).bit_length() - 2)
     return (version + struct.pack("<HHBBB", width, height, packed, 0, 0)
             + palette + b"".join(frames) + b"\x3b")
+
+
+# -- JPEG fixtures -------------------------------------------------------------
+#
+# A minimal encoder, enough to produce streams the DC-only decoder can be
+# driven through. Both Huffman tables give every symbol the same 4-bit code
+# length, so a symbol's code is simply its index -- canonical, valid, and
+# short enough to reason about by eye.
+
+#: DC symbols are the coefficient bit-lengths 0..11.
+JPEG_DC_VALUES = bytes(range(12))
+#: AC symbol 0 is end-of-block and 0xF0 is a run of sixteen zeroes; the rest
+#: are (run << 4 | size) pairs used to exercise the coefficient-skipping loop.
+JPEG_AC_VALUES = bytes([0x00, 0xF0, 0x01, 0x02, 0x11, 0x21, 0x31, 0x41,
+                        0x51, 0x61, 0x71, 0x81, 0x91, 0xA1, 0xB1, 0xC1])
+#: Both tables put every code at length 4, so a symbol's code is its index.
+JPEG_DC_COUNTS = bytes([0, 0, 0, len(JPEG_DC_VALUES)] + [0] * 12)
+JPEG_AC_COUNTS = bytes([0, 0, 0, len(JPEG_AC_VALUES)] + [0] * 12)
+
+
+def jpeg_segment(marker: int, payload: bytes) -> bytes:
+    return bytes([0xFF, marker]) + struct.pack(">H", len(payload) + 2) + payload
+
+
+class JpegBits:
+    """Collects bits and writes them out with JPEG's 0xFF stuffing."""
+
+    def __init__(self) -> None:
+        self.bits: list[int] = []
+
+    def put(self, value: int, count: int) -> None:
+        for i in range(count - 1, -1, -1):
+            self.bits.append((value >> i) & 1)
+
+    def symbol(self, values: bytes, symbol: int) -> None:
+        self.put(values.index(symbol), 4)       # every code is 4 bits
+
+    def coefficient(self, diff: int) -> None:
+        """A DC difference, as its bit-length followed by its magnitude bits."""
+        size = abs(diff).bit_length()
+        self.symbol(JPEG_DC_VALUES, size)
+        if size:
+            self.put(diff if diff > 0 else diff + (1 << size) - 1, size)
+
+    def bytes(self) -> bytes:
+        bits = self.bits + [1] * (-len(self.bits) % 8)   # pad with ones
+        out = bytearray()
+        for i in range(0, len(bits), 8):
+            byte = sum(b << (7 - n) for n, b in enumerate(bits[i:i + 8]))
+            out.append(byte)
+            if byte == 0xFF:
+                out.append(0x00)                # stuffing
+        return bytes(out)
+
+
+def jpeg_bytes(width: int, height: int, blocks, *, sampling=None,
+               sof: int = 0xC0, quality: int = 1, restart: int = 0,
+               extra: bytes = b"", adobe=None, exif=None,
+               ac_extra=None) -> bytes:
+    """A JPEG whose blocks carry a DC coefficient and nothing else.
+
+    ``blocks`` is a list per component of that component's DC *values* in
+    scan order; they are differenced here.  ``sampling`` gives ``(h, v)`` per
+    component, defaulting to 1x1 for every one.
+    """
+    count = len(blocks)
+    sampling = sampling or [(1, 1)] * count
+    progressive = sof == 0xC2
+
+    out = bytearray(b"\xff\xd8")
+    if exif is not None:
+        out += jpeg_segment(0xE1, exif)
+    if adobe is not None:
+        out += jpeg_segment(0xEE, b"Adobe" + b"\x00" * 6 + bytes([adobe]))
+    out += jpeg_segment(0xDB, b"\x00" + bytes([quality] * 64))
+    frame = struct.pack(">BHHB", 8, height, width, count)
+    for i, (h, v) in enumerate(sampling):
+        frame += bytes([i + 1, (h << 4) | v, 0])
+    out += jpeg_segment(sof, frame)
+    out += jpeg_segment(0xC4, b"\x00" + JPEG_DC_COUNTS + JPEG_DC_VALUES)
+    out += jpeg_segment(0xC4, b"\x10" + JPEG_AC_COUNTS + JPEG_AC_VALUES)
+    if restart:
+        out += jpeg_segment(0xDD, struct.pack(">H", restart))
+    out += extra
+
+    scan = bytes([count])
+    for i in range(count):
+        scan += bytes([i + 1, 0x00])
+    scan += bytes([0, 0 if progressive else 63, 0])
+    out += jpeg_segment(0xDA, scan)
+
+    bits = JpegBits()
+    previous = [0] * count
+    units = max(len(b) // (h * v) for b, (h, v) in zip(blocks, sampling))
+    for unit in range(units):
+        if restart and unit and unit % restart == 0:
+            out += bits.bytes()
+            out += bytes([0xFF, 0xD0 + ((unit // restart - 1) % 8)])
+            bits = JpegBits()
+            previous = [0] * count
+        for c in range(count):
+            h, v = sampling[c]
+            for b in range(h * v):
+                at = unit * h * v + b
+                value = blocks[c][at] if at < len(blocks[c]) else previous[c]
+                bits.coefficient(value - previous[c])
+                previous[c] = value
+                if not progressive:
+                    for symbol, size in (ac_extra or ()):
+                        bits.symbol(JPEG_AC_VALUES, symbol)
+                        if size:
+                            bits.put(1, size)
+                    bits.symbol(JPEG_AC_VALUES, 0x00)      # end of block
+    out += bits.bytes()
+    return bytes(out + b"\xff\xd9")
+
+
+def exif_bytes(orientation: int, *, order: bytes = b"II") -> bytes:
+    """An APP1 payload carrying just an orientation tag."""
+    pack = "<" if order == b"II" else ">"
+    ifd = struct.pack(pack + "H", 1)
+    ifd += struct.pack(pack + "HHI", 0x0112, 3, 1)
+    ifd += struct.pack(pack + "H", orientation) + b"\x00\x00"
+    ifd += struct.pack(pack + "I", 0)
+    magic = order + (b"*\x00" if order == b"II" else b"\x00*")
+    return b"Exif\x00\x00" + magic + struct.pack(pack + "I", 8) + ifd
