@@ -206,6 +206,51 @@ def test_execute_sync_plan_stops_when_cancelled(fs, tmp_path):
     assert list((tmp_path / "r").iterdir()) == []
 
 
+# -- sync: sizing a directory up before scanning it ----------------------------
+
+def _entries(files=0, dirs=0):
+    listing = [DirEntry(name=f"f{i}", is_dir=False) for i in range(files)]
+    listing += [DirEntry(name=f"d{i}", is_dir=True) for i in range(dirs)]
+    return listing
+
+
+def test_a_small_directory_is_not_worth_warning_about():
+    survey = sync.survey_directory(_entries(files=12, dirs=3))
+    assert (survey.files, survey.dirs) == (12, 3)
+    assert survey.is_large is False
+    assert survey.describe() == "12 files, 3 subdirectories"
+
+
+def test_either_count_on_its_own_makes_a_directory_large():
+    """A wide directory and a deep one are both bad news, for different reasons."""
+    assert sync.survey_directory(_entries(files=sync.LARGE_FILE_COUNT)).is_large
+    assert sync.survey_directory(_entries(dirs=sync.LARGE_DIR_COUNT)).is_large
+    # One short of either threshold is still an ordinary directory.
+    assert not sync.survey_directory(
+        _entries(files=sync.LARGE_FILE_COUNT - 1,
+                 dirs=sync.LARGE_DIR_COUNT - 1)).is_large
+
+
+def test_the_survey_counts_what_the_scan_would_actually_walk():
+    """".." is not in the directory, and a symlinked directory is not descended."""
+    listing = [
+        DirEntry(name="..", is_dir=True),
+        DirEntry(name="real", is_dir=True),
+        DirEntry(name="elsewhere", is_dir=True, is_symlink=True),
+        DirEntry(name="a.txt", is_dir=False),
+    ]
+    survey = sync.survey_directory(listing)
+    # The symlink counts as a file, matching _index_tree: recorded, not entered.
+    assert (survey.files, survey.dirs) == (2, 1)
+    assert survey.describe() == "2 files, 1 subdirectory"
+
+
+def test_an_empty_directory_surveys_to_nothing():
+    survey = sync.survey_directory([])
+    assert survey.is_large is False
+    assert survey.describe() == "0 files, 0 subdirectories"
+
+
 # -- sync: the scan reports in, and can be got out of --------------------------
 
 def test_scan_can_be_cancelled(fs, tmp_path):

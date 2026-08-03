@@ -50,7 +50,7 @@ from .operations import (
 from .archive import is_archive, open_archive
 from .browsers import viewer_for
 from .panel import Panel
-from .sync import build_sync_plan, execute_sync_plan
+from .sync import build_sync_plan, execute_sync_plan, survey_directory
 from .util import human_size, human_time, ljust, rjust
 
 
@@ -1187,8 +1187,51 @@ class App:
         else:
             self._set_message(f"Deleted {len(targets)} item(s)")
 
+    def _sync_scope_warning(self) -> str | None:
+        """Text to show before syncing two panes, or None if they look sane.
+
+        Both panes have already been listed to be drawn, so counting what is in
+        them is free -- which is the point.  Anything more accurate would mean
+        walking the trees, and walking the trees is the expensive thing the
+        warning is trying to save the user from.
+
+        Counting the pane's own listing rather than re-reading the directory
+        also means the numbers in the dialog are the ones on screen, hidden
+        files included or excluded exactly as the pane has them.
+        """
+        sides = [("Left ", self.left), ("Right", self.right)]
+        surveys = [(label, panel, survey_directory(panel.entries))
+                   for label, panel in sides]
+        if not any(survey.is_large for _l, _p, survey in surveys):
+            return None
+
+        lines: list[str] = []
+        for label, panel, survey in surveys:
+            lines.append(f"{label}: {panel.fs.label()}:{panel.path}")
+            lines.append(f"       {survey.describe()}"
+                         + ("   <-- large" if survey.is_large else ""))
+        lines += [
+            "",
+            "Sync descends into every subdirectory on both sides and",
+            "copies the newer of every pair of files, in both",
+            "directions. On a directory this size that can take a long",
+            "time, and it may copy far more than you meant to.",
+            "",
+            "Nothing is ever deleted, and you still get to see the full",
+            "plan before anything is written.",
+            "",
+            "Scan these two directories anyway?",
+        ]
+        return "\n".join(lines)
+
     def _sync(self) -> None:
         left, right = self.left, self.right
+        warning = self._sync_scope_warning()
+        if warning and not dialogs.confirm(self.stdscr, "Synchronize panes",
+                                           warning):
+            self._set_message("Sync cancelled")
+            return
+
         # The scan gets its own progress dialog. It is the slow half on a big
         # tree -- and the half with nothing to show for itself -- so it needs
         # the escape hatch more than the copying that follows does.

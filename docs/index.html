@@ -210,6 +210,7 @@
         <ul>
           <li>Copied files are stamped with the source's modification time, so a second sync finds nothing to do.</li>
           <li>Timestamps within 2 seconds count as equal — no needless copies across filesystems with coarse clocks.</li>
+          <li>A pane holding hundreds of files or dozens of subdirectories — a home directory, say — is queried before the walk starts, not after you have waited for it.</li>
           <li><strong>Nothing is ever deleted.</strong></li>
         </ul>
       </div>
