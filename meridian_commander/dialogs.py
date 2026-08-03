@@ -133,13 +133,55 @@ def prompt(stdscr, title: str, label: str, default: str = "",
         curses.curs_set(0)
 
 
-def menu(stdscr, title: str, options: list[str]) -> int | None:
+# Menu keys that are spoken for: j and k move the highlight, so neither can
+# also mean "pick the entry called that".
+NAVIGATION_KEYS = "jk"
+
+
+def accelerators(names: list[str], reserved: str = "") -> list[str | None]:
+    """One shortcut letter per name -- its own initial wherever that is free.
+
+    The first letter is the one worth remembering ("w" for "work"), so every
+    name gets a shot at its own before anything falls back to the alphabet in
+    order; otherwise a name early in the list could take, as a fallback, the
+    letter a later one is actually named for.
+
+    ``reserved`` holds letters the caller has already promised elsewhere in the
+    same menu.  Names left over at the end -- a list longer than the alphabet --
+    get ``None``: unreachable by letter, still reachable with the arrow keys,
+    which is the honest answer rather than a second letter meaning two things.
+    """
+    taken = set(NAVIGATION_KEYS) | set(reserved)
+    keys: list[str | None] = [None] * len(names)
+
+    for i, name in enumerate(names):
+        initial = name[:1].lower()
+        if initial.isascii() and initial.isalpha() and initial not in taken:
+            taken.add(initial)
+            keys[i] = initial
+
+    spare = (c for c in "abcdefghijklmnopqrstuvwxyz" if c not in taken)
+    for i, key in enumerate(keys):
+        if key is None:
+            keys[i] = next(spare, None)
+    return keys
+
+
+def menu(stdscr, title: str, options: list[str],
+         keys: list[str | None] | None = None) -> int | None:
     """Vertical single-choice menu.  Returns the selected index or None.
 
     A list too long for the screen (a well stocked preset list on a short
     terminal) scrolls instead of overflowing the window.
+
+    ``keys`` gives a shortcut letter per option (``None`` for none), drawn down
+    the left of the list.  Pressing one *chooses* that option there and then
+    rather than moving the highlight to it -- the whole point is to skip the
+    walk down the list -- so a menu of saved locations answers to a keystroke.
     """
-    width = max(len(title) + 4, max((len(o) for o in options), default=0) + 6, 30)
+    gutter = 3 if keys else 0     # "x  " down the left of every row
+    width = max(len(title) + 4,
+                max((len(o) for o in options), default=0) + 6 + gutter, 30)
     win = _center(stdscr, len(options) + 4, width)
     win_h, win_w = win.getmaxyx()
     body = max(1, win_h - 4)     # rows available for options
@@ -152,7 +194,12 @@ def menu(stdscr, title: str, options: list[str]) -> int | None:
         for row in range(min(body, len(options) - top)):
             i = top + row
             attr = curses.A_REVERSE if i == idx else curses.A_NORMAL
-            text = f" {options[i]} ".ljust(win_w - 4)[: win_w - 4]
+            prefix = ""
+            if keys:
+                # Options without a letter still indent, so one row without a
+                # shortcut does not step the whole column sideways.
+                prefix = f"{keys[i]}  " if keys[i] else "   "
+            text = f" {prefix}{options[i]} ".ljust(win_w - 4)[: win_w - 4]
             try:
                 win.addstr(2 + row, 2, text, attr)
             except curses.error:
@@ -165,6 +212,11 @@ def menu(stdscr, title: str, options: list[str]) -> int | None:
                 pass
         win.refresh()
         k = win.getch()
+        if keys and 32 <= k < 127:
+            pressed = chr(k).lower()
+            for i, key in enumerate(keys):
+                if key == pressed:
+                    return i
         if k in (curses.KEY_UP, ord("k")):
             idx = (idx - 1) % len(options)
         elif k in (curses.KEY_DOWN, ord("j")):

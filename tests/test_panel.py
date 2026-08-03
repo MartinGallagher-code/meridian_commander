@@ -261,12 +261,62 @@ def test_toggle_hidden_keeps_the_cursor_on_the_same_entry(fs, tmp_path):
     assert panel.current_name() == "visible.txt"
 
 
-def test_restoring_the_cursor_falls_back_to_the_top(fs, tree):
+def test_a_vanished_entry_leaves_the_cursor_where_it_was(fs, tree):
+    """Losing the entry under the bar must not throw you back to the top."""
     panel = Panel(fs, str(tree))
     panel.move_to(4)
-    # The remembered name is gone from the listing, so the cursor resets.
     panel.refresh(keep_name="no-such-entry")
-    assert panel.cursor == 0
+    assert panel.cursor == 4
+
+
+def test_the_held_position_is_clamped_to_a_shorter_listing(fs, tree):
+    """Hold the position, but not past the end of what is left."""
+    panel = Panel(fs, str(tree))
+    panel.move_to(len(panel.entries) - 1)
+    for name in ("b.txt", "c.md"):
+        (tree / name).unlink()
+    panel.refresh(keep_name="no-such-entry")
+    assert panel.cursor == len(panel.entries) - 1
+    assert panel.current_name() is not None
+
+
+def test_going_up_lands_on_the_directory_just_left(fs, tmp_path):
+    """The happy path still wins: the name is found, wherever the cursor was."""
+    write(str(tmp_path / "root" / "zdir" / "deep.txt"), "x")
+    (tmp_path / "root" / "adir").mkdir(parents=True, exist_ok=True)
+    panel = Panel(fs, str(tmp_path / "root" / "zdir"))
+    panel.move_to(len(panel.entries) - 1)
+    assert panel.go_parent() is True
+    assert panel.current_name() == "zdir"
+
+
+# -- picking where the cursor goes when entries are removed --------------------
+
+def test_the_next_entry_down_is_chosen(fs, tree):
+    panel = Panel(fs, str(tree))
+    # [".."   "adir"  "zdir"  "a.log"  "b.txt"  "c.md"]
+    panel.move_to(names(panel).index("a.log"))
+    assert panel.name_after_removing({"a.log"}) == "b.txt"
+
+
+def test_a_block_of_tagged_entries_is_stepped_over(fs, tree):
+    """Tagged items sit above and below the bar; the cursor clears them all."""
+    panel = Panel(fs, str(tree))
+    panel.move_to(names(panel).index("zdir"))
+    assert panel.name_after_removing({"zdir", "a.log", "b.txt"}) == "c.md"
+
+
+def test_the_search_turns_back_at_the_end_of_the_listing(fs, tree):
+    """Delete the tail and there is nothing below, so look up instead."""
+    panel = Panel(fs, str(tree))
+    panel.move_to(names(panel).index("b.txt"))
+    assert panel.name_after_removing({"b.txt", "c.md"}) == "a.log"
+
+
+def test_removing_everything_leaves_no_name_to_hold(fs, tree):
+    panel = Panel(fs, str(tree))
+    doomed = {e.name for e in panel.entries}
+    assert panel.name_after_removing(doomed) is None
 
 
 def test_set_location_onto_a_second_backend(fs, tmp_path):
