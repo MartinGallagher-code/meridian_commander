@@ -8,6 +8,7 @@ import pytest
 
 from meridian_commander import app as app_mod
 from meridian_commander import dialogs
+from meridian_commander import sync as sync_mod
 from meridian_commander.filesystems import LocalFileSystem
 from meridian_commander.operations import OperationCancelled
 
@@ -353,6 +354,77 @@ def test_the_sync_preview_lists_the_actions_and_truncates(app, tmp_path,
     assert "file(s)" in preview
     assert "and " in preview and "more" in preview
     assert "'->' copy left->right" in preview
+
+
+def _crowd(app, tmp_path, files=0, dirs=0):
+    """Fill the left pane with more than anyone should want to sync."""
+    for i in range(files):
+        write(str(tmp_path / "left" / f"f{i:04d}.txt"), "x")
+    for i in range(dirs):
+        (tmp_path / "left" / f"d{i:04d}").mkdir()
+    app.left.refresh()
+
+
+def test_a_crowded_directory_is_queried_before_the_scan(app, tmp_path,
+                                                        monkeypatch,
+                                                        _quiet_progress):
+    _crowd(app, tmp_path, files=sync_mod.LARGE_FILE_COUNT)
+    scripted = _ScriptedDialogs(monkeypatch, confirm=[False])
+    app._sync()
+
+    title, text, _err = scripted.messages[0]
+    assert title == "Synchronize panes"
+    # The conftest pane already holds a file of its own.
+    assert f"{sync_mod.LARGE_FILE_COUNT + 1:,} files" in text
+    assert "Scan these two directories anyway?" in text
+    assert app.message == "Sync cancelled"
+    # Declining costs nothing: the expensive half never ran.
+    assert _quiet_progress == []
+
+
+def test_a_pane_full_of_subdirectories_is_queried_too(app, tmp_path,
+                                                      monkeypatch):
+    _crowd(app, tmp_path, dirs=sync_mod.LARGE_DIR_COUNT)
+    scripted = _ScriptedDialogs(monkeypatch, confirm=[False])
+    app._sync()
+    # The conftest pane already holds one subdirectory of its own.
+    assert f"{sync_mod.LARGE_DIR_COUNT + 1:,} subdirectories" in scripted.all_text
+    assert app.message == "Sync cancelled"
+
+
+def test_the_warning_names_both_panes_and_flags_the_big_one(app, tmp_path,
+                                                            monkeypatch):
+    _crowd(app, tmp_path, files=sync_mod.LARGE_FILE_COUNT)
+    scripted = _ScriptedDialogs(monkeypatch, confirm=[False])
+    app._sync()
+
+    text = scripted.messages[0][1]
+    assert str(tmp_path / "left") in text and str(tmp_path / "right") in text
+    # Only the offending side is marked, so the user can see which one it is.
+    flagged = [line for line in text.splitlines() if "<-- large" in line]
+    assert len(flagged) == 1
+    assert "nothing is ever deleted" in text.lower()
+
+
+def test_the_sync_goes_ahead_when_the_warning_is_accepted(app, tmp_path,
+                                                          monkeypatch):
+    _crowd(app, tmp_path, files=sync_mod.LARGE_FILE_COUNT)
+    # Once for the warning, once for the plan preview.
+    _ScriptedDialogs(monkeypatch, confirm=[True, True])
+    app._sync()
+    assert (tmp_path / "right" / "f0000.txt").exists()
+    assert "Synchronized" in app.message
+
+
+def test_an_ordinary_pair_of_directories_is_not_queried(app, tmp_path,
+                                                        monkeypatch):
+    """The warning stays out of the way of the syncs people actually do."""
+    _files(app, tmp_path, only_left="payload")
+    scripted = _ScriptedDialogs(monkeypatch, confirm=[True])
+    app._sync()
+    # The first thing the user saw was the plan, not a question about size.
+    assert "to copy:" in scripted.messages[0][1]
+    assert "anyway?" not in scripted.all_text
 
 
 def test_the_scan_is_shown_and_can_be_cancelled(app, tmp_path, monkeypatch,

@@ -48,7 +48,9 @@ and ships with a built-in file viewer and editor.
 - **Bidirectional directory sync** (`F9`) — compares the two panes and copies
   the newest version of each file in whichever direction is needed, so both
   sides end up holding the latest of everything. Nothing is deleted; you get a
-  preview and confirmation before anything is written.
+  preview and confirmation before anything is written, and a directory big
+  enough that syncing it is probably a mistake is queried *before* the scan
+  starts rather than after you have waited for it.
 - **File viewer** (`F3`) — scrollable, with **search** (`/`, smart case,
   highlighted matches, `n`/`N` next/previous with wrap-around), toggleable
   line numbers (`l`) and horizontal scrolling; works on remote files too.
@@ -275,9 +277,17 @@ python -m meridian_commander
 ## Usage
 
 ```bash
-meridian-commander                 # both panes start in your home directory
+meridian-commander                 # left pane here, right pane in your home directory
 meridian-commander /etc /var/log   # left pane in /etc, right pane in /var/log
+meridian-commander /etc            # left pane in /etc, right pane in your home directory
 ```
+
+With no arguments the **left pane opens in the current directory** — you `cd`
+somewhere, type `meridian`, and the directory you were already thinking about is
+the one under the cursor. The right pane starts at your home directory, so the
+pair is "here" and "somewhere to put things" rather than the same directory
+twice. Press **`~`** in either pane to send it home, and **`Ctrl-G`** to go to a
+path you type.
 
 ### Connecting to a remote location
 
@@ -810,6 +820,18 @@ than by hand, which is why they are not part of `config.ini`.
 
 You see the full list of planned copies and the total byte count before
 confirming, and the operation can be cancelled mid-way.
+
+**A directory that looks too big to sync is queried first.** `F9` is one key
+along from Delete, and the pane you left it on may be your home directory or the
+root of a remote account — a two-way sync of which is almost never what you
+meant. Before the scan starts, both panes' listings are counted, and if either
+holds **200 files or more** or **25 subdirectories or more** you are shown what
+is in them and asked whether to go ahead, defaulting to *No*. The check reads
+the listings the panes have already loaded, so it costs nothing and adds no
+delay: the point is to be asked before the wait, not after it. It is a
+deliberately shallow look — three subdirectories hiding a hundred thousand files
+will not trip it, because measuring that would mean doing the very walk the
+question is trying to save you from.
 
 **Both halves are interruptible.** The scan is the slow one on a large tree —
 it produces nothing until it has walked both sides to the bottom, and on a

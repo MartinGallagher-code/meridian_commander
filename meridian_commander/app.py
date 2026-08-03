@@ -50,8 +50,22 @@ from .operations import (
 from .archive import is_archive, open_archive
 from .browsers import viewer_for
 from .panel import Panel
-from .sync import build_sync_plan, execute_sync_plan
+from .sync import build_sync_plan, execute_sync_plan, survey_directory
 from .util import human_size, human_time, ljust, rjust
+
+
+def _cwd(fs: FileSystem) -> str:
+    """The directory the command was run from, or the backend's home.
+
+    A working directory can be deleted out from under a running shell, in which
+    case asking for it raises rather than answering.  Falling back to home keeps
+    that from being a crash on startup, which would be an absurd way to lose an
+    application over a directory the user was not going to look at anyway.
+    """
+    try:
+        return os.getcwd()
+    except OSError:
+        return fs.home()
 
 
 class App:
@@ -63,7 +77,12 @@ class App:
         left_fs = LocalFileSystem()
         right_fs = LocalFileSystem()
         self._backends += [left_fs, right_fs]
-        self.left = Panel(left_fs, left_fs.normpath(left_path or left_fs.home()))
+        # With no paths given, the left pane opens where the command was run
+        # from: you cd somewhere, type meridian, and the directory you were
+        # already thinking about is the one under the cursor.  The right pane
+        # stays at home, so the pair is "here" and "somewhere to put things"
+        # rather than the same directory twice.
+        self.left = Panel(left_fs, left_fs.normpath(left_path or _cwd(left_fs)))
         self.right = Panel(right_fs, right_fs.normpath(right_path or right_fs.home()))
         self.active = self.left
         self.message = "F1/? Help   Tab switch   F9/s Sync   F10/q Quit   right-click: menu"
@@ -1187,8 +1206,51 @@ class App:
         else:
             self._set_message(f"Deleted {len(targets)} item(s)")
 
+    def _sync_scope_warning(self) -> str | None:
+        """Text to show before syncing two panes, or None if they look sane.
+
+        Both panes have already been listed to be drawn, so counting what is in
+        them is free -- which is the point.  Anything more accurate would mean
+        walking the trees, and walking the trees is the expensive thing the
+        warning is trying to save the user from.
+
+        Counting the pane's own listing rather than re-reading the directory
+        also means the numbers in the dialog are the ones on screen, hidden
+        files included or excluded exactly as the pane has them.
+        """
+        sides = [("Left ", self.left), ("Right", self.right)]
+        surveys = [(label, panel, survey_directory(panel.entries))
+                   for label, panel in sides]
+        if not any(survey.is_large for _l, _p, survey in surveys):
+            return None
+
+        lines: list[str] = []
+        for label, panel, survey in surveys:
+            lines.append(f"{label}: {panel.fs.label()}:{panel.path}")
+            lines.append(f"       {survey.describe()}"
+                         + ("   <-- large" if survey.is_large else ""))
+        lines += [
+            "",
+            "Sync descends into every subdirectory on both sides and",
+            "copies the newer of every pair of files, in both",
+            "directions. On a directory this size that can take a long",
+            "time, and it may copy far more than you meant to.",
+            "",
+            "Nothing is ever deleted, and you still get to see the full",
+            "plan before anything is written.",
+            "",
+            "Scan these two directories anyway?",
+        ]
+        return "\n".join(lines)
+
     def _sync(self) -> None:
         left, right = self.left, self.right
+        warning = self._sync_scope_warning()
+        if warning and not dialogs.confirm(self.stdscr, "Synchronize panes",
+                                           warning):
+            self._set_message("Sync cancelled")
+            return
+
         # The scan gets its own progress dialog. It is the slow half on a big
         # tree -- and the half with nothing to show for itself -- so it needs
         # the escape hatch more than the copying that follows does.
@@ -1359,9 +1421,11 @@ def main(argv: list[str] | None = None) -> int:
         "There is NO WARRANTY, to the extent permitted by law."
     )
     parser.add_argument("left", nargs="?", default=None,
-                        help="starting directory for the left pane")
+                        help="starting directory for the left pane "
+                             "(default: the current directory)")
     parser.add_argument("right", nargs="?", default=None,
-                        help="starting directory for the right pane")
+                        help="starting directory for the right pane "
+                             "(default: your home directory)")
     parser.add_argument("-V", "--version", action="version",
                         version=version_text)
     args = parser.parse_args(argv)

@@ -210,6 +210,7 @@
         <ul>
           <li>Copied files are stamped with the source's modification time, so a second sync finds nothing to do.</li>
           <li>Timestamps within 2 seconds count as equal — no needless copies across filesystems with coarse clocks.</li>
+          <li>A pane holding hundreds of files or dozens of subdirectories — a home directory, say — is queried before the walk starts, not after you have waited for it.</li>
           <li><strong>Nothing is ever deleted.</strong></li>
         </ul>
       </div>
@@ -408,7 +409,7 @@
         <h3>Launch</h3>
         <pre>meridian-commander /etc /var/log
 meridian          # short alias</pre>
-        <p>Optionally pass a starting directory for each pane; both default to your home directory.</p>
+        <p>Optionally pass a starting directory for each pane. With no arguments the left pane opens in the current directory and the right one at your home directory.</p>
       </div>
       <div class="step">
         <span class="n">03</span>

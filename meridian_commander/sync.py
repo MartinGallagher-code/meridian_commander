@@ -16,12 +16,17 @@ remote pane every directory is a network round trip, so a tree with a lot of
 files can take minutes during which the application has nothing to say.  Left
 silent and uninterruptible that is indistinguishable from a hang, which is
 exactly what it was mistaken for.
+
+Better still is not to start.  :func:`survey_directory` looks at what a pane has
+already listed and says whether it is big enough to be worth asking about first,
+so a sync of somebody's whole home directory can be waved off in a keystroke
+rather than scanned for a minute and then declined.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Iterable
 
 from .filesystems import DirEntry, FileSystem
 from .operations import (
@@ -43,6 +48,64 @@ MTIME_TOLERANCE = 2.0
 # while once per directory leaves a single huge directory silent for as long as
 # it takes to read.  Doing both bounds the wait either way.
 SCAN_REPORT_EVERY = 250
+
+# What counts as "a lot" when deciding whether to warn before scanning at all.
+# Both numbers describe a directory's *immediate* listing, which is the only
+# thing that can be counted for free: the pane has already listed it, so the
+# check costs nothing, where measuring the tree would mean doing the very walk
+# the warning exists to talk the user out of.
+#
+# 200 files is roughly two screens of listing -- past that the user is looking
+# at a summary rather than at files they can name, which is the point where a
+# two-way sync stops being something they can predict the result of.  25
+# subdirectories matters more than the file count, because each one is a whole
+# tree the scan will descend into and, on a remote pane, its own round trip.
+LARGE_FILE_COUNT = 200
+LARGE_DIR_COUNT = 25
+
+
+@dataclass
+class DirectorySurvey:
+    """How big a directory looks from its own listing, before any walking.
+
+    A cheap proxy, and deliberately a shallow one: three subdirectories holding
+    a hundred thousand files each will not trip either threshold.  It catches
+    the case the warning is actually for -- a home directory or a filesystem
+    root left in a pane -- without making the user wait to be told they should
+    not have waited.
+    """
+
+    files: int = 0
+    dirs: int = 0
+
+    @property
+    def is_large(self) -> bool:
+        return self.files >= LARGE_FILE_COUNT or self.dirs >= LARGE_DIR_COUNT
+
+    def describe(self) -> str:
+        files = f"{self.files:,} file{'' if self.files == 1 else 's'}"
+        dirs = f"{self.dirs:,} subdirector{'y' if self.dirs == 1 else 'ies'}"
+        return f"{files}, {dirs}"
+
+
+def survey_directory(entries: Iterable[DirEntry]) -> DirectorySurvey:
+    """Count what a sync would find at the top of ``entries``.
+
+    Symlinked directories count as files, because that is what
+    :func:`_index_tree` makes of them: it records them and does not descend, so
+    they cost one entry rather than a subtree.  A ``".."`` pseudo-entry -- which
+    a panel puts at the head of its listing, and which is not part of the
+    directory -- is ignored.
+    """
+    survey = DirectorySurvey()
+    for entry in entries:
+        if entry.name == "..":
+            continue
+        if entry.is_dir and not entry.is_symlink:
+            survey.dirs += 1
+        else:
+            survey.files += 1
+    return survey
 
 
 @dataclass
