@@ -56,6 +56,12 @@ and ships with a built-in file viewer and editor.
   (or `.jar`, `.whl`, `.tgz`, `.tar.bz2`, `.tar.xz`) and the pane goes *into*
   it. Browse, tag and copy files out with `F5` exactly as from a directory;
   Backspace at the top comes back out. Read-only, and stdlib-only.
+- **PDF viewer** (`F3` on a `.pdf`) — the text of each page, laid out as the
+  page has it: lines rebuilt from glyph positions, spaces inferred from the
+  gaps, columns kept side by side. `Tab` pages through, `/` searches the whole
+  document. A **scanned** page has no text — press `i` and its image opens in
+  the image viewer. Standard library alone: object streams, cross-reference
+  streams, Flate/LZW/ASCII85/RunLength and `/ToUnicode` CMaps all included.
 - **Image viewer** (`F3` on a `.png`, `.jpg`, `.gif`, `.bmp`, `.pnm`) — the
   picture itself, in colour, drawn as half-block characters so each cell shows
   two pixels. Pan, zoom, step through GIF frames, or drop to an ASCII
@@ -431,6 +437,38 @@ character formatting is dropped — this shows what the document *says*. Legacy
 `.doc`, like `.xls`, is a different format entirely and stays in the text
 viewer.
 
+### PDF
+
+`F3` on a `.pdf` shows one page at a time. There are no lines in a PDF — a page
+is a program that paints glyphs at coordinates — so the lines are rebuilt from
+where the glyphs landed:
+
+- runs are grouped into lines by **baseline**, then ordered by x;
+- **spaces are inferred from the gaps**, because plenty of producers emit one
+  draw call per word (or per kerning pair) with no space characters anywhere
+  in the file;
+- a gap wide enough to be a column break becomes several spaces, so **columns
+  stay side by side** rather than interleaving into nonsense.
+
+Encoding is where extraction usually goes wrong. A string in a content stream
+holds character codes in the *font's own* encoding, and a subset font commonly
+numbers its glyphs from 1 in the order they appear. The font's `/ToUnicode`
+CMap is the only way back; without it a subset font yields confident mojibake.
+That CMap, `/Differences` arrays and WinAnsi are all followed. A composite font
+with no CMap at all emits **nothing** rather than a guess.
+
+The object layer handles what modern files actually contain: cross-reference
+streams and `/ObjStm` object streams (without which a PDF made this century
+looks almost empty), incremental updates, linearised files, and Flate, LZW,
+ASCII85, ASCIIHex and RunLength with PNG and TIFF predictors. A file whose
+cross-reference table is wrong — hand-edited, truncated — is recovered by
+scanning for the objects. Encrypted files are reported as such rather than
+producing rubbish.
+
+A **scanned page** has no text at all, only one large image. Those pages say so
+and offer `i`, which opens the picture in the image viewer; `DCTDecode` images
+are JPEGs and go straight to the JPEG decoder.
+
 ### Images
 
 `F3` on an image draws it. A terminal cell is about twice as tall as it is
@@ -630,6 +668,9 @@ quits. Wrapping breaks at spaces and keeps the file's own line numbering, so a
 paragraph occupying six rows is still one numbered line to search and jump to.
 In the **Markdown viewer**: everything the text viewer does, plus `r` to
 switch between the rendered view and the file as it was written.
+In the **PDF viewer**: `Tab`/`Shift-Tab` (or `[`/`]`, `←`/`→`) page through,
+arrows/PgUp/PgDn scroll a long page, `/` searches the whole document with
+`n`/`N`, `i` opens a scanned page's image, `q` quits.
 In the **image viewer**: arrows or `hjkl` pan, `+`/`-` zoom and `f` fits,
 `n`/`p` (or Space) step animation frames, `c` switches between colour
 half-blocks and the ASCII ramp, `q` quits.
@@ -804,6 +845,8 @@ the sync engine are written once and work across any pair of backends.
 | `pptx.py` | stdlib `.pptx` reader and the slide browser |
 | `markdown.py` | Markdown rendered to styled lines, and its viewer |
 | `image.py` / `jpeg.py` | stdlib PNG/GIF/BMP/Netpbm decoders, and JPEG |
+| `pdfobj.py` | PDF lexer, object graph, cross-references and filters |
+| `pdf.py` | PDF text extraction, page images, and the PDF browser |
 | `imageview.py` | colour quantising, half-block drawing, the image browser |
 | `dialogs.py` | prompts, menus, confirmations, progress bars |
 | `app.py` | curses UI, key bindings, orchestration |

@@ -944,3 +944,158 @@ def exif_bytes(orientation: int, *, order: bytes = b"II") -> bytes:
     ifd += struct.pack(pack + "I", 0)
     magic = order + (b"*\x00" if order == b"II" else b"\x00*")
     return b"Exif\x00\x00" + magic + struct.pack(pack + "I", 8) + ifd
+
+
+# -- PDF fixtures --------------------------------------------------------------
+#
+# Built byte by byte, like the others. The readers were separately checked
+# against files from reportlab, pypdf and qpdf, but none of those is a
+# dependency this project will take, and a file spelled out in full says what
+# the format says rather than what one producer happens to emit.
+
+def pdf_stream(dictionary: str, body: bytes, *, deflate: bool = False) -> bytes:
+    """A stream object body, with /Length filled in from the data."""
+    if deflate:
+        body = zlib.compress(body)
+        dictionary = dictionary.rstrip()[:-2] + " /Filter /FlateDecode >>"
+    head = dictionary.rstrip()[:-2] + " /Length %d >>" % len(body)
+    return head.encode("latin-1") + b"\nstream\n" + body + b"\nendstream"
+
+
+def pdf_bytes(objects: dict, *, root: int = 1, trailer_extra: str = "",
+              header: bytes = b"%PDF-1.4\n", broken_xref: bool = False,
+              no_trailer: bool = False) -> bytes:
+    """A PDF with a classic cross-reference table.
+
+    ``objects`` maps object number to its body, as bytes or as a string.
+    ``broken_xref`` writes offsets that are all wrong, which is how a
+    hand-edited or truncated file behaves and which the reader recovers from
+    by scanning.
+    """
+    out = bytearray(header)
+    offsets = {}
+    for num in sorted(objects):
+        body = objects[num]
+        if isinstance(body, str):
+            body = body.encode("latin-1")
+        offsets[num] = len(out)
+        out += b"%d 0 obj\n" % num + body + b"\nendobj\n"
+    start = len(out)
+    top = max(objects) + 1
+    out += b"xref\n0 %d\n" % top
+    out += b"0000000000 65535 f \n"
+    for num in range(1, top):
+        at = 0 if broken_xref else offsets.get(num, 0)
+        kind = b"n" if num in offsets else b"f"
+        out += b"%010d 00000 %s \n" % (at, kind)
+    if not no_trailer:
+        out += (b"trailer\n<< /Size %d /Root %d 0 R %s>>\n"
+                % (top, root, trailer_extra.encode("latin-1")))
+    out += b"startxref\n%d\n%%%%EOF\n" % start
+    return bytes(out)
+
+
+def pdf_xref_stream(objects: dict, *, root: int = 1,
+                    in_object_stream=()) -> bytes:
+    """A PDF using a cross-reference *stream*, and optionally object streams.
+
+    ``in_object_stream`` names the objects to pack into an ``/ObjStm`` rather
+    than write at top level -- the layout every PDF made this century uses,
+    and the one a reader that only knows classic tables cannot open at all.
+    """
+    packed = {n: objects[n] for n in in_object_stream}
+    loose = {n: objects[n] for n in objects if n not in packed}
+    out = bytearray(b"%PDF-1.5\n")
+    offsets = {}
+    entries = {}
+
+    if packed:
+        header, body = "", bytearray()
+        for num in sorted(packed):
+            value = packed[num]
+            if isinstance(value, str):
+                value = value.encode("latin-1")
+            header += "%d %d " % (num, len(body))
+            body += value + b"\n"
+        stream_num = max(objects) + 1
+        first = len(header)
+        content = header.encode("latin-1") + bytes(body)
+        offsets[stream_num] = len(out)
+        # The container is itself an ordinary object and needs its own entry;
+        # without one the reader cannot find the stream that holds the rest.
+        entries[stream_num] = (1, len(out), 0)
+        out += b"%d 0 obj\n" % stream_num + pdf_stream(
+            "<< /Type /ObjStm /N %d /First %d >>" % (len(packed), first),
+            content, deflate=True) + b"\nendobj\n"
+        for index, num in enumerate(sorted(packed)):
+            entries[num] = (2, stream_num, index)
+
+    for num in sorted(loose):
+        value = loose[num]
+        if isinstance(value, str):
+            value = value.encode("latin-1")
+        offsets[num] = len(out)
+        entries[num] = (1, len(out), 0)
+        out += b"%d 0 obj\n" % num + value + b"\nendobj\n"
+
+    xref_num = max(entries) + 1
+    start = len(out)
+    entries[xref_num] = (1, start, 0)
+    top = xref_num + 1
+    rows = bytearray()
+    for num in range(top):
+        kind, second, third = entries.get(num, (0, 0, 65535))
+        rows += bytes([kind]) + second.to_bytes(4, "big") + third.to_bytes(2, "big")
+    out += b"%d 0 obj\n" % xref_num + pdf_stream(
+        "<< /Type /XRef /Size %d /W [1 4 2] /Root %d 0 R >>" % (top, root),
+        bytes(rows), deflate=True) + b"\nendobj\n"
+    out += b"startxref\n%d\n%%%%EOF\n" % start
+    return bytes(out)
+
+
+def pdf_page_objects(content: bytes, *, resources: str = "",
+                     media: str = "[0 0 612 792]", pages: int = 1) -> dict:
+    """The catalogue, page tree, pages and content streams of a small PDF."""
+    kids = " ".join("%d 0 R" % (4 + i * 2) for i in range(pages))
+    objects = {
+        1: "<< /Type /Catalog /Pages 2 0 R >>",
+        2: "<< /Type /Pages /Count %d /Kids [%s] /MediaBox %s >>"
+           % (pages, kids, media),
+    }
+    if not resources:
+        resources = ("<< /Font << /F1 3 0 R >> >>")
+        objects[3] = ("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica"
+                      " /Encoding /WinAnsiEncoding >>")
+    for i in range(pages):
+        objects[4 + i * 2] = (
+            "<< /Type /Page /Parent 2 0 R /Resources %s /Contents %d 0 R >>"
+            % (resources, 5 + i * 2))
+        objects[5 + i * 2] = pdf_stream("<< >>", content)
+    return objects
+
+
+#: Which of simple_pdf's keywords belong to the file rather than the page.
+_FILE_KEYWORDS = ("root", "trailer_extra", "header", "broken_xref",
+                  "no_trailer")
+
+
+def simple_pdf(content: bytes, **kwargs) -> bytes:
+    """A one-page PDF whose content stream is ``content``."""
+    file_args = {k: kwargs.pop(k) for k in list(kwargs)
+                 if k in _FILE_KEYWORDS}
+    return pdf_bytes(pdf_page_objects(content, **kwargs), **file_args)
+
+
+def text_content(*lines, font: str = "F1", size: int = 12,
+                 x: int = 72, y: int = 700, leading: int = 16) -> bytes:
+    """A content stream drawing one string per line, top down."""
+    out = ["BT", "/%s %d Tf" % (font, size), "%d %d Td" % (x, y),
+           "%d TL" % leading]
+    for i, line in enumerate(lines):
+        if i:
+            out.append("T*")
+        escaped = (line.replace("\\", "\\\\").replace("(", "\\(")
+                   .replace(")", "\\)"))
+        out.append("(%s) Tj" % escaped)
+    out.append("ET")
+    return "\n".join(out).encode("latin-1")
