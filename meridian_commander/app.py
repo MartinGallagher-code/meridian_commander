@@ -1182,6 +1182,13 @@ class App:
         if not dialogs.confirm(self.stdscr, "Delete", text):
             return
 
+        # Decide where the cursor goes while the listing is still intact: the
+        # nearest entry that is not being deleted.  Tagged items can be spread
+        # anywhere above and below the bar, so the answer is rarely the index
+        # the cursor happens to be on, and it has to be worked out before the
+        # entries it is worked out from are gone.
+        keep = panel.name_after_removing({t.name for t in targets})
+
         errors: list[str] = []
         dlg = dialogs.ProgressDialog(self.stdscr, "Delete")
         try:
@@ -1199,7 +1206,7 @@ class App:
             dlg.close()
 
         panel.clear_selection()
-        panel.refresh()
+        panel.refresh(keep_name=keep)
         if errors:
             dialogs.message(self.stdscr, "Delete errors",
                             "\n".join(errors[:8]), error=True)

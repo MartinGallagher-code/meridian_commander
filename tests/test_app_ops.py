@@ -308,6 +308,77 @@ def test_a_delete_cancelled_from_the_progress_window(app, tmp_path, monkeypatch)
     assert remaining & {"a", "b"}
 
 
+# -- where the cursor is left after a delete -----------------------------------
+
+def _listing(app, tmp_path, *names):
+    for name in names:
+        write(str(tmp_path / "left" / name), "x")
+    app.left.refresh()
+    return [e.name for e in app.left.entries]
+
+
+def test_the_cursor_lands_on_the_next_file_down(app, tmp_path, monkeypatch):
+    _listing(app, tmp_path, "a.txt", "b.txt", "c.txt")
+    _point_at(app.left, "b.txt")
+    _ScriptedDialogs(monkeypatch, confirm=[True])
+    app._delete()
+    assert app.left.current_name() == "c.txt"
+
+
+def test_deleting_the_last_file_walks_the_cursor_back_up(app, tmp_path,
+                                                         monkeypatch):
+    """Nothing below to land on, so the cursor takes the entry above."""
+    listing = _listing(app, tmp_path, "a.txt", "b.txt", "c.txt")
+    last, second_last = listing[-1], listing[-2]
+    _point_at(app.left, last)
+    _ScriptedDialogs(monkeypatch, confirm=[True])
+    app._delete()
+    assert app.left.current_name() == second_last
+
+
+def test_tagged_files_are_stepped_over_together(app, tmp_path, monkeypatch):
+    """The cursor clears the whole tagged block, not just the entry under it."""
+    _listing(app, tmp_path, "a.txt", "b.txt", "c.txt", "d.txt")
+    _point_at(app.left, "a.txt")
+    app.left.selected = {"a.txt", "b.txt", "c.txt"}
+    _ScriptedDialogs(monkeypatch, confirm=[True])
+    app._delete()
+    assert app.left.current_name() == "d.txt"
+
+
+def test_a_delete_that_fails_leaves_the_cursor_on_something_real(app, tmp_path,
+                                                                 monkeypatch):
+    """The kept name was never deleted, so it is still there to land on."""
+    _listing(app, tmp_path, "a.txt", "b.txt", "c.txt")
+    _point_at(app.left, "b.txt")
+
+    def explode(path):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(app.left.fs, "delete_tree", explode)
+    _ScriptedDialogs(monkeypatch, confirm=[True])
+    app._delete()
+    assert app.left.current_name() == "c.txt"
+    assert (tmp_path / "left" / "b.txt").exists()
+
+
+def test_emptying_the_directory_leaves_the_cursor_somewhere_valid(app, tmp_path,
+                                                                  monkeypatch):
+    import shutil
+
+    for stale in (tmp_path / "left").iterdir():
+        if stale.is_file():
+            stale.unlink()
+        else:
+            shutil.rmtree(stale)
+    _listing(app, tmp_path, "only.txt")
+    app.left.selected = {"only.txt"}
+    _ScriptedDialogs(monkeypatch, confirm=[True])
+    app._delete()
+    # All that is left is the ".." entry, and the cursor is on it.
+    assert app.left.current_name() == ".."
+
+
 # -- sync ----------------------------------------------------------------------
 
 def test_sync_copies_the_missing_files(app, tmp_path, monkeypatch):

@@ -36,8 +36,17 @@ class Panel:
 
     # -- loading ----------------------------------------------------------
     def refresh(self, keep_name: str | None = None) -> None:
-        """Reload the current directory, trying to keep the cursor in place."""
+        """Reload the current directory, trying to keep the cursor in place.
+
+        The cursor follows ``keep_name`` -- or whatever it was sitting on --
+        by name.  When that entry has gone, deleted or renamed or filtered out
+        from under it, the cursor holds its *position* rather than springing
+        back to the top of the listing: after removing something you are almost
+        always still interested in what was around it, and hunting your way back
+        down a long directory is a poor reward for a deletion that worked.
+        """
         target = keep_name or self.current_name()
+        fallback = self.cursor
         self.error = None
         try:
             entries = self.fs.listdir(self.path)
@@ -50,7 +59,7 @@ class Panel:
         # Drop selections for entries that no longer exist.
         names = {e.name for e in self.entries}
         self.selected &= names
-        self._restore_cursor(target)
+        self._restore_cursor(target, fallback)
 
     def _sorted(self, entries: list[DirEntry]) -> list[DirEntry]:
         parent = [] if self._at_root() else [DirEntry(name=self.PARENT, is_dir=True)]
@@ -76,14 +85,30 @@ class Panel:
     def _at_root(self) -> bool:
         return self.fs.parent(self.path) == self.path
 
-    def _restore_cursor(self, name: str | None) -> None:
-        self.cursor = 0
+    def _restore_cursor(self, name: str | None, fallback: int = 0) -> None:
+        self.cursor = fallback
         if name:
             for i, e in enumerate(self.entries):
                 if e.name == name:
                     self.cursor = i
                     break
         self._clamp()
+
+    def name_after_removing(self, doomed: set[str]) -> str | None:
+        """Where the cursor should land if ``doomed`` were to disappear.
+
+        The nearest entry that is not on the list: down first, so the highlight
+        settles on whatever followed the removed block, then back up for the
+        case where the tail of the listing went with it.  Returning a *name*
+        rather than an index is what makes it survive a delete that only partly
+        worked -- the entries that were not removed have not moved either.
+        """
+        below = range(self.cursor, len(self.entries))
+        above = range(self.cursor - 1, -1, -1)
+        for i in list(below) + list(above):
+            if self.entries[i].name not in doomed:
+                return self.entries[i].name
+        return None
 
     # -- current selection ------------------------------------------------
     def current(self) -> DirEntry | None:
@@ -131,6 +156,9 @@ class Panel:
             return False
         self.path = parent
         self.selected.clear()
+        # An index into the directory being left means nothing in its parent,
+        # so the cursor starts at the top; normally the name below finds it.
+        self.cursor = 0
         self.refresh(keep_name=leaving)
         return True
 

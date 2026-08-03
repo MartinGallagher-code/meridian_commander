@@ -34,6 +34,10 @@ and ships with a built-in file viewer and editor.
   (the *remote* account's home on a remote pane), and `=` points the **other
   pane at this pane's directory and connection**, reusing the same live session
   so a remote location is never dialled — or authenticated — twice.
+- **The cursor stays put** — after deleting (`F8`) the highlight settles on the
+  next entry down, stepping over a whole tagged block rather than springing back
+  to the top of the listing. The same holds whenever an entry disappears from
+  under the bar: the pane keeps its position instead of losing your place.
 - **Presets** (`b`) — save the places you keep coming back to, local or remote,
   and reopen one from a list. A preset stores the connection *and* the
   directory (never a password) and reuses a connection that is already open.
