@@ -861,6 +861,27 @@ scripts/merge.sh bundle.txt some/dir     # bundle a tree (default: current dir)
 scripts/split.sh bundle.txt restored/    # expand it (default: current dir)
 ```
 
+**Splitting.** Some places that accept a text file will not accept a large
+one. `-m`/`--max-size` writes a set of parts instead of one file:
+
+```bash
+scripts/merge.sh -m 240K bundle.txt some/dir
+# Wrote bundle-part1-of3.txt: 16 entr(y/ies), 195497 bytes
+# Wrote bundle-part2-of3.txt: 11 entr(y/ies), 243471 bytes
+# Wrote bundle-part3-of3.txt: 20 entr(y/ies), 173311 bytes
+
+for p in bundle-part*-of3.txt; do scripts/split.sh "$p" restored/; done
+```
+
+Parts are cut **only at section boundaries**, so each one is a valid bundle in
+its own right — `split.sh` needs no special handling and the parts can be
+expanded in any order. Each carries its own entry count, so a truncated part
+is still caught, and each says which part it is, so expanding one on its own
+warns rather than leaving a tree that looks complete and is not. A single
+entry larger than the limit cannot be divided; it gets a part to itself and
+`merge.sh` says so. If everything fits, the plain single file is written under
+the name you asked for.
+
 The bundle format inlines text files verbatim and base64-encodes binaries
 (and any text file whose content would collide with the section markers).
 Permissions, symlinks, empty directories and missing trailing newlines are
