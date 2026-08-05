@@ -49,7 +49,9 @@ and ships with a built-in file viewer and editor.
   servers that permit SSH login but have the SFTP subsystem disabled.
 - **Copy & move across any pair of panes** — local→remote, remote→local,
   remote→remote and local→local all work through one streaming engine, with a
-  cancellable progress bar (`F5` copy, `F6` move).
+  cancellable progress bar (`F5` copy, `F6` move). A copy from an SFTP pane to
+  the *same* server writes down a second channel, so the read and the write
+  never contend (see [Copying on one connection](#copying-on-one-connection)).
 - **Bidirectional directory sync** (`F9`) — compares the two panes and copies
   the newest version of each file in whichever direction is needed, so both
   sides end up holding the latest of everything. Nothing is deleted; you get a
@@ -883,6 +885,30 @@ Saved locations are kept separately, in
 `~/.config/meridian-commander/presets.ini` — see
 [Presets](#presets--saved-locations). They are written by the app (`b`) rather
 than by hand, which is why they are not part of `config.ini`.
+
+## Copying on one connection
+
+Both panes share a single live connection after `=` (mirror) or after opening a
+preset that reuses one — that is the point of both features, since it avoids
+authenticating twice and makes a move between the panes a cheap same-server
+rename. It also means a remote→remote copy is frequently **a connection copying
+to itself**.
+
+That used to be unsafe. One SFTP session is one channel, and every file handle
+it opens shares that channel. Reading calls paramiko's `prefetch()`, which fills
+the channel with read responses; the writes then have to get out past them. The
+two directions contend, and the session either stalls or drops — measured
+against a real server on loopback, roughly **one copy in three** died. Over a
+slow link it hangs instead, because the window to lose the race in is wider.
+
+So writes now go through **a second SFTP session** on the same SSH transport.
+It costs one channel and no authentication — the transport is already up — and
+the two directions stop meeting. The session is opened on first write, so
+browsing never pays for it, and a server that refuses a second channel falls
+back to the old single-session behaviour rather than losing the ability to write.
+
+This does not affect **SSH (shell)** panes, which already run each `cat` in its
+own channel, or FTP, or any copy between two different connections.
 
 ## How synchronization works
 
