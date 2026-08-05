@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import curses
 
+from . import termimage
 from .filesystems import FileSystem
 from .image import Image, ImageError, MAX_BYTES, decode
 from .util import ljust, truncate
@@ -80,6 +81,21 @@ def palette_index(r: int, g: int, b: int) -> int:
     if grey_error < cube_error:
         return GREY_BASE + level
     return CUBE_BASE + 36 * ri + 6 * gi + bi
+
+
+def palette_rgb(index: int) -> tuple[int, int, int]:
+    """The colour an xterm-256 index stands for -- :func:`palette_index` back.
+
+    The graphics protocols declare their own palette, so they need the colour a
+    quantised pixel actually became, not the number standing for it.
+    """
+    if index >= GREY_BASE:
+        shade = 8 + (index - GREY_BASE) * 10
+        return shade, shade, shade
+    offset = index - CUBE_BASE
+    return (CUBE_STEPS[offset // 36],
+            CUBE_STEPS[(offset // 6) % 6],
+            CUBE_STEPS[offset % 6])
 
 
 def luminance(r: int, g: int, b: int) -> int:
@@ -163,14 +179,17 @@ def sample(image: Image, frame: int, scale_w: int, scale_h: int,
 
 
 def fit(image_w: int, image_h: int, cols: int, rows: int,
-        zoom: int = 100) -> tuple[int, int]:
+        zoom: int = 100, cell_w: int = 1, cell_h: int = 2) -> tuple[int, int]:
     """Pixel size that fits ``cols`` x ``rows`` cells, keeping the aspect ratio.
 
-    Rows count double because of the half-block: a cell is two pixels tall.
+    ``cell_w`` x ``cell_h`` is how many pixels one cell holds.  It defaults to
+    the half-block's 1x2 -- a cell is one pixel wide and two tall -- and is the
+    terminal's real cell size when a graphics protocol is drawing, which is the
+    only thing that has to change to size a picture for either renderer.
     """
     if image_w <= 0 or image_h <= 0 or cols <= 0 or rows <= 0:
         return 0, 0
-    room_w, room_h = cols, rows * 2
+    room_w, room_h = cols * cell_w, rows * cell_h
     scale = min(room_w / image_w, room_h / image_h) * zoom / 100
     return max(1, round(image_w * scale)), max(1, round(image_h * scale))
 
@@ -192,6 +211,14 @@ class ImageView:
         self.colour = True
         self.notice = ""
         self.pairs: Pairs | None = None
+        # A terminal that speaks a graphics protocol gets the real pixels; the
+        # half-block renderer stays as the fallback and as the "c" toggle's
+        # other half, so nothing depends on the protocol being there.
+        self.protocol = termimage.detect()
+        self.graphics = self.protocol is not None
+        self.cell_px = termimage.cell_pixels() or termimage.DEFAULT_CELL
+        self.measured = termimage.cell_pixels() is not None
+        self._pending: tuple[bytes, int, int] | None = None
         # An already-decoded image is handed in when the picture came from
         # inside another file -- a PDF page, say -- rather than off disk.
         if image is None:
@@ -211,22 +238,43 @@ class ImageView:
             self.error = str(exc)
 
     # -- geometry -----------------------------------------------------------
+    def cell_size(self) -> tuple[int, int]:
+        """Pixels per cell for whichever renderer is drawing.
+
+        Every measurement below is in image pixels, so this is the only place
+        that knows a half-block cell holds 1x2 of them and a real one holds
+        whatever the terminal says.  Pan, zoom and clamping then work the same
+        for both.
+        """
+        return self.cell_px if self.using_graphics() else (1, 2)
+
+    def using_graphics(self) -> bool:
+        """Whether the real-pixel path is both available and switched on."""
+        return bool(self.graphics and self.protocol)
+
+    def room(self, cols: int, rows: int) -> tuple[int, int]:
+        """The view's size in image pixels."""
+        cell_w, cell_h = self.cell_size()
+        return cols * cell_w, rows * cell_h
+
     def scaled(self, cols: int, rows: int) -> tuple[int, int]:
         """The image's size in pixels at the current zoom."""
         if self.image is None:
             return 0, 0
+        cell_w, cell_h = self.cell_size()
         return fit(self.image.width, self.image.height, cols, rows,
-                   ZOOM_STEPS[self.zoom])
+                   ZOOM_STEPS[self.zoom], cell_w, cell_h)
 
     def clamp(self, cols: int, rows: int) -> None:
         """Keep the view inside the image, and centre it when it fits."""
         scale_w, scale_h = self.scaled(cols, rows)
-        self.off_x = max(0, min(self.off_x, scale_w - cols))
-        self.off_y = max(0, min(self.off_y, scale_h - rows * 2))
-        if scale_w <= cols:
-            self.off_x = -((cols - scale_w) // 2)
-        if scale_h <= rows * 2:
-            self.off_y = -((rows * 2 - scale_h) // 2)
+        room_w, room_h = self.room(cols, rows)
+        self.off_x = max(0, min(self.off_x, scale_w - room_w))
+        self.off_y = max(0, min(self.off_y, scale_h - room_h))
+        if scale_w <= room_w:
+            self.off_x = -((room_w - scale_w) // 2)
+        if scale_h <= room_h:
+            self.off_y = -((room_h - scale_h) // 2)
 
     def pan(self, dx: int, dy: int, cols: int, rows: int) -> None:
         self.off_x += dx
@@ -236,12 +284,13 @@ class ImageView:
     def set_zoom(self, index: int, cols: int, rows: int) -> None:
         """Change zoom about the centre of the view, not about its corner."""
         old_w, old_h = self.scaled(cols, rows)
-        centre_x = (self.off_x + cols / 2) / max(1, old_w)
-        centre_y = (self.off_y + rows) / max(1, old_h)
+        room_w, room_h = self.room(cols, rows)
+        centre_x = (self.off_x + room_w / 2) / max(1, old_w)
+        centre_y = (self.off_y + room_h / 2) / max(1, old_h)
         self.zoom = max(0, min(len(ZOOM_STEPS) - 1, index))
         new_w, new_h = self.scaled(cols, rows)
-        self.off_x = round(centre_x * new_w - cols / 2)
-        self.off_y = round(centre_y * new_h - rows)
+        self.off_x = round(centre_x * new_w - room_w / 2)
+        self.off_y = round(centre_y * new_h - room_h / 2)
         self.clamp(cols, rows)
 
     def step_frame(self, delta: int) -> None:
@@ -294,6 +343,9 @@ class ImageView:
     def _draw_image(self, win, width: int, body: int) -> None:
         if body <= 0 or width <= 0:
             return
+        if self.using_graphics():
+            self._plan_graphics(width, body)
+            return
         if self.pairs is None:
             self.pairs = Pairs()
         self.clamp(width, body)
@@ -325,6 +377,63 @@ class ImageView:
         return (0 <= x + self.off_x < scale_w
                 and 0 <= y + self.off_y < scale_h)
 
+    # -- the real-pixel path ------------------------------------------------
+    def _plan_graphics(self, width: int, body: int) -> None:
+        """Build the escape sequence for this frame and note where it goes.
+
+        Nothing is written here.  curses has not flushed yet, and anything sent
+        before it does is painted over by the repaint that follows; the caller
+        emits the payload afterwards, from :meth:`flush_graphics`.
+        """
+        self._pending = None
+        self.clamp(width, body)
+        scale_w, scale_h = self.scaled(width, body)
+        room_w, room_h = self.room(width, body)
+        cell_w, cell_h = self.cell_px
+
+        # The part of the image the view actually covers.  Only this is sent,
+        # so an image smaller than the window sits on the terminal's own
+        # background rather than in a black box of its own making.
+        x0, x1 = max(self.off_x, 0), min(self.off_x + room_w, scale_w)
+        y0, y1 = max(self.off_y, 0), min(self.off_y + room_h, scale_h)
+        out_w, out_h = x1 - x0, y1 - y0
+        if out_w <= 0 or out_h <= 0:
+            return
+
+        rows = sample(self.image, self.frame, scale_w, scale_h,
+                      x0, y0, out_w, out_h)
+        # Cell the top-left pixel lands in.  A picture can start part-way into
+        # a cell, and a cell is the finest position an escape sequence has, so
+        # the placement rounds -- by less than one cell, and only when panning.
+        col = max(0, round((x0 - self.off_x) / cell_w))
+        row = 1 + max(0, round((y0 - self.off_y) / cell_h))
+
+        if self.protocol == termimage.KITTY:
+            pixels = bytearray()
+            for line in rows:
+                for r, g, b in line:
+                    pixels += bytes((r, g, b))
+            payload = termimage.kitty_clear() + termimage.kitty_encode(
+                bytes(pixels), out_w, out_h,
+                -(-out_w // cell_w), -(-out_h // cell_h))
+        else:
+            payload = termimage.sixel_encode(
+                rows, out_w, out_h, palette_index, palette_rgb)
+        self._pending = (payload, row, col)
+
+    def flush_graphics(self, write=None) -> None:
+        """Send the frame planned by the last :meth:`draw`, if any.
+
+        Call after ``curses.doupdate()``.  A picture lasts exactly until curses
+        next paints those cells, which is why this runs every pass rather than
+        once: redrawing is also how the previous frame gets cleaned up.
+        """
+        pending, self._pending = self._pending, None
+        if pending is None:
+            return
+        payload, row, col = pending
+        termimage.emit(payload, row, col, write)
+
     def _draw_title(self, win, width: int) -> None:
         title = f" Image: {self.name}"
         if self.image is not None and not self.error:
@@ -353,13 +462,23 @@ class ImageView:
                 parts.append(f"frame {self.frame + 1}/{len(self.image.frames)}")
                 if self.image.truncated:
                     parts.append("[truncated]")
-            if not full_colour():
+            if self.using_graphics():
+                parts.append(self.protocol)
+                if not self.measured:
+                    # The sizing is a guess, and a picture that looks stretched
+                    # should say why rather than look like a decoding bug.
+                    parts.append("assumed cell size")
+            elif not full_colour():
                 parts.append("no 256-colour palette")
             elif not self.colour:
                 parts.append("ASCII")
-            if self.pairs is not None and self.pairs.exhausted:
+            if not self.using_graphics() and self.pairs is not None \
+                    and self.pairs.exhausted:
                 parts.append("colours exhausted")
-            parts.append("arrows pan  +/- zoom  [c]olour  n/p frame  [q]uit")
+            keys = "arrows pan  +/- zoom  [c]olour"
+            if self.protocol:
+                keys += "  [g]raphics"
+            parts.append(f"{keys}  n/p frame  [q]uit")
             hint = "  ".join(parts)
         win.attrset(curses.A_REVERSE)
         try:
@@ -375,8 +494,14 @@ class ImageView:
         win = curses.newwin(height, width, 0, 0)
         win.keypad(True)
         while True:
+            if self.using_graphics():
+                # curses skips cells it believes are unchanged, and the picture
+                # is invisible to it, so without this the blanks underneath are
+                # never rewritten and the old frame stays on the screen.
+                win.touchwin()
             self.draw(win)
             curses.doupdate()
+            self.flush_graphics()
             height, width = stdscr.getmaxyx()
             body = max(1, height - 2)
             step = max(1, width // 8)
@@ -404,3 +529,16 @@ class ImageView:
                 self.step_frame(-1)
             elif key in (ord("c"), ord("C")):
                 self.colour = not self.colour
+            elif key in (ord("g"), ord("G")):
+                self._toggle_graphics()
+
+    def _toggle_graphics(self) -> None:
+        """Switch between the real pixels and the half-block drawing."""
+        if self.protocol is None:
+            self.notice = " this terminal has no graphics protocol "
+            return
+        self.graphics = not self.graphics
+        # The two renderers measure in different pixels, so an offset carried
+        # across would land somewhere unrelated; the next clamp re-centres.
+        self.off_x = self.off_y = 0
+        self._pending = None

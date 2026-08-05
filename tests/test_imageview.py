@@ -579,3 +579,173 @@ def test_a_note_longer_than_the_window_is_cut_off(tmp_path, fs):
         return win.instr(1, 0, 30).decode()
 
     assert "WEBP" in with_colour_screen(6, 40, run)
+
+
+# -- the real-pixel path -------------------------------------------------------
+#
+# The protocol is forced rather than detected: the test suite runs wherever it
+# runs, and a renderer that only got exercised on the developer's terminal
+# would be a renderer nobody tested.
+
+@pytest.fixture
+def sixel_picture(picture, monkeypatch):
+    monkeypatch.setattr(picture, "protocol", imageview.termimage.SIXEL)
+    monkeypatch.setattr(picture, "graphics", True)
+    monkeypatch.setattr(picture, "cell_px", (10, 20))
+    return picture
+
+
+def test_without_a_protocol_the_half_blocks_still_draw(picture, monkeypatch):
+    monkeypatch.setattr(picture, "protocol", None)
+    monkeypatch.setattr(picture, "graphics", False)
+    assert picture.using_graphics() is False
+    assert picture.cell_size() == (1, 2)
+
+    def run(stdscr):
+        win = curses.newwin(8, 30, 0, 0)
+        picture.draw(win)
+        return [win.instr(y, 0, 30).decode() for y in range(8)]
+
+    lines = with_colour_screen(10, 40, run)
+    assert HALF_BLOCK in "".join(lines[1:-1])
+    assert picture._pending is None
+
+
+def test_the_cell_size_follows_the_renderer(sixel_picture):
+    assert sixel_picture.using_graphics() is True
+    assert sixel_picture.cell_size() == (10, 20)
+    # The same window is far more pixels when a cell holds more of them.
+    assert sixel_picture.room(20, 10) == (200, 200)
+    sixel_picture.graphics = False
+    assert sixel_picture.room(20, 10) == (20, 20)
+
+
+def test_the_body_is_left_to_the_graphics(sixel_picture):
+    """No half-blocks are painted where the picture is going to land."""
+
+    def run(stdscr):
+        win = curses.newwin(8, 30, 0, 0)
+        sixel_picture.draw(win)
+        return [win.instr(y, 0, 30).decode() for y in range(8)]
+
+    lines = with_colour_screen(10, 40, run)
+    assert HALF_BLOCK not in "".join(lines[1:-1])
+
+
+def test_a_frame_is_planned_but_not_written_until_curses_has_flushed(
+        sixel_picture):
+    def run(stdscr):
+        win = curses.newwin(8, 30, 0, 0)
+        sixel_picture.draw(win)
+        return sixel_picture._pending
+
+    pending = with_colour_screen(10, 40, run)
+    assert pending is not None
+    payload, row, _col = pending
+    assert payload.startswith(imageview.termimage.SIXEL_START)
+    assert row >= 1                      # never over the title bar
+
+    written = []
+    sixel_picture.flush_graphics(write=written.append)
+    assert written and payload in written[0]
+    # Flushing consumes it, so a pass that plans nothing sends nothing.
+    assert sixel_picture._pending is None
+    written.clear()
+    sixel_picture.flush_graphics(write=written.append)
+    assert written == []
+
+
+def test_the_planned_pixels_are_the_image(sixel_picture):
+    """Decode the payload back and check it against the source pixels."""
+    from test_termimage import decode_sixel
+
+    def run(stdscr):
+        win = curses.newwin(8, 30, 0, 0)
+        sixel_picture.draw(win)
+        return sixel_picture._pending
+
+    payload, _row, _col = with_colour_screen(10, 40, run)
+    width, height, pixels = decode_sixel(payload)
+    assert width > 0 and height > 0
+    # The 4x2 fixture is red/green/blue/white across the top; whatever the
+    # scale, the top-left pixel is the red one and the top-right is white.
+    assert pixels[(0, 0)] == imageview.palette_rgb(imageview.palette_index(*RED))
+    assert pixels[(width - 1, 0)] == imageview.palette_rgb(
+        imageview.palette_index(*WHITE))
+
+
+def test_kitty_sends_the_pixels_rather_than_a_palette(picture, monkeypatch):
+    monkeypatch.setattr(picture, "protocol", imageview.termimage.KITTY)
+    monkeypatch.setattr(picture, "graphics", True)
+    monkeypatch.setattr(picture, "cell_px", (10, 20))
+
+    def run(stdscr):
+        win = curses.newwin(8, 30, 0, 0)
+        picture.draw(win)
+        return picture._pending
+
+    payload, _row, _col = with_colour_screen(10, 40, run)
+    # Previous frames are cleared first, or they pile up on the screen.
+    assert payload.startswith(imageview.termimage.kitty_clear())
+    assert b"a=T" in payload and b"f=24" in payload
+
+
+def test_the_graphics_key_toggles_the_renderer(sixel_picture, monkeypatch):
+    run_keys(sixel_picture, [ord("g")], monkeypatch=monkeypatch)
+    assert sixel_picture.graphics is False
+    run_keys(sixel_picture, [ord("G")], monkeypatch=monkeypatch)
+    assert sixel_picture.graphics is True
+
+
+def test_the_graphics_key_says_so_when_there_is_no_protocol(picture,
+                                                            monkeypatch):
+    monkeypatch.setattr(picture, "protocol", None)
+    monkeypatch.setattr(picture, "graphics", False)
+    picture._toggle_graphics()
+    assert "no graphics protocol" in picture.notice
+    assert picture.graphics is False
+
+
+def test_switching_renderer_recentres_rather_than_keeping_the_offset(
+        sixel_picture):
+    sixel_picture.off_x = 500
+    sixel_picture.off_y = 500
+    sixel_picture._toggle_graphics()
+    # 500 graphics pixels is off the end of the half-block view entirely.
+    assert (sixel_picture.off_x, sixel_picture.off_y) == (0, 0)
+
+
+def test_the_footer_names_the_protocol_in_use(sixel_picture):
+    def run(stdscr):
+        win = curses.newwin(8, 100, 0, 0)
+        sixel_picture.draw(win)
+        return win.instr(7, 0, 100).decode()
+
+    footer = with_colour_screen(10, 110, run)
+    assert imageview.termimage.SIXEL in footer
+    assert "[g]raphics" in footer
+
+
+def test_an_assumed_cell_size_is_admitted_in_the_footer(sixel_picture,
+                                                        monkeypatch):
+    monkeypatch.setattr(sixel_picture, "measured", False)
+
+    def run(stdscr):
+        win = curses.newwin(8, 60, 0, 0)
+        sixel_picture.draw(win)
+        return win.instr(7, 0, 60).decode()
+
+    assert "assumed cell size" in with_colour_screen(10, 70, run)
+
+
+def test_a_view_panned_off_the_image_plans_nothing(sixel_picture):
+    def run(stdscr):
+        win = curses.newwin(8, 30, 0, 0)
+        # Past the far edge, with the clamp deliberately bypassed.
+        sixel_picture.draw(win)
+        sixel_picture.off_x = 10 ** 6
+        sixel_picture.clamp = lambda cols, rows: None
+        sixel_picture.draw(win)
+        return sixel_picture._pending
+
+    assert with_colour_screen(10, 40, run) is None
