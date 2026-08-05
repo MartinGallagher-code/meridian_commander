@@ -142,8 +142,24 @@ SIXEL_START = b"\x1bPq"
 SIXEL_END = b"\x1b\\"
 
 
+def _percent(value: int) -> int:
+    """An 8-bit channel as the whole percent nearest to it."""
+    return (value * 100 + 127) // 255
+
+
 def _sixel_runs(masks: list[int]) -> bytes:
-    """One colour's row of six-pixel columns, run-length encoded."""
+    """One colour's row of six-pixel columns, run-length encoded.
+
+    Trailing empty columns paint nothing and are dropped -- *before* encoding,
+    not after.  Trimming them from the finished string would take the "?" that
+    a repeat introducer was counting and leave "!5" behind with nothing to
+    repeat, which reads as a run of whatever byte happens to follow.
+    """
+    end = len(masks)
+    while end and masks[end - 1] == 0:
+        end -= 1
+    masks = masks[:end]
+
     out = bytearray()
     run_char = -1
     run = 0
@@ -166,9 +182,7 @@ def _sixel_runs(masks: list[int]) -> bytes:
         flush()
         run_char, run = mask, 1
     flush()
-
-    # Trailing empty columns paint nothing, so they need not be written.
-    return bytes(out).rstrip(b"?")
+    return bytes(out)
 
 
 def sixel_encode(rows: list[list[tuple[int, int, int]]], width: int, height: int,
@@ -200,9 +214,12 @@ def sixel_encode(rows: list[list[tuple[int, int, int]]], width: int, height: int
             return 0
         registers[colour] = number
         r, g, b = rgb_of(colour)
-        # Sixel channels are percentages, not bytes.
-        out.extend(b"#%d;2;%d;%d;%d" % (number, r * 100 // 255,
-                                        g * 100 // 255, b * 100 // 255))
+        # Sixel channels are percentages, not bytes, so 0-255 cannot survive
+        # the trip exactly -- 95 is 37.25%, and only whole percents may be
+        # written.  Rounding rather than truncating keeps the error under
+        # half a percent instead of biasing every channel downwards.
+        out.extend(b"#%d;2;%d;%d;%d" % (number, _percent(r), _percent(g),
+                                        _percent(b)))
         return number
 
     for top in range(0, height, 6):

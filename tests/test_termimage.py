@@ -148,6 +148,12 @@ def decode_sixel(payload: bytes):
         elif ch == b"!":                     # run length
             i += 1
             count, i = number(i)
+            # The repeated byte must be a sixel, not whatever came next: an
+            # introducer left with nothing to repeat is exactly the kind of
+            # damage a lenient parser reads straight past.
+            assert 0x3F <= body[i] <= 0x7E, (
+                "!%d is followed by %r, which is not a sixel" % (
+                    count, body[i:i + 1]))
             mask = body[i] - 0x3F
             i += 1
             for _ in range(count):
@@ -216,6 +222,24 @@ def test_a_flat_run_is_compressed():
     assert len(payload) < 200
     _w, _h, pixels = decode_sixel(payload)
     assert len(pixels) == 200 * 6
+
+
+def test_a_long_empty_tail_leaves_no_dangling_repeat():
+    """The trailing gap is dropped before encoding, not trimmed off after.
+
+    Trimming the finished string took the "?" a repeat introducer was counting
+    and left "!5" with nothing to repeat -- which a real terminal reads as a
+    run of whatever byte follows, and which made the image come out wider than
+    it is.  Every colour here has a long empty tail on one side.
+    """
+    rows = [[(255, 0, 0)] * 8 + [(0, 0, 255)] * 8 for _ in range(6)]
+    payload = encode(rows)
+    width, height, pixels = decode_sixel(payload)
+    assert (width, height) == (16, 6)
+    want = quantised(rows)
+    for y in range(6):
+        for x in range(16):
+            assert pixels[(x, y)] == want[y][x], f"pixel {x},{y}"
 
 
 def test_a_short_run_is_written_out_rather_than_counted():
@@ -373,3 +397,72 @@ def test_a_stream_that_will_not_flush_is_not_fatal():
 
     termimage.emit(b"PAYLOAD", 1, 1, write=_Refuses())
     assert written and written[0].endswith(b"PAYLOAD")
+
+
+# -- against a reference implementation ----------------------------------------
+#
+# The decoder above is ours, and two implementations written from the same
+# reading of a spec can share a misreading.  libsixel is the reference, so
+# where it is installed the encoder is checked against it as well.  It caught
+# two bugs this file's own decoder had let through: a run-length introducer
+# left with nothing to repeat, and every colour channel biased a shade dark.
+
+def _sixel2png():
+    import shutil
+
+    return shutil.which("sixel2png")
+
+
+@pytest.mark.skipif(not _sixel2png(), reason="libsixel (sixel2png) not installed")
+def test_libsixel_decodes_what_we_encode(tmp_path):
+    import subprocess
+    import sys
+
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+    from support import rgb_png
+
+    from meridian_commander.image import decode
+
+    # Bars, a gradient and a diagonal: flat runs, many colours, and thin
+    # detail that a mis-encoded run would smear.
+    width, height = 64, 36
+    source = []
+    for y in range(height):
+        for x in range(width):
+            if y < 12:
+                source.append([(255, 0, 0), (0, 255, 0), (0, 0, 255),
+                               (255, 255, 0)][x * 4 // width])
+            elif y < 24:
+                source.append((x * 255 // width, y * 255 // height, 200))
+            else:
+                source.append((255, 255, 255) if abs(x - (y - 24) * 2) < 2
+                              else (20, 20, 20))
+    png = tmp_path / "in.png"
+    png.write_bytes(rgb_png(width, height, source))
+
+    image = decode(png.read_bytes())
+    buf = image.frames[0].pixels
+    rows = [[(buf[(y * width + x) * 3], buf[(y * width + x) * 3 + 1],
+              buf[(y * width + x) * 3 + 2]) for x in range(width)]
+            for y in range(height)]
+
+    sixel = tmp_path / "out.sixel"
+    sixel.write_bytes(termimage.sixel_encode(rows, width, height,
+                                             palette_index, palette_rgb))
+    out = tmp_path / "out.png"
+    subprocess.run([_sixel2png(), "-i", str(sixel), "-o", str(out)],
+                   check=True, capture_output=True)
+
+    got = decode(out.read_bytes())
+    assert (got.width, got.height) == (width, height)
+
+    # Every pixel in its place, and every colour within the half percent the
+    # protocol's palette can express -- sixel writes channels as whole
+    # percents, so 95/255 can only ever come back as 94 or 96.
+    theirs = got.frames[0].pixels
+    worst = 0
+    for i in range(0, len(buf), 3):
+        want = palette_rgb(palette_index(buf[i], buf[i + 1], buf[i + 2]))
+        have = (theirs[i], theirs[i + 1], theirs[i + 2])
+        worst = max(worst, max(abs(a - b) for a, b in zip(want, have)))
+    assert worst <= 2, f"colour drifted by {worst}/255"
