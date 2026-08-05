@@ -304,3 +304,72 @@ def test_emit_positions_the_payload_then_writes_it():
     written = []
     termimage.emit(b"PAYLOAD", 2, 3, write=written.append)
     assert written == [termimage.cursor_to(2, 3) + b"PAYLOAD"]
+
+
+# -- the corners ---------------------------------------------------------------
+
+def test_cell_pixels_reports_what_the_terminal_says(monkeypatch):
+    """The measuring path itself: CI has no terminal with a pixel size."""
+    import fcntl
+    import struct
+
+    # rows, cols, xpixels, ypixels -- a 100x40 grid of 9x21 cells.
+    packed = struct.pack("HHHH", 40, 100, 900, 840)
+    monkeypatch.setattr(fcntl, "ioctl", lambda *a, **k: packed)
+    assert termimage.cell_pixels(1) == (9, 21)
+
+
+def test_a_terminal_that_reports_no_pixel_size_measures_nothing(monkeypatch):
+    import fcntl
+    import struct
+
+    monkeypatch.setattr(fcntl, "ioctl",
+                        lambda *a, **k: struct.pack("HHHH", 40, 100, 0, 0))
+    assert termimage.cell_pixels(1) is None
+
+
+def test_cell_pixels_gives_up_where_there_is_no_termios(monkeypatch):
+    """Windows has no termios, and importing it must not be fatal."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "termios", None)
+    assert termimage.cell_pixels(1) is None
+
+
+def test_more_colours_than_registers_reuses_one_rather_than_failing():
+    """A quantiser that overruns its promise costs a wrong shade, not a crash."""
+    count = termimage.SIXEL_COLOURS + 40
+    rows = [[(x % 256, x // 256, 0) for x in range(count)]]
+    payload = termimage.sixel_encode(
+        rows, count, 1,
+        lambda r, g, b: r + g * 256,          # every pixel its own colour
+        lambda i: (i % 256, i // 256, 0))
+    # Only as many colours as there are registers were ever declared.
+    assert payload.count(b";2;") == termimage.SIXEL_COLOURS
+    assert payload.endswith(termimage.SIXEL_END)
+
+
+def test_emit_does_nothing_without_a_byte_stream(monkeypatch):
+    """Under a stand-in stdout there is nowhere to put an escape sequence."""
+    import sys
+
+    class _TextOnly:
+        pass
+
+    monkeypatch.setattr(sys, "stdout", _TextOnly())
+    termimage.emit(b"PAYLOAD", 0, 0)          # must not raise
+
+
+def test_a_stream_that_will_not_flush_is_not_fatal():
+    """The bytes are written; a refused flush is the terminal's problem."""
+    written = []
+
+    class _Refuses:
+        def __call__(self, data):
+            written.append(data)
+
+        def flush(self):
+            raise OSError("broken pipe")
+
+    termimage.emit(b"PAYLOAD", 1, 1, write=_Refuses())
+    assert written and written[0].endswith(b"PAYLOAD")
