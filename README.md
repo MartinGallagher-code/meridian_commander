@@ -70,8 +70,10 @@ and ships with a built-in file viewer and editor.
   the image viewer. Standard library alone: object streams, cross-reference
   streams, Flate/LZW/ASCII85/RunLength and `/ToUnicode` CMaps all included.
 - **Image viewer** (`F3` on a `.png`, `.jpg`, `.gif`, `.bmp`, `.pnm`) — the
-  picture itself, in colour, drawn as half-block characters so each cell shows
-  two pixels. Pan, zoom, step through GIF frames, or drop to an ASCII
+  picture itself, in the terminal's **real pixels** on terminals that speak
+  **Sixel** or the **kitty** graphics protocol, and half-block characters
+  (two pixels per cell) everywhere else. `g` switches between them. Pan, zoom,
+  step through GIF frames, or drop to an ASCII
   luminance ramp. `.webp`/`.avif`/`.heic`/`.tiff` are named and measured
   rather than drawn — their pixels need a video codec the standard library
   does not ship.
@@ -508,7 +510,55 @@ are JPEGs and go straight to the JPEG decoder.
 
 ### Images
 
-`F3` on an image draws it. A terminal cell is about twice as tall as it is
+`F3` on an image draws it — with the terminal's **real pixels** where that is
+possible, and half-block characters everywhere else.
+
+#### Real pixels: Sixel and kitty
+
+A terminal that speaks a graphics protocol is handed the actual bitmap, at the
+terminal's own resolution and in its own colours. Two protocols cover the
+field, and Meridian picks whichever the terminal has:
+
+| Protocol | Terminals | What it costs |
+| --- | --- | --- |
+| **kitty** | kitty, Ghostty, Konsole, WezTerm | nothing — raw RGB goes over as-is |
+| **Sixel** | xterm, foot, mlterm, WezTerm, mintty, contour, iTerm2, Windows Terminal | a 256-colour palette |
+
+kitty is preferred where both are available, because it takes RGB directly and
+so neither quantises nor pays for a palette. Both are written from the same
+decoded buffer the half-block renderer uses, in the standard library alone —
+`base64` is the only import either needs, and there is no `img2sixel` or
+Pillow anywhere near it.
+
+`g` switches between the real pixels and the half-blocks at any time, so the
+two are always comparable on the same picture. The footer names whichever is
+drawing.
+
+**Detection is from the environment**, not by asking the terminal: a query
+means writing an escape and reading the reply, which races with curses over
+the same input and hangs outright on a terminal that answers neither way.
+`MERIDIAN_GRAPHICS` overrides it — `off` forces half-blocks, `sixel` or
+`kitty` forces a protocol:
+
+```bash
+MERIDIAN_GRAPHICS=off meridian        # never use graphics
+MERIDIAN_GRAPHICS=sixel meridian      # a terminal we guessed wrong about
+```
+
+Sizing needs the terminal's cell size in pixels, from `TIOCGWINSZ`. Terminals
+that do not report it get an assumed 8×16 cell and the footer says so, since a
+picture that looks stretched should explain itself rather than read as a
+decoding bug.
+
+The catch worth knowing: **curses cannot see any of this.** The escape
+sequences go straight to the terminal after curses has flushed, so the picture
+is wiped whenever curses repaints those cells — which is why it is redrawn on
+every pass rather than kept alive, and why redrawing is also how the previous
+frame gets cleaned up.
+
+#### Half-blocks: the universal fallback
+
+A terminal cell is about twice as tall as it is
 wide, so one cell means one squashed pixel; writing `▀` (upper half block)
 instead gives **two** pixels per cell — the foreground paints the top half and
 the background the bottom. An 80×24 terminal becomes 80×48 square pixels.
@@ -538,7 +588,8 @@ orientation (phone photos are rarely stored upright).
 
 Transparency is composited against a checkerboard, the way image editors show
 it. Keys: arrows or `hjkl` pan, `+`/`-` zoom (up to 8×), `f` fits, `n`/`p`
-step animation frames, `c` toggles colour and ASCII, `q` quits.
+step animation frames, `c` toggles colour and ASCII, `g` switches between real
+pixels and half-blocks, `q` quits.
 
 ### Markdown
 
@@ -710,7 +761,8 @@ arrows/PgUp/PgDn scroll a long page, `/` searches the whole document with
 `n`/`N`, `i` opens a scanned page's image, `q` quits.
 In the **image viewer**: arrows or `hjkl` pan, `+`/`-` zoom and `f` fits,
 `n`/`p` (or Space) step animation frames, `c` switches between colour
-half-blocks and the ASCII ramp, `q` quits.
+half-blocks and the ASCII ramp, `g` between the terminal's real pixels
+(Sixel/kitty) and half-blocks, `q` quits.
 In the **slide browser**: `Tab`/`Shift-Tab` (or `←`/`→`, `[`/`]`, Space)
 change slide, arrows/PgUp/PgDn scroll a slide that overflows, `t` shows the
 speaker notes, `/` searches every slide's title, body and notes with `n`/`N`,
@@ -897,6 +949,7 @@ the sync engine are written once and work across any pair of backends.
 | `pdfobj.py` | PDF lexer, object graph, cross-references and filters |
 | `pdf.py` | PDF text extraction, page images, and the PDF browser |
 | `imageview.py` | colour quantising, half-block drawing, the image browser |
+| `termimage.py` | Sixel and kitty graphics: detection, encoding, placement |
 | `dialogs.py` | prompts, menus, confirmations, progress bars |
 | `app.py` | curses UI, key bindings, orchestration |
 
