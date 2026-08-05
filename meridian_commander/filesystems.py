@@ -591,6 +591,8 @@ class SFTPFileSystem(FileSystem):
             self.username = self._client.get_transport().get_username()
         except Exception:
             self.username = username or "?"
+        # Opened lazily by _write_session(), so browsing never pays for it.
+        self._sftp_write = None
         try:
             self._sftp = self._client.open_sftp()
         except Exception as exc:
@@ -657,8 +659,36 @@ class SFTPFileSystem(FileSystem):
             pass
         return f
 
+    def _write_session(self):
+        """A second SFTP session, opened on demand, that writes go through.
+
+        One SFTP session is one channel, and every handle it opens shares it.
+        Reading and writing down the same one is therefore not just slow but
+        unsafe: :meth:`open_read` prefetches, which fills the channel with read
+        responses, while the writes are trying to get out past them.  The two
+        directions contend, and the session either stalls or drops.
+
+        That is not a hypothetical.  Both panes share one connection after
+        ``=`` or after opening a preset that reuses a live one, so a copy from
+        a remote pane to a remote pane is routinely a connection copying to
+        itself.  On a fast link it dropped roughly one copy in three; on a slow
+        one it hangs, because the window it has to lose the race in is wider.
+
+        A second session costs one channel and no authentication -- the
+        transport is already up -- and the two directions stop meeting.
+        """
+        if self._sftp_write is None:
+            try:
+                self._sftp_write = self._client.open_sftp()
+            except Exception:
+                # A server that refuses a second channel keeps the old
+                # behaviour, which mostly works, rather than losing the
+                # ability to write at all.
+                self._sftp_write = self._sftp
+        return self._sftp_write
+
     def open_write(self, path: str):
-        return self._sftp.open(path, "wb")
+        return self._write_session().open(path, "wb")
 
     def utime(self, path: str, mtime: float) -> None:
         # paramiko takes an (atime, mtime) tuple of POSIX timestamps.
@@ -682,6 +712,13 @@ class SFTPFileSystem(FileSystem):
 
     def close(self) -> None:
         try:
+            # The write session, when there is a distinct one, goes first: it
+            # is the one the transport does not know it has to wait for.
+            if self._sftp_write is not None and self._sftp_write is not self._sftp:
+                try:
+                    self._sftp_write.close()
+                except Exception:
+                    pass
             self._sftp.close()
         finally:
             _close_ssh_client(self._client)

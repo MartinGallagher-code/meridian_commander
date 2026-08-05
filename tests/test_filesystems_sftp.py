@@ -623,6 +623,88 @@ def test_sftp_open_write(sftp_fs):
     assert ("open", "/srv/new.txt", "wb") in sftp.calls
 
 
+# -- reading and writing must not share one channel ----------------------------
+#
+# One SFTP session is one channel.  open_read() prefetches, so reading and
+# writing down the same session puts a flood of read responses in front of
+# every write -- and both panes share one connection after "=" or a reused
+# preset, which makes a remote-to-remote copy a connection copying to itself.
+# Against a real server that dropped roughly one copy in three.
+
+class _SessionHandingClient(_FakeClient):
+    """A client that opens a *distinct* session each time, as a server does."""
+
+    def __init__(self, limit=None):
+        super().__init__(sftp=_FakeSftp())
+        self.sessions: list = []
+        self.limit = limit               # sessions this server will allow
+
+    def open_sftp(self):
+        if self.limit is not None and len(self.sessions) >= self.limit:
+            raise OSError("no more channels")
+        session = self._sftp if not self.sessions else _FakeSftp()
+        self.sessions.append(session)
+        return session
+
+
+def test_writes_go_through_a_second_session(sftp_fs):
+    client = _SessionHandingClient()
+    fs, _sftp, _ = sftp_fs(client=client)
+    fs.open_read("/srv/big.iso")
+    fs.open_write("/srv/copy.iso")
+
+    assert len(client.sessions) == 2, "the write should open its own session"
+    reads, writes = client.sessions
+    assert ("open", "/srv/big.iso", "rb") in reads.calls
+    assert ("open", "/srv/copy.iso", "wb") in writes.calls
+    # The read never touches the write session, and vice versa.
+    assert ("open", "/srv/copy.iso", "wb") not in reads.calls
+    assert ("open", "/srv/big.iso", "rb") not in writes.calls
+
+
+def test_the_second_session_is_opened_only_when_something_is_written(sftp_fs):
+    """Browsing is the common case and must not pay for a channel it never uses."""
+    client = _SessionHandingClient()
+    fs, _sftp, _ = sftp_fs(client=client)
+    fs.listdir("/srv")
+    fs.open_read("/srv/big.iso")
+    assert len(client.sessions) == 1
+
+    fs.open_write("/srv/new.txt")
+    assert len(client.sessions) == 2
+    # And it is reused, not reopened per file.
+    fs.open_write("/srv/another.txt")
+    assert len(client.sessions) == 2
+
+
+def test_a_server_that_refuses_a_second_channel_still_writes(sftp_fs):
+    """Losing the separation is bad; losing the ability to write is worse."""
+    client = _SessionHandingClient(limit=1)
+    fs, _sftp, _ = sftp_fs(client=client)
+    fs.open_write("/srv/new.txt")
+    assert len(client.sessions) == 1
+    assert ("open", "/srv/new.txt", "wb") in client.sessions[0].calls
+
+
+def test_closing_closes_the_write_session_too(sftp_fs):
+    client = _SessionHandingClient()
+    fs, _sftp, _ = sftp_fs(client=client)
+    fs.open_write("/srv/new.txt")
+    fs.close()
+    assert all(session.closed for session in client.sessions)
+    assert client.closed is True
+
+
+def test_a_write_session_that_will_not_close_does_not_strand_the_client(sftp_fs):
+    client = _SessionHandingClient()
+    fs, _sftp, _ = sftp_fs(client=client)
+    fs.open_write("/srv/new.txt")
+    client.sessions[1].close = lambda: (_ for _ in ()).throw(OSError("gone"))
+    fs.close()
+    assert client.sessions[0].closed is True
+    assert client.closed is True
+
+
 def test_sftp_mutations(sftp_fs):
     fs, sftp, _ = sftp_fs()
     fs.utime("/a", 500.0)
