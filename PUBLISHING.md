@@ -22,7 +22,8 @@ distribution name is **`meridian-commander`**; the import package is
 
 ## Releasing a new version
 
-1. Bump the version in **both** places (keep them identical):
+1. Bump the version in **both** places (keep them identical — the test suite
+   checks that they are, and PyPI refuses a version it already has):
    - `pyproject.toml` → `[project] version`
    - `meridian_commander/__init__.py` → `__version__`
 2. Run the checks locally:
@@ -53,6 +54,28 @@ twine upload dist/*                          # real PyPI
 twine upload --repository testpypi dist/*
 pip install -i https://test.pypi.org/simple/ meridian-commander
 ```
+
+## When the upload fails with "400 Bad Request"
+
+twine reports the failure as a bare
+
+```
+ERROR    HTTPError: 400 Bad Request from https://upload.pypi.org/legacy/
+         Bad Request
+```
+
+and prints the actual reason a few lines *above* that, inside the HTML page
+PyPI returned. Scroll up in the job log. By far the most common reason is
+
+```
+400 File already exists ('meridian_commander-1.1.0-py3-none-any.whl', ...)
+```
+
+which means that version is already released. PyPI never allows a file name to
+be reused — not even after the file is deleted — so the upload cannot be made
+to succeed: bump the version and release again. The workflow now checks PyPI
+before uploading and fails with that advice instead, so this should only be
+reachable by uploading by hand.
 
 ## Notes
 
