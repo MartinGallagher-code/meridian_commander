@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -125,3 +126,22 @@ def test_scripts_are_declared():
     text = (SETUP_PY.parent / "pyproject.toml").read_text()
     assert "[project.scripts]" in text
     assert "meridian = " in text
+
+
+def test_the_two_versions_agree():
+    """pyproject and __init__ must name the same version.
+
+    Releasing means bumping both by hand, and the halves fail differently
+    when they drift: pyproject decides what PyPI is asked to accept, while
+    ``__version__`` is what ``meridian --version`` reports to the user. A
+    stale ``__version__`` ships a package that misreports itself; a stale
+    pyproject version asks PyPI to accept a filename it already has, which
+    it refuses with a 400 that only says "Bad Request" until you read the
+    body. Cheaper to catch here.
+    """
+    from meridian_commander import __version__
+
+    text = (SETUP_PY.parent / "pyproject.toml").read_text()
+    declared = re.search(r'(?m)^version = "([^"]+)"$', text)
+    assert declared, "no version in pyproject.toml"
+    assert declared.group(1) == __version__

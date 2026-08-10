@@ -87,4 +87,22 @@ jobs:
         with:
           name: dist
           path: dist/
+      # PyPI never lets a filename be reused, so uploading a version that is
+      # already released fails -- but it fails inside twine, after the
+      # attestations are signed, and the error twine prints on its own line is
+      # "400 Bad Request" with the reason buried in an HTML body above it. Ask
+      # PyPI first and say the useful thing instead. Only a definite 200 (the
+      # version is there) stops the run: a network failure or any other status
+      # leaves the decision to the upload, which is the authority anyway.
+      - name: Refuse to re-upload a released version
+        run: |
+          sdist=$(ls dist/*.tar.gz | head -1)
+          version=$(basename "$sdist" .tar.gz | sed -E 's/^[^-]+-//')
+          status=$(curl -sS -o /dev/null -w '%{http_code}' \
+            "https://pypi.org/pypi/meridian-commander/$version/json" || echo "000")
+          echo "meridian-commander $version: PyPI answered $status"
+          if [ "$status" = "200" ]; then
+            echo "::error::meridian-commander $version is already on PyPI, and PyPI does not allow a file name to be reused, so this upload cannot succeed. Bump the version in pyproject.toml and meridian_commander/__init__.py, then release again."
+            exit 1
+          fi
       - uses: pypa/gh-action-pypi-publish@release/v1
