@@ -1,13 +1,41 @@
-"""Reusable curses dialogs: messages, prompts, menus and progress bars.
+"""Reusable curses dialogs: messages, prompts, menus, drop-downs, progress.
 
-These are deliberately self-contained helpers that draw a centered window over
+These are deliberately self-contained helpers that draw a centred window over
 the main screen, run their own tiny input loop, and return a value.  Keeping
 them here keeps :mod:`meridian_commander.app` focused on file-manager logic.
+
+They are drawn the way Turbo Vision drew them, because that is what the rest
+of the application looks like: a grey box with a double-line frame, a close
+box in the top-left corner, the caption between ``╡ ╞`` brackets, red
+accelerator letters, blue input fields, green buttons with their own little
+drop shadow, and the whole box casting a shadow two columns right and one row
+down onto whatever it covers.  The colours come from
+:mod:`meridian_commander.theme`, so a monochrome terminal still gets the
+layout and loses only the paint.
 """
 
 from __future__ import annotations
 
 import curses
+
+from . import theme
+
+
+def _cast_shadow(stdscr, y: int, x: int, height: int, width: int) -> None:
+    """Darken the cells the dialog's shadow falls on, on the screen below it.
+
+    The shadow cannot live in the dialog's own window -- it falls *outside*
+    it -- so it is painted onto the screen underneath before the window is
+    created.  The application's next full redraw wipes it, which is exactly
+    when the dialog has gone.
+    """
+    try:
+        theme.shadow(stdscr, y, x, height, width)
+        stdscr.noutrefresh()
+    except (curses.error, AttributeError):
+        # A stand-in screen in a test, or a terminal too small for the cells
+        # the shadow would fall on.  Neither is worth refusing the dialog for.
+        pass
 
 
 def _center(stdscr, height: int, width: int):
@@ -16,36 +44,46 @@ def _center(stdscr, height: int, width: int):
     height = min(height, max_y - 2)
     y = max(0, (max_y - height) // 2)
     x = max(0, (max_x - width) // 2)
+    _cast_shadow(stdscr, y, x, height, width)
     win = curses.newwin(height, width, y, x)
     win.keypad(True)
-    win.attrset(curses.A_NORMAL)
+    theme.background(win, "dialog")
+    win.attrset(theme.attr("dialog"))
     return win
 
 
-def _box(win, title: str = "") -> None:
+def _box(win, title: str = "", footer: str = "") -> None:
+    """Erase the window and draw the framed grey box the dialogs live in."""
     win.erase()
-    win.box()
-    if title:
-        h, w = win.getmaxyx()
-        t = f" {title} "
-        win.addstr(0, max(1, (w - len(t)) // 2), t[: w - 2], curses.A_BOLD)
+    h, w = win.getmaxyx()
+    theme.frame(win, 0, 0, h, w, "dialogframe", title=title,
+                title_role="dialogtitle", footer=footer,
+                footer_role="dialogdim")
+
+
+def _buttons(win, y: int, specs: list[tuple[str, bool]], width: int) -> None:
+    """A centred row of push buttons; ``specs`` is (caption, focused) pairs."""
+    widths = [max(10, len(theme.strip_hotkey(caption)) + 4)
+              for caption, _ in specs]
+    total = sum(widths) + 2 * (len(widths) - 1)
+    x = max(2, (width - total) // 2)
+    for (caption, focused), bw in zip(specs, widths):
+        x = theme.button(win, y, x, caption, width=bw, focused=focused)
 
 
 def message(stdscr, title: str, text: str, error: bool = False) -> None:
     """Show a modal message; dismissed with any key."""
     lines = text.split("\n")
-    width = max(len(title) + 4, max((len(l) for l in lines), default=0) + 4, 30)
-    height = len(lines) + 4
+    width = max(len(title) + 8, max((len(l) for l in lines), default=0) + 6, 34)
+    height = len(lines) + 5
     win = _center(stdscr, height, width)
-    _box(win, title)
-    attr = curses.A_BOLD if error else curses.A_NORMAL
+    _box(win, title, "press any key")
+    role = "dialogerror" if error else "dialog"
     win_h, win_w = win.getmaxyx()
-    for i, line in enumerate(lines[: win_h - 3]):
-        try:
-            win.addstr(2 + i, 2, line[: win_w - 4], attr)
-        except curses.error:
-            pass
-    win.addstr(win_h - 1, 2, " press any key ", curses.A_DIM)
+    body = lines[: max(0, win_h - 5)]
+    for i, line in enumerate(body):
+        theme.paint(win, 1 + i, 3, line[: win_w - 6], role)
+    _buttons(win, min(win_h - 3, len(body) + 2), [("~O~K", True)], win_w)
     win.refresh()
     win.getch()
 
@@ -53,24 +91,18 @@ def message(stdscr, title: str, text: str, error: bool = False) -> None:
 def confirm(stdscr, title: str, text: str, default_yes: bool = False) -> bool:
     """Yes/No confirmation.  Returns True for yes."""
     lines = text.split("\n")
-    width = max(len(title) + 4, max((len(l) for l in lines), default=0) + 4, 34)
+    width = max(len(title) + 8, max((len(l) for l in lines), default=0) + 6, 36)
     height = len(lines) + 5
     win = _center(stdscr, height, width)
     choice = default_yes
     while True:
         _box(win, title)
         win_h, win_w = win.getmaxyx()
-        for i, line in enumerate(lines[: win_h - 4]):
-            try:
-                win.addstr(2 + i, 2, line[: win_w - 4])
-            except curses.error:
-                pass
-        yes = "[ Yes ]"
-        no = "[ No ]"
-        y = win_h - 2
-        win.addstr(y, 4, yes, curses.A_REVERSE if choice else curses.A_NORMAL)
-        win.addstr(y, 4 + len(yes) + 2, no,
-                   curses.A_REVERSE if not choice else curses.A_NORMAL)
+        body = lines[: max(0, win_h - 5)]
+        for i, line in enumerate(body):
+            theme.paint(win, 1 + i, 3, line[: win_w - 6], "dialog")
+        _buttons(win, min(win_h - 3, len(body) + 2),
+                 [("~Y~es", choice), ("~N~o", not choice)], win_w)
         win.refresh()
         k = win.getch()
         if k in (curses.KEY_LEFT, curses.KEY_RIGHT, 9):
@@ -86,25 +118,29 @@ def confirm(stdscr, title: str, text: str, default_yes: bool = False) -> bool:
 def prompt(stdscr, title: str, label: str, default: str = "",
            is_password: bool = False) -> str | None:
     """Single-line text input.  Returns the string, or None if cancelled."""
-    width = max(len(title) + 4, len(label) + 6, 50)
-    height = 6
+    width = max(len(title) + 8, len(label) + 6, 50)
+    height = 5
     win = _center(stdscr, height, width)
     buf = list(default)
     pos = len(buf)
     curses.curs_set(1)
     try:
         while True:
-            _box(win, title)
-            w = win.getmaxyx()[1]
-            win.addstr(1, 2, label[: w - 4])
-            field_w = w - 4
+            _box(win, title, "Enter=OK  Esc=Cancel")
+            win_h, w = win.getmaxyx()
+            theme.paint(win, 1, 3, label[: w - 6], "dialog")
+            field_w = w - 6
             shown = "".join("*" if is_password else c for c in buf)
             start = max(0, pos - field_w + 1)
-            win.attrset(curses.A_UNDERLINE)
-            win.addstr(3, 2, shown[start : start + field_w].ljust(field_w))
-            win.attrset(curses.A_NORMAL)
-            win.addstr(height - 1, 2, " Enter=OK  Esc=Cancel ", curses.A_DIM)
-            win.move(3, 2 + min(pos - start, field_w - 1))
+            visible = shown[start : start + field_w]
+            theme.paint(win, 2, 3, visible, "input", field_w)
+            # The caret is a cell of the field in reverse, the way an input
+            # line looked before terminals grew a cursor of their own.
+            caret = min(pos - start, field_w - 1)
+            theme.paint(win, 2, 3 + caret,
+                        visible[caret] if caret < len(visible) else " ",
+                        "inputcursor")
+            win.move(2, 3 + caret)
             win.refresh()
             k = win.getch()
             if k in (10, 13, curses.KEY_ENTER):
@@ -172,44 +208,44 @@ def menu(stdscr, title: str, options: list[str],
     """Vertical single-choice menu.  Returns the selected index or None.
 
     A list too long for the screen (a well stocked preset list on a short
-    terminal) scrolls instead of overflowing the window.
+    terminal) scrolls instead of overflowing the window, and grows a Turbo
+    Vision scrollbar down its right-hand edge when it does.
 
     ``keys`` gives a shortcut letter per option (``None`` for none), drawn down
-    the left of the list.  Pressing one *chooses* that option there and then
-    rather than moving the highlight to it -- the whole point is to skip the
-    walk down the list -- so a menu of saved locations answers to a keystroke.
+    the left of the list in the accelerator colour.  Pressing one *chooses*
+    that option there and then rather than moving the highlight to it -- the
+    whole point is to skip the walk down the list -- so a menu of saved
+    locations answers to a keystroke.
     """
     gutter = 3 if keys else 0     # "x  " down the left of every row
-    width = max(len(title) + 4,
-                max((len(o) for o in options), default=0) + 6 + gutter, 30)
-    win = _center(stdscr, len(options) + 4, width)
+    width = max(len(title) + 8,
+                max((len(o) for o in options), default=0) + 7 + gutter, 32)
+    win = _center(stdscr, len(options) + 2, width)
     win_h, win_w = win.getmaxyx()
-    body = max(1, win_h - 4)     # rows available for options
+    body = max(1, win_h - 2)     # rows available for options
+    row_w = win_w - 4            # one column kept for the scrollbar
     idx = 0
     top = 0
     while True:
         # Keep the cursor inside the visible window.
         top = max(min(top, idx), idx - body + 1, 0)
-        _box(win, title)
+        scrolling = len(options) > body
+        _box(win, title, f"{idx + 1}/{len(options)}" if scrolling else "")
         for row in range(min(body, len(options) - top)):
             i = top + row
-            attr = curses.A_REVERSE if i == idx else curses.A_NORMAL
+            selected = i == idx
+            role = "sel" if selected else "input"
             prefix = ""
             if keys:
                 # Options without a letter still indent, so one row without a
                 # shortcut does not step the whole column sideways.
                 prefix = f"{keys[i]}  " if keys[i] else "   "
-            text = f" {prefix}{options[i]} ".ljust(win_w - 4)[: win_w - 4]
-            try:
-                win.addstr(2 + row, 2, text, attr)
-            except curses.error:
-                pass
-        if len(options) > body:
-            try:
-                win.addstr(win_h - 1, 2, f" {idx + 1}/{len(options)} ",
-                           curses.A_DIM)
-            except curses.error:
-                pass
+            text = f" {prefix}{options[i]} ".ljust(row_w)[:row_w]
+            theme.paint(win, 1 + row, 1, text, role)
+            if keys and keys[i]:
+                theme.paint(win, 1 + row, 2, keys[i],
+                            "selhot" if selected else "dialoghot")
+        theme.scrollbar(win, 1, win_w - 2, body, top, body, len(options))
         win.refresh()
         k = win.getch()
         if keys and 32 <= k < 127:
@@ -233,6 +269,120 @@ def menu(stdscr, title: str, options: list[str],
             return idx
         elif k == 27:
             return None
+
+
+# -- drop-down menus -----------------------------------------------------------
+#
+# The menu bar's own widget.  Kept here with the other modal windows because it
+# is one: it opens over the desktop, owns the keyboard while it is up, and
+# hands back the name of whatever was chosen.
+
+#: What a drop-down returns when the user arrows off its left or right edge --
+#: the menu bar reads these and opens the neighbouring menu.
+PREVIOUS_MENU = "<prev>"
+NEXT_MENU = "<next>"
+
+
+def _first_selectable(items: list[dict], start: int, step: int) -> int:
+    """The next item that can hold the highlight, wrapping around."""
+    n = len(items)
+    if n == 0:
+        return 0
+    i = start
+    for _ in range(n):
+        i = (i + step) % n
+        if not items[i].get("sep") and not items[i].get("disabled"):
+            return i
+    return start
+
+
+def dropdown(stdscr, items: list[dict], y: int, x: int) -> str | None:
+    """Open a drop-down at (y, x) and return the chosen item's name.
+
+    Each item is a dict of ``label`` (with a ``~H~ot`` marker), ``name`` (what
+    is returned), and optionally ``key`` (shortcut text, right-aligned),
+    ``sep``, ``disabled`` and ``checked``.  Returns None when the user gives
+    up, or one of the sentinels above when they arrow off the sides.
+    """
+    entries = [i for i in items]
+    if not entries:
+        return None
+    width = max(
+        len(theme.strip_hotkey(i.get("label", "")))
+        + (len(i.get("key", "")) + 4 if i.get("key") else 0) + 4
+        for i in entries)
+    width = max(width, 14)
+    height = len(entries) + 2
+
+    max_y, max_x = stdscr.getmaxyx()
+    # Keep the menu on the desktop, opening upwards if there is no room below.
+    if y + height > max_y:
+        y = max(0, max_y - height)
+    x = min(x, max(0, max_x - width))
+    _cast_shadow(stdscr, y, x, height, width)
+    win = curses.newwin(height, min(width, max_x - x), y, x)
+    win.keypad(True)
+    theme.background(win, "menu")
+
+    sel = _first_selectable(entries, -1, 1)
+    while True:
+        win.erase()
+        h, w = win.getmaxyx()
+        theme.frame(win, 0, 0, h, w, "menu", double=False)
+        for i, item in enumerate(entries):
+            row = 1 + i
+            if item.get("sep"):
+                # A rule that meets the frame on both sides, as a drop-down's
+                # separators did rather than floating inside it.
+                theme.paint(win, row, 0,
+                            theme.glyph("lt1") + theme.glyph("h1") * (w - 2)
+                            + theme.glyph("rt1"), "menusep")
+                continue
+            chosen = i == sel
+            if item.get("disabled"):
+                role = "menudim"
+                hot = "menudim"
+            else:
+                role = "menusel" if chosen else "menu"
+                hot = "menuselhot" if chosen else "menuhot"
+            theme.fill(win, row, 1, w - 2, role)
+            theme.paint_caption(win, row, 3, item.get("label", ""), role, hot)
+            if item.get("checked"):
+                theme.paint(win, row, 1, theme.glyph("check"), role)
+            shortcut = item.get("key", "")
+            if shortcut and len(shortcut) + 4 < w:
+                theme.paint(win, row, w - 1 - len(shortcut) - 1, shortcut,
+                            role if item.get("disabled") else
+                            ("menusel" if chosen else "menushortcut"))
+        win.refresh()
+
+        k = win.getch()
+        if k in (27, 3):
+            return None
+        if k == curses.KEY_UP:
+            sel = _first_selectable(entries, sel, -1)
+        elif k == curses.KEY_DOWN:
+            sel = _first_selectable(entries, sel, 1)
+        elif k == curses.KEY_HOME:
+            sel = _first_selectable(entries, -1, 1)
+        elif k == curses.KEY_END:
+            sel = _first_selectable(entries, len(entries), -1)
+        elif k == curses.KEY_LEFT:
+            return PREVIOUS_MENU
+        elif k == curses.KEY_RIGHT:
+            return NEXT_MENU
+        elif k in (10, 13, curses.KEY_ENTER, ord(" ")):
+            item = entries[sel]
+            if not item.get("sep") and not item.get("disabled"):
+                return item.get("name", "")
+        elif 32 <= k < 127:
+            # An accelerator letter selects and activates in one keystroke.
+            letter = chr(k).lower()
+            for item in entries:
+                if theme.hotkey_letter(item.get("label", "")) == letter:
+                    if item.get("disabled"):
+                        break
+                    return item.get("name", "")
 
 
 def connect_dialog(stdscr) -> dict | None:
@@ -325,15 +475,16 @@ def _marching_bar(width: int, tick: int) -> str:
     """
     if width <= 0:
         return ""
-    block = min(MARCH_WIDTH, width)
-    span = width - block
+    block, track = theme.glyph("block"), theme.glyph("shade")
+    size = min(MARCH_WIDTH, width)
+    span = width - size
     if span <= 0:
-        return "#" * width
+        return block * width
     # A full cycle is out and back; fold the second half onto the first.
     at = tick % (span * 2)
     if at > span:
         at = span * 2 - at
-    return "-" * at + "#" * block + "-" * (span - at)
+    return track * at + block * size + track * (span - at)
 
 
 class ProgressDialog:
@@ -379,15 +530,14 @@ class ProgressDialog:
 
     def draw(self) -> None:
         win = self.win
-        _box(win, self.title)
+        _box(win, self.title, "Esc/Q = cancel")
         w = win.getmaxyx()[1]
-        win.addstr(2, 2, self.overall[: w - 4].ljust(w - 4))
-        win.addstr(3, 2, self.detail[: w - 4].ljust(w - 4))
-        bar_w = w - 6
+        theme.paint(win, 2, 2, self.overall[: w - 4], "dialog", w - 4)
+        theme.paint(win, 3, 2, self.detail[: w - 4], "dialogdim", w - 4)
+        bar_w = w - 12
         if self.total > 0:
             frac = max(0.0, min(1.0, self.cur / self.total))
-            filled = int(bar_w * frac)
-            bar = "#" * filled + "-" * (bar_w - filled)
+            bar = theme.progress_bar(bar_w, frac)
             pct = f"{int(frac * 100):3d}%"
         else:
             # No denominator -- a directory scan does not know how much is
@@ -395,9 +545,10 @@ class ProgressDialog:
             # block travels instead: motion is the message.
             bar, pct = _marching_bar(bar_w, self.ticks), "    "
         self.ticks += 1
-        win.addstr(5, 2, f"[{bar}]"[: w - 2])
-        win.addstr(5, w - 6, pct)
-        win.addstr(6, 2, " Esc/Q = cancel ", curses.A_DIM)
+        theme.paint(win, 5, 2, "[", "dialogdim")
+        theme.paint(win, 5, 3, bar, "thumb")
+        theme.paint(win, 5, 3 + bar_w, "]", "dialogdim")
+        theme.paint(win, 5, w - 6, pct, "dialog")
         win.noutrefresh()
         curses.doupdate()
 

@@ -30,6 +30,7 @@ import curses
 import zipfile
 from dataclasses import dataclass, field
 
+from . import theme
 from .ooxml import (
     OoxmlError,
     attr,
@@ -367,6 +368,7 @@ class SlideView:
 
     # -- drawing ----------------------------------------------------------
     def draw(self, win) -> None:
+        theme.background(win, "edit")
         win.erase()
         height, width = win.getmaxyx()
         body_h = max(0, height - 2)
@@ -378,19 +380,11 @@ class SlideView:
             if self.deck.truncated:
                 title += " [truncated]"
         title += " "
-        win.attrset(curses.A_REVERSE)
-        try:
-            win.addstr(0, 0, ljust(title, width))
-        except curses.error:
-            pass
-        win.attrset(curses.A_NORMAL)
+        theme.paint(win, 0, 0, title, "keybar", width)
 
         if self.error:
-            try:
-                win.addstr(2, 2, truncate(f"Cannot read: {self.error}",
-                                          max(0, width - 4)))
-            except curses.error:
-                pass
+            theme.paint(win, 2, 2, truncate(f"Cannot read: {self.error}",
+                                            max(0, width - 4)), "panelerror")
             self._draw_footer(win, height, width)
             win.noutrefresh()
             return
@@ -401,8 +395,8 @@ class SlideView:
             index = self.top + row
             if index >= len(rows):
                 break
-            attr = curses.A_BOLD if self._is_heading(index, rows) \
-                else curses.A_NORMAL
+            attr = theme.attr("editheading" if self._is_heading(index, rows)
+                              else "edit")
             # No guard here, unlike the title and footer around it: a body row
             # is never the last row of the window, and ljust() has already cut
             # the text to the width, so this is a write curses accepts.
@@ -426,12 +420,7 @@ class SlideView:
                 parts.append(f"/{self.search}")
             parts.append("Tab slide  [t]notes  [/]find  n/N  [q]uit")
             hint = "  ".join(parts)
-        win.attrset(curses.A_REVERSE)
-        try:
-            win.addstr(height - 1, 0, ljust(f" {hint} ", width))
-        except curses.error:
-            pass
-        win.attrset(curses.A_NORMAL)
+        theme.paint(win, height - 1, 0, f" {hint} ", "keybar", width)
 
     # -- interaction ------------------------------------------------------
     def run(self, stdscr) -> None:

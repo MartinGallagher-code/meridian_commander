@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import curses
+import re
 
 import pytest
 
@@ -24,7 +25,12 @@ def panes(tmp_path):
 
 
 def _render(panes, rows=24, cols=80, prepare=None):
-    """Draw an App on a real screen and return (text, app)."""
+    """Draw an App on a real screen and return (text, app).
+
+    Rows are read whole rather than by a byte count: the frames are drawn in
+    box-drawing characters, and three bytes per cell means a count in bytes
+    stops well short of the right-hand edge.
+    """
     holder = {}
 
     def run(stdscr):
@@ -33,18 +39,25 @@ def _render(panes, rows=24, cols=80, prepare=None):
         if prepare is not None:
             prepare(app)
         app.draw()
-        return "\n".join(stdscr.instr(row, 0, cols).decode()
+        return "\n".join(stdscr.instr(row, 0).decode()
                          for row in range(rows))
 
     return with_curses_screen(rows, cols, run), holder["app"]
 
 
-def test_both_panes_are_drawn_with_a_divider(panes):
+def test_both_panes_are_drawn_in_framed_windows(panes):
     text, _ = _render(panes)
     assert "readme.txt" in text
     assert "subdir/" in text
-    # The divider column separates the two panes on every body row.
-    assert text.splitlines()[2][39] not in ("", " ") or True
+    # Two windows side by side: the frames meet in the middle of every body
+    # row, so the boundary is drawn rather than implied.  The left pane's own
+    # edge carries its scrollbar, which is where a Turbo Vision window kept
+    # one, and the right pane's frame is the column after it.
+    body = text.splitlines()[3]
+    assert body[39] in "\u2591\u2588\u25b2\u25bc"
+    assert body[40] in "|\u2551\u2502"
+    # The active pane is framed double, the other single.
+    assert "\u2554" in text and "\u250c" in text
 
 
 def test_the_header_shows_the_location(panes):
@@ -71,8 +84,8 @@ def test_sizes_and_times_are_rendered(panes):
 def test_a_symlink_is_marked(panes):
     text, _ = _render(panes, cols=200)
     link_line = [l for l in text.splitlines() if "alias" in l][0]
-    # The marker column carries "@" for a symlink.
-    assert link_line.startswith("@")
+    # The marker column, just inside the window frame, carries "@".
+    assert link_line[1] == "@"
 
 
 def test_tagged_entries_are_marked(panes):
@@ -81,7 +94,7 @@ def test_tagged_entries_are_marked(panes):
 
     text, _ = _render(panes, prepare=tag)
     tagged = [l for l in text.splitlines() if "readme.txt" in l][0]
-    assert tagged.startswith("*")
+    assert tagged[1] == "*"
 
 
 def test_the_footer_summarises_a_tagged_selection(panes):
@@ -121,6 +134,20 @@ def test_the_status_line_and_function_bar(panes):
     text, _ = _render(panes, prepare=message)
     assert "Copied 3 files" in text
     assert "Help" in text and "Quit" in text
+
+
+def test_the_menu_bar_carries_the_menus_and_a_clock(panes):
+    text, _ = _render(panes)
+    bar = text.splitlines()[0]
+    for caption in ("File", "Command", "Options", "Help"):
+        assert caption in bar
+    assert re.search(r"\d\d:\d\d", bar)
+
+
+def test_the_desktop_is_shaded_behind_the_panes(panes):
+    """The hint line sits on the desktop, so its row shows the texture."""
+    text, _ = _render(panes)
+    assert "\u2591" in text.splitlines()[-2]
 
 
 def test_a_tiny_terminal_says_so(panes):
@@ -366,8 +393,11 @@ def test_the_function_bar_stops_at_the_screen_edge(panes, monkeypatch):
     # Narrower than the ten function keys: the loop stops instead of wrapping.
     app._draw_function_bar(23, 5)
     assert drawn
-    # Five of the ten keys fit; the loop stops rather than wrapping around.
-    assert len(drawn) == 10
+    # The grey background of the bar, then the five key numbers that fit --
+    # at one column each there is no room for their labels, and the loop
+    # stops rather than wrapping around.
+    assert len(drawn) == 1 + 5
+    assert [d[2] for d in drawn[1:]] == ["1", "2", "3", "4", "5"]
 
 
 def test_activating_nothing_does_nothing(panes, monkeypatch):

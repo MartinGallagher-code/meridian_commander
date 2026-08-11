@@ -14,21 +14,28 @@ from __future__ import annotations
 
 import curses
 
+from . import theme
 from .filesystems import FileSystem
 
 MAX_VIEW_BYTES = 16 * 1024 * 1024  # 16 MiB safety cap
 
-#: What each style code means on screen.  Only monochrome attributes are used:
-#: they need no colour pairs and so no initialised screen, and they work on a
-#: terminal with no colour at all.  A_ITALIC is not in every ncurses build, and
-#: underline reads as emphasis where it is missing.
-STYLE_ATTRS = {
-    "B": curses.A_BOLD,                                   # **strong**
-    "I": getattr(curses, "A_ITALIC", curses.A_UNDERLINE),  # *emphasis*
-    "C": curses.A_REVERSE,                                # `code`
-    "D": curses.A_DIM,                                    # rules, quotes, URLs
-    "U": curses.A_UNDERLINE,                              # link text
+#: What each style code means on screen, as a theme role.  Going through the
+#: theme rather than naming attributes here is what keeps a rendered document
+#: in the same palette as everything else -- and it still degrades to a plain
+#: monochrome attribute on a terminal that has no colour to give.
+STYLE_ROLES = {
+    "B": "editbold",     # **strong**
+    "I": "editem",       # *emphasis*
+    "C": "editcode",     # `code`
+    "D": "editdim",      # rules, quotes, URLs
+    "U": "editlink",     # link text
 }
+
+
+def style_attr(code: str) -> int:
+    """The curses attribute for a style code, or the plain text one."""
+    role = STYLE_ROLES.get(code)
+    return theme.attr(role) if role else theme.attr("edit")
 
 
 class Viewer:
@@ -207,6 +214,7 @@ class Viewer:
 
     # -- rendering --------------------------------------------------------
     def draw(self, win) -> None:
+        theme.background(win, "edit")
         win.erase()
         height, width = win.getmaxyx()
         body_h = height - 2
@@ -214,18 +222,11 @@ class Viewer:
         title = self._title()
         if self.truncated:
             title += "[truncated] "
-        win.attrset(curses.A_REVERSE)
-        try:
-            win.addstr(0, 0, title.ljust(width)[:width])
-        except curses.error:
-            pass
-        win.attrset(curses.A_NORMAL)
+        theme.paint(win, 0, 0, title, "keybar", width)
 
         if self.error:
-            try:
-                win.addstr(2, 2, f"Cannot open file: {self.error}"[: width - 4])
-            except curses.error:
-                pass
+            theme.paint(win, 2, 2, f"Cannot open file: {self.error}"[: width - 4],
+                        "panelerror")
             self._draw_footer(win, height, width)
             win.noutrefresh()
             return
@@ -242,9 +243,7 @@ class Viewer:
                 # continuations are left blank so the numbers stay countable.
                 src = self.origin[idx]
                 label = str(src + 1) if self.first_row[src] == idx else ""
-                win.attrset(curses.color_pair(0) | curses.A_DIM)
-                win.addstr(y, 0, label.rjust(gutter - 1) + " ")
-                win.attrset(curses.A_NORMAL)
+                theme.paint(win, y, 0, label.rjust(gutter - 1) + " ", "editnum")
             line = self.lines[idx]
             visible = line[self.left : self.left + (width - gutter)]
             style = self._row_style(idx)[self.left : self.left + len(visible)]
@@ -252,7 +251,7 @@ class Viewer:
                 if style.strip():
                     self._draw_styled(win, y, gutter, visible, style)
                 else:
-                    win.addstr(y, gutter, visible)
+                    win.addstr(y, gutter, visible, theme.attr("edit"))
             except curses.error:
                 pass
             if self.search:
@@ -279,8 +278,7 @@ class Viewer:
         for index in range(1, len(text) + 1):
             if index < len(text) and style[index] == style[start]:
                 continue
-            win.addstr(y, x + start, text[start:index],
-                       STYLE_ATTRS.get(style[start], curses.A_NORMAL))
+            win.addstr(y, x + start, text[start:index], style_attr(style[start]))
             start = index
 
     def _highlight_matches(self, win, y: int, line: str, gutter: int,
@@ -296,10 +294,7 @@ class Viewer:
             if not seg or sx >= width:
                 continue
             seg = seg[: width - sx]
-            try:
-                win.addstr(y, sx, seg, curses.A_REVERSE)
-            except curses.error:
-                pass
+            theme.paint(win, y, sx, seg, "editmatch")
 
     def _draw_footer(self, win, height: int, width: int) -> None:
         # An unreadable file has no lines at all; the counter keeps its
@@ -313,12 +308,7 @@ class Viewer:
             parts.append(self.notice)
         parts.append(self._hints())
         hint = "  ".join(parts)
-        win.attrset(curses.A_REVERSE)
-        try:
-            win.addstr(height - 1, 0, f" {hint} ".ljust(width)[:width])
-        except curses.error:
-            pass
-        win.attrset(curses.A_NORMAL)
+        theme.paint(win, height - 1, 0, f" {hint} ", "keybar", width)
 
     # -- interaction ------------------------------------------------------
     def run(self, stdscr) -> None:

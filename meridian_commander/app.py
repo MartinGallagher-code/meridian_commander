@@ -2,7 +2,15 @@
 
 This module wires the pieces together -- two :class:`~meridian_commander.panel.Panel`
 objects, the filesystem backends, the viewer/editor, dialogs and the file
-operations -- into a curses event loop styled after Midnight Commander.
+operations -- into a curses event loop with the keys of Midnight Commander and
+the face of Turbo Vision.
+
+The screen is laid out the way a Borland IDE laid one out: a grey menu bar
+along the top with a clock in its right-hand corner, a shaded blue desktop
+underneath it, two framed windows on that desktop (the active one drawn with a
+double-line frame, the other single), a hint line, and the F-key bar along the
+bottom.  :mod:`meridian_commander.theme` owns the colours and the chrome; this
+module says what goes where.
 
 Key bindings (also shown in the F1 help screen)::
 
@@ -16,8 +24,8 @@ Key bindings (also shown in the F1 help screen)::
     + / -          tag all / untag all         F8   delete
     Ctrl-U         swap panes                  F9   synchronize panes
     Ctrl-R         reload both panes           F10  quit
-    Ctrl-G         go to path
-    Ctrl-T         change sort order
+    Ctrl-G         go to path                  Esc  the menu bar
+    Ctrl-T         change sort order           Alt+F/C/O/H  a menu by name
     ~              home directory (this pane)
     =              other pane: same location as this one
     b              presets: saved locations to return to
@@ -26,11 +34,13 @@ Key bindings (also shown in the F1 help screen)::
 from __future__ import annotations
 
 import curses
+import locale
 import os
 import shlex
 import subprocess
+import time
 
-from . import dialogs, presets
+from . import dialogs, presets, theme
 from .editor import Editor
 from .filesystems import (
     FileSystem,
@@ -68,6 +78,97 @@ def _cwd(fs: FileSystem) -> str:
         return fs.home()
 
 
+# ---------------------------------------------------------------------------
+# The menu bar
+# ---------------------------------------------------------------------------
+#
+# Item keys: ``label`` is the caption with its ``~H~ot`` marker, ``name`` is
+# the action :meth:`App._dispatch` looks up, ``key`` is the shortcut text shown
+# right-aligned, and ``sep`` draws a rule.  Every entry names an action that a
+# key binding also reaches, so the menu is a second way to everything rather
+# than a place where features hide.
+
+MENUS: list[dict] = [
+    {
+        "label": "≡", "name": "system",
+        "items": [
+            {"label": "~A~bout...", "name": "about"},
+            {"sep": True},
+            {"label": "~C~olours...", "name": "colours"},
+        ],
+    },
+    {
+        "label": "~F~ile", "name": "file",
+        "items": [
+            {"label": "~V~iew", "name": "view", "key": "F3"},
+            {"label": "~E~dit", "name": "edit", "key": "F4"},
+            {"label": "~C~opy", "name": "copy", "key": "F5"},
+            {"label": "~M~ove", "name": "move", "key": "F6"},
+            {"label": "~R~ename", "name": "rename"},
+            {"sep": True},
+            {"label": "Make ~d~irectory", "name": "mkdir", "key": "F7"},
+            {"label": "De~l~ete", "name": "delete", "key": "F8"},
+            {"label": "~T~ag / untag", "name": "tag", "key": "Ins"},
+            {"sep": True},
+            {"label": "~F~ind files...", "name": "find"},
+            {"label": "E~x~it", "name": "quit", "key": "F10"},
+        ],
+    },
+    {
+        "label": "~C~ommand", "name": "command",
+        "items": [
+            {"label": "~O~pen location...", "name": "connect", "key": "F2"},
+            {"label": "~P~resets...", "name": "presets", "key": "b"},
+            {"label": "~G~o to path...", "name": "goto", "key": "Ctrl+G"},
+            {"label": "~H~ome directory", "name": "home", "key": "~"},
+            {"sep": True},
+            {"label": "~S~wap panes", "name": "swap", "key": "Ctrl+U"},
+            {"label": "~R~eload panes", "name": "reload", "key": "Ctrl+R"},
+            {"label": "Sa~m~e location in other pane", "name": "mirror",
+             "key": "="},
+            {"label": "S~y~nchronize panes", "name": "sync", "key": "F9"},
+            {"sep": True},
+            {"label": "~T~erminal in this pane", "name": "terminal", "key": "t"},
+            {"label": "Full-screen she~l~l", "name": "shell", "key": "!"},
+            {"label": "Plug-~i~ns...", "name": "plugins", "key": "p"},
+        ],
+    },
+    {
+        "label": "~O~ptions", "name": "options",
+        "items": [
+            {"label": "~S~ort order...", "name": "sort", "key": "Ctrl+T"},
+            {"label": "Show ~h~idden files", "name": "hidden", "key": "."},
+            {"sep": True},
+            {"label": "~C~olours...", "name": "colours"},
+            {"label": "Confi~g~uration...", "name": "config", "key": "C"},
+        ],
+    },
+    {
+        "label": "~H~elp", "name": "help",
+        "items": [
+            {"label": "~C~ontents", "name": "help", "key": "F1"},
+            {"sep": True},
+            {"label": "~A~bout...", "name": "about"},
+        ],
+    },
+]
+
+
+def menu_layout() -> list[tuple[int, int]]:
+    """Where each menu's caption sits on the bar, as (start column, width).
+
+    Worked out from the captions alone so a mouse click can be turned back
+    into a menu index without having drawn anything first.
+    """
+    spans = []
+    col = 1
+    for entry in MENUS:
+        width = len(theme.strip_hotkey(entry["label"])) + 2
+        spans.append((col, width))
+        col += width
+    return spans
+
+
 class App:
     def __init__(self, stdscr, left_path: str | None = None,
                  right_path: str | None = None) -> None:
@@ -85,10 +186,13 @@ class App:
         self.left = Panel(left_fs, left_fs.normpath(left_path or _cwd(left_fs)))
         self.right = Panel(right_fs, right_fs.normpath(right_path or right_fs.home()))
         self.active = self.left
-        self.message = "F1/? Help   Tab switch   F9/s Sync   F10/q Quit   right-click: menu"
+        self.message = ("Esc menu   Tab switch pane   F1 Help   "
+                        "F9 Sync   F10 Quit   right-click: actions")
         self.running = True
         # (panel, y, x, h, w) rectangles, refreshed on every draw for the mouse.
         self._panel_boxes: list[tuple] = []
+        # The menu whose caption is highlighted while its drop-down is open.
+        self._open_menu: int | None = None
 
     # -- helpers ----------------------------------------------------------
     @property
@@ -103,34 +207,29 @@ class App:
         stdscr = self.stdscr
         stdscr.erase()
         height, width = stdscr.getmaxyx()
-        if height < 6 or width < 20:
+        if height < 8 or width < 24:
             stdscr.addstr(0, 0, "Terminal too small")
             stdscr.noutrefresh()
             curses.doupdate()
             return
 
-        panel_h = height - 2
-        # One column between the panes is reserved for a vertical divider, so
-        # the boundary stays obvious even when a pane is running a terminal
-        # or plug-in with free-form content.
-        left_w = (width - 1) // 2
-        div_x = left_w
-        right_x = left_w + 1
+        # Row 0 is the menu bar, the last row the F-key bar, and the one above
+        # it the hint line; the desktop is everything in between.
+        panel_y = 1
+        panel_h = height - 3
+        left_w = width // 2
+        right_x = left_w
         right_w = width - right_x
+
+        self._draw_desktop(panel_y, height - 2, width)
+        self._draw_menu_bar(width)
 
         # Remember each pane's screen rectangle so the mouse handler can map a
         # click back to a pane and a row.
         self._panel_boxes = [
-            (self.left, 0, 0, panel_h, left_w),
-            (self.right, 0, right_x, panel_h, right_w),
+            (self.left, panel_y, 0, panel_h, left_w),
+            (self.right, panel_y, right_x, panel_h, right_w),
         ]
-
-        divider_attr = curses.A_DIM
-        for row in range(panel_h):
-            try:
-                stdscr.addch(row, div_x, curses.ACS_VLINE, divider_attr)
-            except curses.error:
-                pass
 
         for panel, py, px, ph, pw in self._panel_boxes:
             if panel.plugin is not None:
@@ -138,61 +237,82 @@ class App:
                     panel.plugin.draw(stdscr, py, px, ph, pw)
                 except Exception as exc:
                     # A broken draw() must not take down the whole UI.
-                    try:
-                        stdscr.addstr(py + 1, px + 1,
-                                      f"plugin draw error: {exc}"[: pw - 2])
-                    except curses.error:
-                        pass
+                    theme.paint(stdscr, py + 1, px + 1,
+                                f"plugin draw error: {exc}"[: pw - 2], "panel")
             else:
                 self._draw_panel(panel, py, px, ph, pw,
                                  active=self.active is panel)
 
-        # Status line.
-        stdscr.attrset(curses.A_NORMAL)
-        status = self.message[: width - 1]
-        try:
-            stdscr.addstr(height - 2, 0, status.ljust(width - 1))
-        except curses.error:
-            pass
-
+        # The hint line sits on the desktop rather than in a bar of its own,
+        # which is where Turbo Vision put anything that was not chrome.
+        theme.paint(stdscr, height - 2, 1, self.message[: width - 2], "hint")
         self._draw_function_bar(height - 1, width)
         stdscr.noutrefresh()
         curses.doupdate()
 
+    def _draw_desktop(self, top: int, bottom: int, width: int) -> None:
+        """Fill the desktop with the light-shade texture, as the IDEs did."""
+        for row in range(top, bottom + 1):
+            theme.fill(self.stdscr, row, 0, width, "desktop",
+                       theme.glyph("shade"))
+
+    def _draw_menu_bar(self, width: int) -> None:
+        """The grey bar along the top: the menus, then the clock."""
+        stdscr = self.stdscr
+        theme.fill(stdscr, 0, 0, width, "menu")
+        for index, ((start, span), entry) in enumerate(
+                zip(menu_layout(), MENUS)):
+            if start + span > width:
+                break
+            selected = index == self._open_menu
+            role = "menusel" if selected else "menu"
+            hot = "menuselhot" if selected else "menuhot"
+            theme.fill(stdscr, 0, start, span, role)
+            theme.paint_caption(stdscr, 0, start + 1, entry["label"], role, hot)
+        clock = time.strftime("%H:%M")
+        if width > 30:
+            theme.paint(stdscr, 0, width - len(clock) - 2, clock, "clock")
+
     def _draw_panel(self, panel: Panel, y: int, x: int, h: int, w: int,
                     active: bool) -> None:
+        """One pane, drawn as a Turbo Vision window.
+
+        The active pane gets the double-line frame and the yellow caption; the
+        other is drawn single and grey.  Which pane has the keyboard is
+        therefore legible from the shape of the border alone, which is what
+        the IDEs were doing before anyone could rely on colour.
+        """
         stdscr = self.stdscr
-        body_h = h - 3  # header, column titles, footer
+        body_h = h - 3            # caption row, column titles, footer row
+        inner_w = w - 2
+        if body_h < 1 or inner_w < 8:
+            return
         panel.ensure_visible(body_h)
 
-        border = curses.A_BOLD if active else curses.A_DIM
-        # Header: filesystem label + current path.  Long paths keep their
-        # tail visible (the deepest directories matter most).
+        # Caption: filesystem label + current path.  Long paths keep their
+        # tail visible (the deepest directories matter most), and are trimmed
+        # before the frame sees them so the frame can still centre them.
         header = f"{panel.fs.label()}:{panel.path}"
-        if len(header) > w:
-            header = "~" + header[-(w - 1):]
-        head_attr = curses.A_REVERSE if active else curses.A_NORMAL
-        try:
-            stdscr.addstr(y, x, ljust(header, w), head_attr)
-        except curses.error:
-            pass
+        room = max(8, inner_w - 8)
+        if len(header) > room:
+            header = "~" + header[-(room - 1):]
 
-        # Column titles.
-        title = f" {'Name'.ljust(w - 22)}{'Size':>6} {'Modify time':>12}"
-        try:
-            stdscr.addstr(y + 1, x, ljust(title, w), curses.A_UNDERLINE | border)
-        except curses.error:
-            pass
+        theme.frame(stdscr, y, x, h, w,
+                    "frame" if active else "framenc",
+                    title=header, title_role="title" if active else "titlenc",
+                    double=active, close=False,
+                    footer=self._panel_footer(panel),
+                    footer_role="panelerror" if panel.error else "panelinfo")
 
-        # Entries.
+        name_w = max(4, inner_w - 20)
+        title = f" {'Name'.ljust(name_w)}{'Size':>6} {'Modify time':>12}"
+        theme.paint(stdscr, y + 1, x + 1, title, "panelhead", inner_w)
+
         for row in range(body_h):
             idx = panel.top + row
             ry = y + 2 + row
             if idx >= len(panel.entries):
-                try:
-                    stdscr.addstr(ry, x, " " * w)
-                except curses.error:
-                    pass
+                theme.fill(stdscr, ry, x + 1, inner_w, "panel")
                 continue
             entry = panel.entries[idx]
             is_cursor = active and idx == panel.cursor
@@ -205,48 +325,53 @@ class App:
                 display = name + "/"
             else:
                 display = name
-            marker = "*" if tagged else " "
+            marker = " "
             if entry.is_symlink:
-                marker = "@" if not tagged else "*"
+                marker = theme.glyph("link")
+            if tagged:
+                marker = theme.glyph("tag")
 
             size_s = " <DIR>" if entry.is_dir else human_size(entry.size)
             time_s = human_time(entry.mtime)
-            name_w = w - 22
-            line = f"{marker}{ljust(display, name_w)}{rjust(size_s, 6)} {time_s[:12]:>12}"
-            line = ljust(line, w)
+            line = (f"{marker}{ljust(display, name_w)}{rjust(size_s, 6)} "
+                    f"{time_s[:12]:>12}")
 
-            attr = curses.A_NORMAL
-            if entry.is_dir:
-                attr |= curses.A_BOLD
-            if entry.is_symlink:
-                attr |= curses.A_DIM
-            if tagged:
-                attr = curses.A_BOLD | (curses.color_pair(1)
-                                        if curses.has_colors() else 0)
             if is_cursor:
-                attr = curses.A_REVERSE | (curses.A_BOLD if entry.is_dir else 0)
-            try:
-                stdscr.addstr(ry, x, line, attr)
-            except curses.error:
-                pass
+                role = ("panelcursortag" if tagged else
+                        "panelcursordir" if entry.is_dir else "panelcursor")
+            elif tagged:
+                role = "paneltag"
+            elif entry.is_symlink:
+                role = "panellink"
+            elif entry.is_dir:
+                role = "paneldir"
+            else:
+                role = "panel"
+            theme.paint(stdscr, ry, x + 1, line, role, inner_w)
 
-        # Footer: selection summary or error.
+        # The scrollbar rides the right-hand border, which is where a Turbo
+        # Vision window kept it.
+        theme.scrollbar(stdscr, y + 2, x + w - 1, body_h, panel.top, body_h,
+                        len(panel.entries),
+                        role="scroll" if active else "framenc")
+
+    def _panel_footer(self, panel: Panel) -> str:
+        """The text along a pane's bottom frame.
+
+        Whatever is worth knowing about the pane right now, in order: the
+        error that stopped it being listed, what is tagged, what is under the
+        cursor, or how much is in the directory.
+        """
         if panel.error:
-            footer = f" ! {panel.error}"
-        elif panel.selected:
+            return f"! {panel.error}"
+        if panel.selected:
             total = sum(e.size or 0 for e in panel.entries
                         if e.name in panel.selected)
-            footer = f" {len(panel.selected)} tagged, {human_size(total).strip()}"
-        else:
-            cur = panel.current()
-            if cur and cur.name != Panel.PARENT and not cur.is_dir:
-                footer = f" {cur.name}  {human_size(cur.size).strip()}"
-            else:
-                footer = f" {len(panel.entries) - (0 if panel._at_root() else 1)} items"
-        try:
-            stdscr.addstr(y + h - 1, x, ljust(footer, w), border | curses.A_REVERSE)
-        except curses.error:
-            pass
+            return f"{len(panel.selected)} tagged, {human_size(total).strip()}"
+        cur = panel.current()
+        if cur and cur.name != Panel.PARENT and not cur.is_dir:
+            return f"{cur.name}  {human_size(cur.size).strip()}"
+        return f"{len(panel.entries) - (0 if panel._at_root() else 1)} items"
 
     def _draw_function_bar(self, y: int, width: int) -> None:
         keys = [
@@ -254,19 +379,16 @@ class App:
             ("5", "Copy"), ("6", "Move"), ("7", "Mkdir"), ("8", "Del"),
             ("9", "Sync"), ("10", "Quit"),
         ]
+        theme.fill(self.stdscr, y, 0, width, "keybar")
         seg = max(1, width // len(keys))
         x = 0
         for num, label in keys:
             if x >= width:
                 break
-            text = f"{num}{label}"
-            try:
-                self.stdscr.addstr(y, x, str(num), curses.A_NORMAL)
-                self.stdscr.addstr(y, x + len(num),
-                                   label.ljust(seg - len(num))[: max(0, seg - len(num))],
-                                   curses.A_REVERSE)
-            except curses.error:
-                pass
+            room = max(0, seg - len(num))
+            theme.paint(self.stdscr, y, x, str(num), "keybarkey")
+            theme.paint(self.stdscr, y, x + len(num),
+                        label.ljust(room)[:room], "keybar")
             x += seg
 
     # -- main loop --------------------------------------------------------
@@ -307,9 +429,121 @@ class App:
         self.stdscr.timeout(-1)
         self._close_backends()
 
+    # -- the menu bar -------------------------------------------------------
+    def _menu_items(self, index: int) -> list[dict]:
+        """One menu's entries, with the state-dependent ticks filled in."""
+        items = []
+        for item in MENUS[index]["items"]:
+            entry = dict(item)
+            if entry.get("name") == "hidden":
+                entry["checked"] = self.active.show_hidden
+            items.append(entry)
+        return items
+
+    def open_menu(self, index: int) -> None:
+        """Open a drop-down and run whatever it comes back with.
+
+        Left and right walk to the neighbouring menu without closing the bar,
+        which is the behaviour that makes a menu bar feel like one rather than
+        like a stack of unrelated pop-ups.
+        """
+        spans = menu_layout()
+        while True:
+            index %= len(MENUS)
+            self._open_menu = index
+            self.draw()
+            chosen = dialogs.dropdown(self.stdscr, self._menu_items(index),
+                                      1, spans[index][0])
+            if chosen == dialogs.PREVIOUS_MENU:
+                index -= 1
+                continue
+            if chosen == dialogs.NEXT_MENU:
+                index += 1
+                continue
+            break
+        self._open_menu = None
+        if chosen:
+            self._dispatch(chosen)
+
+    def _actions(self) -> dict:
+        """Every named action, as a table of name -> what to call.
+
+        A table rather than a chain of ``if``s so that the menu tree can be
+        checked against it: an entry naming an action nothing answers to is a
+        dead entry, and the tests say so rather than the user finding out.
+        """
+        return {
+            "view": self._view,
+            "edit": self._edit,
+            "copy": self._copy,
+            "move": self._move,
+            "rename": self._rename,
+            "mkdir": self._mkdir,
+            "delete": self._delete,
+            "tag": self.active.toggle_select,
+            "find": self._find_files,
+            "connect": self._open_location,
+            "presets": self._presets_menu,
+            "goto": self._go_to_path,
+            "home": self._go_home,
+            "swap": self._swap_panes,
+            "reload": self._reload,
+            "mirror": self._mirror_to_other_pane,
+            "sync": self._sync,
+            "terminal": self._open_terminal_pane,
+            "shell": self._open_terminal,
+            "plugins": self._plugin_mode,
+            "sort": self._sort_menu,
+            "hidden": self._toggle_hidden,
+            "colours": self._colour_menu,
+            "config": self._config_menu,
+            "help": self._help,
+            "about": self._about,
+            "quit": self._quit,
+        }
+
+    def _dispatch(self, action: str) -> None:
+        """Run a named action from the menu bar or the context menu."""
+        handler = self._actions().get(action)
+        if handler is not None:
+            handler()
+
+    def _menu_key(self, key: int) -> bool:
+        """Handle Esc and the Alt+letter combinations that open a menu.
+
+        A lone Esc and Alt+F arrive as the same first byte, so the only way to
+        tell them apart is to look for a second one straight away: a real Alt
+        combination has already sent its letter, while a user pressing Escape
+        has not.  Returns True when the key was the menu's.
+        """
+        following = self._peek_key()
+        if following == -1:
+            self.open_menu(0)
+            return True
+        if 32 <= following < 127:
+            letter = chr(following).lower()
+            for index, entry in enumerate(MENUS):
+                if theme.hotkey_letter(entry["label"]) == letter:
+                    self.open_menu(index)
+                    return True
+        return True     # an escape sequence we do not use: swallow it
+
+    def _peek_key(self) -> int:
+        """The next key if one is already waiting, else -1."""
+        getch = getattr(self.stdscr, "getch", None)
+        if getch is None:
+            return -1
+        try:
+            self.stdscr.timeout(40)
+            return getch()
+        except curses.error:
+            return -1
+        finally:
+            self.stdscr.timeout(-1)
+
     def handle_key(self, key: int) -> None:
         panel = self.active
-        body_h = self.stdscr.getmaxyx()[0] - 5
+        body_h = self.stdscr.getmaxyx()[0] - 6
 
         # A plugin owning the active pane gets first crack at every key.
         if panel.plugin is not None and key != curses.KEY_RESIZE:
@@ -353,12 +587,12 @@ class App:
             panel.select_all()
         elif key in (ord("-"), ord("\\")):
             panel.clear_selection()
+        elif key == 27:  # Esc: the menu bar; Alt+letter: a menu by name
+            self._menu_key(key)
         elif key == 21:  # Ctrl-U swap panes
             self._swap_panes()
         elif key == 18:  # Ctrl-R reload
-            self.left.refresh()
-            self.right.refresh()
-            self._set_message("Reloaded")
+            self._reload()
         elif key == 7:  # Ctrl-G go to path
             self._go_to_path()
         elif key == ord("~"):  # home directory of this pane's filesystem
@@ -370,9 +604,7 @@ class App:
         elif key == 20:  # Ctrl-T sort
             self._sort_menu()
         elif key == ord("."):  # toggle hidden files in the active pane
-            panel.toggle_hidden()
-            self._set_message("Hidden files "
-                              + ("shown" if panel.show_hidden else "hidden"))
+            self._toggle_hidden()
         elif key == ord("t"):  # terminal inside this pane
             self._open_terminal_pane()
         elif key == ord("!"):  # full-screen shell (for vim/htop and friends)
@@ -406,13 +638,54 @@ class App:
         elif key in (curses.KEY_F9, ord("9"), ord("s")):
             self._sync()
         elif key in (curses.KEY_F10, ord("0"), ord("q"), 3):  # 3 = Ctrl-C
-            if dialogs.confirm(self.stdscr, "Quit", "Exit Meridian Commander?",
-                               default_yes=True):
-                self.running = False
+            self._quit()
         elif key == curses.KEY_RESIZE:
             pass
 
     # -- actions ----------------------------------------------------------
+    def _quit(self) -> None:
+        if dialogs.confirm(self.stdscr, "Quit", "Exit Meridian Commander?",
+                           default_yes=True):
+            self.running = False
+
+    def _reload(self) -> None:
+        self.left.refresh()
+        self.right.refresh()
+        self._set_message("Reloaded")
+
+    def _toggle_hidden(self) -> None:
+        panel = self.active
+        panel.toggle_hidden()
+        self._set_message("Hidden files "
+                          + ("shown" if panel.show_hidden else "hidden"))
+
+    def _colour_menu(self) -> None:
+        """Switch colour scheme, the way Options > Colours always did."""
+        from . import config as config_mod
+
+        names = theme.names()
+        labels = [f"{name}{'   (current)' if name == theme.current else ''}"
+                  for name in names]
+        choice = dialogs.menu(self.stdscr, "Colours", labels + ["Cancel"])
+        if choice is None or choice == len(names):
+            return
+        theme.init(names[choice])
+        saved = config_mod.save_scheme(names[choice])
+        self._set_message(f"Colour scheme: {names[choice]}"
+                          + ("" if saved else "  (could not be saved)"))
+
+    def _about(self) -> None:
+        from . import __version__
+
+        dialogs.message(self.stdscr, "About", (
+            f"Meridian Commander {__version__}\n"
+            "\n"
+            "A two-pane terminal file manager: local, SFTP, SSH and FTP,\n"
+            "with a viewer, an editor, archives and plug-ins.\n"
+            "\n"
+            "Copyright (C) 2026 Martin Gallagher.  GPLv3 or later."
+        ))
+
     def _activate_entry(self) -> None:
         panel = self.active
         entry = panel.current()
@@ -639,6 +912,15 @@ class App:
         try:
             _id, mx, my, _z, bstate = curses.getmouse()
         except curses.error:
+            return
+
+        # The menu bar owns the top row: a click there opens a menu, exactly
+        # as clicking a caption did in the IDEs.
+        if my == 0:
+            for index, (start, span) in enumerate(menu_layout()):
+                if start <= mx < start + span:
+                    self.open_menu(index)
+                    return
             return
 
         target = None
@@ -1347,6 +1629,8 @@ class App:
             "  Insert / Space tag file    +/-  tag all / untag all\n"
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
             "  Ctrl-G         go to path   Ctrl-T  sort order\n"
+            "  Esc            the menu bar (Alt+F, Alt+C, Alt+O, Alt+H\n"
+            "                 open a menu by name; click one to open it)\n"
             "  ~              home directory of this pane's location\n"
             "  =              other pane: same directory and connection\n"
             "  b              presets: go to / save / delete a location\n"
@@ -1362,6 +1646,7 @@ class App:
             "  F3 on an image arrows pan, +/- zoom, c colour/ASCII, n frame\n"
             "  F3 on .pdf     page text: Tab page, / find, i scanned image\n"
             "  C              configuration: edit config.ini / plug-ins\n"
+            "  Options>Colours  turbo (blue), midnight (black), mono\n"
             "\n"
             "  Function keys -- each also has digit and letter aliases,\n"
             "  for terminals that swallow the F-keys:\n"
@@ -1395,13 +1680,17 @@ class App:
 
 
 def _main(stdscr, args) -> None:
-    curses.use_default_colors()
+    from . import config as config_mod
+
     if curses.has_colors():
         curses.start_color()
         try:
-            curses.init_pair(1, curses.COLOR_YELLOW, -1)  # tagged files
+            curses.use_default_colors()
         except curses.error:
             pass
+    # Every colour the application uses is allocated here, once, so nothing
+    # drawn later has to ask whether it may have any.
+    theme.init(config_mod.colour_scheme())
     stdscr.keypad(True)
     # Raw mode: without it the tty's XON/XOFF flow control eats Ctrl-S (the
     # editor's save key!) and Ctrl-Q, and Ctrl-S can freeze the display.
@@ -1447,6 +1736,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-V", "--version", action="version",
                         version=version_text)
     args = parser.parse_args(argv)
+
+    # The frames are drawn with box-drawing characters, which curses can only
+    # put on the screen once the locale has been taken from the environment.
+    # Without this the terminal is told to render them in ASCII instead --
+    # see meridian_commander.theme.
+    try:
+        locale.setlocale(locale.LC_ALL, "")
+    except locale.Error:
+        pass
 
     try:
         curses.wrapper(_main, args)

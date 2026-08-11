@@ -6,7 +6,7 @@ import curses
 
 import pytest
 
-from meridian_commander import dialogs
+from meridian_commander import dialogs, theme
 
 from support import (
     _ScriptedWindow,
@@ -42,19 +42,22 @@ def test_a_window_is_centred_and_clipped_to_the_screen():
     assert clipped == (18, 58)
 
 
-def test_the_title_is_centred_and_truncated():
+def test_the_title_is_bracketed_and_truncated():
     def check(stdscr):
         win = dialogs._center(stdscr, 5, 20)
         dialogs._box(win, "Title")
-        titled = win.instr(0, 0, 20).decode()
+        titled = win.instr(0, 0).decode()
         dialogs._box(win, "")
-        untitled = win.instr(0, 0, 20).decode()
+        untitled = win.instr(0, 0).decode()
         wide = dialogs._center(stdscr, 5, 12)
         dialogs._box(wide, "A very long title indeed")
-        return titled, untitled, wide.instr(0, 0, 12).decode()
+        return titled, untitled, wide.instr(0, 0).decode()
 
     titled, untitled, long_title = with_curses_screen(20, 60, check)
-    assert " Title " in titled
+    # The caption sits in the top border between Turbo Vision's brackets,
+    # after the close box in the corner.
+    assert "\u2561 Title \u255e" in titled
+    assert titled.startswith("\u2554[\u25a0]")
     assert "Title" not in untitled
     # An over-long title is cut to fit rather than overflowing the frame.
     assert "A very" in long_title
@@ -83,8 +86,16 @@ def test_an_error_message_is_emphasised(monkeypatch):
                      lambda s: dialogs.message(s, "Error", "it broke",
                                                error=True),
                      [27])
-    bold = [d for d in window.drawn if len(d) > 3 and d[3] == curses.A_BOLD]
-    assert bold
+    shouted = [d for d in window.drawn
+               if len(d) > 3 and d[3] == theme.attr("dialogerror")]
+    assert any(d[2] == "it broke" for d in shouted)
+
+
+def test_a_message_offers_an_ok_button(monkeypatch):
+    _, window = _run(monkeypatch,
+                     lambda s: dialogs.message(s, "Note", "all done"), [27])
+    drawn = _text(window)
+    assert "OK" in drawn
 
 
 def test_message_clips_text_too_tall_for_the_screen(monkeypatch):
@@ -98,7 +109,7 @@ def test_message_clips_text_too_tall_for_the_screen(monkeypatch):
 def test_message_survives_a_window_that_refuses_to_draw(monkeypatch):
     """A refused body write must not take the dialog down."""
     _run(monkeypatch, lambda s: dialogs.message(s, "Note", "one\ntwo"),
-         [10], fail_draws=lambda y, x: y == 2)
+         [10], fail_draws=lambda y, x: y in (1, 2))
 
 
 # -- confirm -------------------------------------------------------------------
@@ -135,8 +146,10 @@ def test_confirm_selection_can_be_moved_then_accepted(monkeypatch, toggle):
                           lambda s: dialogs.confirm(s, "Delete", "Sure?"),
                           [toggle, 13])
     assert answer is True
-    assert "[ Yes ]" in _text(window)
-    assert "[ No ]" in _text(window)
+    # Turbo Vision push buttons: the caption, its accelerator picked out, and
+    # no brackets -- the colour and the shadow are what make them buttons.
+    drawn = _text(window)
+    assert "Yes" in drawn and "No" in drawn
 
 
 def test_confirm_shows_several_lines(monkeypatch):
@@ -148,7 +161,7 @@ def test_confirm_shows_several_lines(monkeypatch):
 def test_confirm_survives_a_window_that_refuses_to_draw(monkeypatch):
     answer, _ = _run(monkeypatch,
                      lambda s: dialogs.confirm(s, "Delete", "a\nb"),
-                     [ord("y")], fail_draws=lambda y, x: y == 2)
+                     [ord("y")], fail_draws=lambda y, x: y in (1, 2))
     assert answer is True
 
 
@@ -218,8 +231,10 @@ def test_prompt_scrolls_a_value_wider_than_the_field(monkeypatch):
                                                    default=long_value),
                           [10])
     assert answer == long_value
-    # Only the tail around the cursor is on screen.
-    assert len(_text(window)) < len(long_value) * 2
+    # Only the tail around the cursor is on screen: no write is wider than
+    # the input field, whatever the value's length.
+    widest = max(len(d[2]) for d in window.drawn if len(d) > 2)
+    assert widest < 60
 
 
 def test_prompt_ignores_keys_it_does_not_handle(monkeypatch):
@@ -363,6 +378,108 @@ def test_a_list_longer_than_the_alphabet_runs_out_honestly():
     assert len(set(given)) == len(given)     # and never the same letter twice
 
 
+# -- drop-down menus -----------------------------------------------------------
+
+def _dropdown(monkeypatch, items, keys, rows=24, cols=70):
+    """Run a drop-down with its window's keystrokes scripted."""
+    real_newwin = curses.newwin
+    captured: dict = {}
+
+    def fake_newwin(*args, **kwargs):
+        window = _ScriptedWindow(real_newwin(*args, **kwargs), keys)
+        captured["window"] = window
+        return window
+
+    monkeypatch.setattr(curses, "newwin", fake_newwin)
+    chosen = with_curses_screen(
+        rows, cols, lambda stdscr: dialogs.dropdown(stdscr, items, 1, 4))
+    return chosen, captured.get("window")
+
+
+ITEMS = [
+    {"label": "~V~iew", "name": "view", "key": "F3"},
+    {"label": "~E~dit", "name": "edit"},
+    {"sep": True},
+    {"label": "~D~elete", "name": "delete", "disabled": True},
+    {"label": "~H~idden", "name": "hidden", "checked": True},
+]
+
+
+def test_a_drop_down_returns_the_entry_that_was_chosen(monkeypatch):
+    chosen, window = _dropdown(monkeypatch, ITEMS, [10])
+    assert chosen == "view"
+    drawn = _text(window)
+    assert "View" in drawn and "F3" in drawn
+
+
+def test_a_drop_down_skips_separators_and_disabled_entries(monkeypatch):
+    # Down three times from View: Edit, past the rule and the dead entry,
+    # to Hidden.
+    chosen, _ = _dropdown(monkeypatch, ITEMS,
+                          [curses.KEY_DOWN, curses.KEY_DOWN, 10])
+    assert chosen == "hidden"
+
+
+def test_a_drop_down_wraps_at_the_ends(monkeypatch):
+    chosen, _ = _dropdown(monkeypatch, ITEMS, [curses.KEY_UP, 10])
+    assert chosen == "hidden"
+    chosen, _ = _dropdown(monkeypatch, ITEMS,
+                          [curses.KEY_END, curses.KEY_HOME, 10])
+    assert chosen == "view"
+
+
+def test_a_drop_down_answers_to_an_accelerator(monkeypatch):
+    chosen, _ = _dropdown(monkeypatch, ITEMS, [ord("E")])
+    assert chosen == "edit"
+
+
+def test_a_disabled_entry_cannot_be_chosen_by_its_letter(monkeypatch):
+    chosen, _ = _dropdown(monkeypatch, ITEMS, [ord("d"), 27])
+    assert chosen is None
+
+
+def test_escape_closes_a_drop_down(monkeypatch):
+    chosen, _ = _dropdown(monkeypatch, ITEMS, [27])
+    assert chosen is None
+
+
+@pytest.mark.parametrize("key, expected", [
+    (curses.KEY_LEFT, dialogs.PREVIOUS_MENU),
+    (curses.KEY_RIGHT, dialogs.NEXT_MENU),
+])
+def test_arrowing_off_the_sides_asks_for_the_next_menu(monkeypatch, key,
+                                                       expected):
+    chosen, _ = _dropdown(monkeypatch, ITEMS, [key])
+    assert chosen == expected
+
+
+def test_a_ticked_entry_is_marked(monkeypatch):
+    _chosen, window = _dropdown(monkeypatch, ITEMS, [27])
+    assert any(d[2] == theme.glyph("check") for d in window.drawn
+               if len(d) > 2)
+
+
+def test_an_empty_drop_down_opens_nothing(monkeypatch):
+    assert with_curses_screen(
+        20, 60, lambda stdscr: dialogs.dropdown(stdscr, [], 1, 1)) is None
+
+
+def test_a_drop_down_near_the_bottom_opens_upwards(monkeypatch):
+    """It has to stay on the desktop; there is nothing below the last row."""
+    real_newwin = curses.newwin
+    where: list[tuple] = []
+
+    def fake_newwin(h, w, y, x):
+        where.append((h, y))
+        return _ScriptedWindow(real_newwin(h, w, y, x), [27])
+
+    monkeypatch.setattr(curses, "newwin", fake_newwin)
+    with_curses_screen(10, 40,
+                       lambda stdscr: dialogs.dropdown(stdscr, ITEMS, 8, 2))
+    height, top = where[0]
+    assert top + height <= 10
+
+
 # -- connect dialog ------------------------------------------------------------
 
 class _Answers:
@@ -463,7 +580,7 @@ def test_progress_draws_a_bar_and_a_percentage():
         progress = dialogs.ProgressDialog(stdscr, "Copying")
         progress.set_overall("2 of 4 files")
         progress.update(50, 100, "big.iso")
-        rendered = "\n".join(progress.win.instr(row, 0, 58).decode()
+        rendered = "\n".join(progress.win.instr(row, 0).decode()
                              for row in range(8))
         progress.close()
         return rendered
@@ -472,7 +589,8 @@ def test_progress_draws_a_bar_and_a_percentage():
     assert "2 of 4 files" in rendered
     assert "big.iso" in rendered
     assert " 50%" in rendered
-    assert "#" in rendered and "-" in rendered
+    # Half a bar: blocks over the shaded track they run along.
+    assert theme.glyph("block") in rendered and theme.glyph("shade") in rendered
     assert "Esc/Q = cancel" in rendered
 
 
@@ -484,7 +602,7 @@ def test_progress_with_no_total_marches_instead_of_sitting_at_zero():
         frames = []
         for _ in range(4):
             progress.update(0, 0, "left: 1,000 files")
-            frames.append(progress.win.instr(5, 0, 58).decode())
+            frames.append(progress.win.instr(5, 0).decode())
         progress.close()
         return frames
 
@@ -493,21 +611,25 @@ def test_progress_with_no_total_marches_instead_of_sitting_at_zero():
     assert not any("%" in f for f in frames)
     # ... and the block is somewhere different each time, which is the signal
     # that something is still happening.
-    assert len({f.index("#") for f in frames}) == len(frames)
+    block = theme.glyph("block")
+    assert len({f.index(block) for f in frames}) == len(frames)
 
 
 @pytest.mark.parametrize("width, tick, expected", [
     (0, 0, ""),                       # no room at all
-    (4, 0, "####"),                   # narrower than the block: fill it
-    (8, 3, "########"),
-    (12, 0, "########----"),
-    (12, 2, "--########--"),
-    (12, 4, "----########"),          # at the far end
-    (12, 5, "---########-"),          # and turns around rather than wrapping
-    (12, 8, "########----"),          # back to the start: one full cycle
+    (4, 0, "BBBB"),                   # narrower than the block: fill it
+    (8, 3, "BBBBBBBB"),
+    (12, 0, "BBBBBBBB----"),
+    (12, 2, "--BBBBBBBB--"),
+    (12, 4, "----BBBBBBBB"),          # at the far end
+    (12, 5, "---BBBBBBBB-"),          # and turns around rather than wrapping
+    (12, 8, "BBBBBBBB----"),          # back to the start: one full cycle
 ])
 def test_marching_bar(width, tick, expected):
-    assert dialogs._marching_bar(width, tick) == expected
+    """``B`` stands for the block and ``-`` for the track it travels along."""
+    wanted = (expected.replace("B", theme.glyph("block"))
+              .replace("-", theme.glyph("shade")))
+    assert dialogs._marching_bar(width, tick) == wanted
     if width:
         assert len(dialogs._marching_bar(width, tick)) == width
 
@@ -516,13 +638,14 @@ def test_progress_clamps_an_over_long_count():
     def run(stdscr):
         progress = dialogs.ProgressDialog(stdscr, "Copying")
         progress.update(500, 100, "overshoot")
-        rendered = progress.win.instr(5, 0, 58).decode()
+        rendered = progress.win.instr(5, 0).decode()
         progress.close()
         return rendered
 
     rendered = with_curses_screen(20, 70, run)
     assert "100%" in rendered
-    assert "-" not in rendered.split("]")[0]
+    # A full bar: no unfilled track left inside the brackets.
+    assert theme.glyph("shade") not in rendered.split("]")[0]
 
 
 @pytest.mark.parametrize("key", [27, ord("q"), ord("Q")])

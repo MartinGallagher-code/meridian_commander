@@ -12,15 +12,17 @@ import curses
 import io
 import os
 import pty
+import select
 import struct
 import tarfile
+import threading
 import zipfile
 import zlib
 from xml.sax.saxutils import escape
 
 import pytest
 
-from meridian_commander import dialogs
+from meridian_commander import dialogs, theme
 from meridian_commander.filesystems import LocalFileSystem
 
 
@@ -147,6 +149,23 @@ class _FakeRemoteBackend(LocalFileSystem):
 # overflowing it produces, so only a real window can catch a regression in the
 # code that guards against them.
 
+def _drain(fd: int, stop) -> None:
+    """Read and throw away everything written to a pseudo-terminal.
+
+    Without this the screens below deadlock: curses writes the whole picture
+    to the terminal, nothing is reading the other end, and once the pipe
+    buffer fills the write blocks for ever.  A blank screen fitted; a screen
+    with a painted background does not, which is a property of the terminal
+    rather than of the code under test.
+    """
+    while not stop.is_set():
+        try:
+            if select.select([fd], [], [], 0.05)[0] and not os.read(fd, 65536):
+                return
+        except OSError:
+            return
+
+
 def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
     """Run ``fn(stdscr)`` on a real curses screen ``rows`` x ``cols``.
 
@@ -161,6 +180,9 @@ def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
     only useful for the paths that check the count and then decline to use it.
     """
     master, slave = pty.openpty()
+    stop = threading.Event()
+    reader = threading.Thread(target=_drain, args=(master, stop), daemon=True)
+    reader.start()
     saved_out, saved_in = os.dup(1), os.dup(0)
     saved_term = os.environ.get("TERM")
     os.environ["TERM"] = "xterm-256color"
@@ -177,6 +199,10 @@ def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
         if colours is not None:
             saved_colours = getattr(curses, "COLORS", 8)
             curses.COLORS = colours
+        # Give the screen the colours the application would have given it, so
+        # drawing is tested in the palette it actually runs in -- and so a
+        # test that deliberately breaks the theme cannot leak into the next.
+        theme.init()
         curses.resizeterm(rows, cols)
         # curses keeps one screen per process, so wipe whatever an earlier
         # test left behind: every caller expects a blank terminal.
@@ -187,6 +213,8 @@ def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
             if colours is not None:
                 curses.COLORS = saved_colours
             curses.endwin()
+        stop.set()
+        reader.join(timeout=2)
         os.dup2(saved_out, 1)
         os.dup2(saved_in, 0)
         for fd in (saved_out, saved_in, master, slave):

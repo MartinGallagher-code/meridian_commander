@@ -20,6 +20,11 @@ DEFAULT_CONFIG = """\
 ; Meridian Commander configuration.
 ; Edit from within the app: press C and choose "Edit configuration".
 
+[ui]
+; Colour scheme: turbo (Borland blue), midnight (black ground), mono.
+; Also switchable while running, from Options > Colours.
+scheme = turbo
+
 [plugins]
 ; Extra directories to search for plug-ins, colon-separated.
 ; Built-in plug-ins and ~/.config/meridian-commander/plugins/ are always used.
@@ -131,6 +136,40 @@ def plugin_settings(name: str, defaults: dict) -> dict:
                     pass
             merged[key] = value
     return merged
+
+
+def colour_scheme() -> str:
+    """The colour scheme named in ``[ui] scheme``, or the default.
+
+    An unknown name is not an error worth stopping a file manager for: the
+    theme falls back to ``turbo`` and the user sees the wrong colours rather
+    than no application.
+    """
+    parser = load()
+    return (parser.get("ui", "scheme", fallback="") or "").strip() or "turbo"
+
+
+def save_scheme(name: str) -> bool:
+    """Remember a colour scheme chosen from the Options menu.
+
+    Rewritten with :mod:`configparser` rather than by hand, which loses the
+    comments in the rest of the file -- so the file is only touched when the
+    setting actually changes, and a failure to write is reported to the caller
+    instead of raising: the scheme is already applied on screen either way.
+    """
+    if colour_scheme() == name:
+        return True
+    parser = load()
+    if not parser.has_section("ui"):
+        parser.add_section("ui")
+    parser.set("ui", "scheme", name)
+    try:
+        os.makedirs(config_dir(), exist_ok=True)
+        with open(config_path(), "w") as f:
+            parser.write(f)
+    except OSError:
+        return False
+    return True
 
 
 def extra_plugin_dirs() -> list[str]:

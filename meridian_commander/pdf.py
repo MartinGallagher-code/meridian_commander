@@ -31,10 +31,10 @@ from __future__ import annotations
 
 import re
 
-from . import pdfobj
+from . import pdfobj, theme
 from .filesystems import FileSystem
 from .image import Image, ImageError
-from .util import ljust, truncate
+from .util import truncate
 from .pdfobj import (
     Document,
     Lexer,
@@ -813,16 +813,14 @@ class PdfView:
     def draw(self, win) -> None:
         import curses
 
+        theme.background(win, "edit")
         win.erase()
         height, width = win.getmaxyx()
         body_h = max(0, height - 2)
         self._draw_title(win, width)
         if self.error:
-            try:
-                win.addstr(1, 2, truncate(f"Cannot read: {self.error}",
-                                          max(0, width - 4)))
-            except curses.error:
-                pass
+            theme.paint(win, 1, 2, truncate(f"Cannot read: {self.error}",
+                                            max(0, width - 4)), "panelerror")
         else:
             lines = self.body()
             self.top = max(0, min(self.top, max(0, len(lines) - 1)))
@@ -838,24 +836,15 @@ class PdfView:
         win.noutrefresh()
 
     def _draw_title(self, win, width: int) -> None:
-        import curses
-
         title = f" PDF: {self.name}"
         if not self.error:
             title += f" -- page {self.index + 1}/{len(self.pages)}"
             if self.truncated:
                 title += " [truncated]"
         title += " "
-        win.attrset(curses.A_REVERSE)
-        try:
-            win.addstr(0, 0, ljust(title, width))
-        except curses.error:
-            pass
-        win.attrset(curses.A_NORMAL)
+        theme.paint(win, 0, 0, title, "keybar", width)
 
     def _draw_footer(self, win, height: int, width: int) -> None:
-        import curses
-
         if self.notice:
             hint = self.notice
         elif self.error:
@@ -868,12 +857,7 @@ class PdfView:
                 parts.append("[i]mage")
             parts.append("Tab page  [/]find  n/N  [q]uit")
             hint = "  ".join(parts)
-        win.attrset(curses.A_REVERSE)
-        try:
-            win.addstr(height - 1, 0, ljust(f" {hint} ", width))
-        except curses.error:
-            pass
-        win.attrset(curses.A_NORMAL)
+        theme.paint(win, height - 1, 0, f" {hint} ", "keybar", width)
 
     # -- interaction --------------------------------------------------------
     def show_image(self, stdscr) -> None:

@@ -23,7 +23,8 @@ from meridian_commander.markdown import (
     is_markdown,
     render,
 )
-from meridian_commander.viewer import STYLE_ATTRS, Viewer
+from meridian_commander import theme
+from meridian_commander.viewer import STYLE_ROLES, Viewer
 
 from support import _KeyScript, script_newwin, with_curses_screen, write
 
@@ -517,16 +518,16 @@ def _draw(view, rows=14, cols=60):
 def test_styled_text_is_drawn_one_run_at_a_time(doc):
     drawn = _draw(doc)
     # "Some bold prose ..." is drawn as several writes, the bold one carrying
-    # A_BOLD, rather than as one flat write of the whole line.
-    bold = [a for a in drawn if len(a) > 3 and a[3] == curses.A_BOLD]
+    # the strong-text attribute, rather than as one flat write of the line.
+    bold = [a for a in drawn if len(a) > 3 and a[3] == theme.attr("editbold")]
     assert any(a[2] == "bold" for a in bold)
-    code = [a for a in drawn if len(a) > 3 and a[3] == curses.A_REVERSE]
+    code = [a for a in drawn if len(a) > 3 and a[3] == theme.attr("editcode")]
     assert any(a[2] == "code" for a in code)
 
 
-def test_an_unstyled_run_is_drawn_without_an_attribute(doc):
+def test_an_unstyled_run_is_drawn_in_the_plain_text_colour(doc):
     drawn = _draw(doc)
-    plain = [a for a in drawn if len(a) > 3 and a[3] == curses.A_NORMAL]
+    plain = [a for a in drawn if len(a) > 3 and a[3] == theme.attr("edit")]
     assert any(a[2] == "a bullet" for a in plain)
 
 
@@ -536,9 +537,10 @@ def test_the_source_view_draws_unstyled(monkeypatch, doc):
     assert any("# Title" in a[2] for a in drawn if len(a) > 2)
 
 
-def test_every_style_code_has_an_attribute():
+def test_every_style_code_has_a_role():
     for code in (BOLD, ITALIC, CODE, DIM, LINK):
-        assert code in STYLE_ATTRS
+        assert code in STYLE_ROLES
+        assert STYLE_ROLES[code] in theme.ROLES
 
 
 @pytest.mark.parametrize("rows, cols", [

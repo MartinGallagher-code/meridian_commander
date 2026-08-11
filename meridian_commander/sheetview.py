@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import curses
 
+from . import theme
 from .filesystems import FileSystem
 from .util import ljust, rjust, truncate
 from .xlsx import Sheet, Workbook, column_name, read_workbook
@@ -174,6 +175,7 @@ class SheetView:
 
     # -- drawing ------------------------------------------------------------
     def draw(self, win) -> None:
+        theme.background(win, "edit")
         win.erase()
         height, width = win.getmaxyx()
         body_h = max(0, height - 3)
@@ -218,50 +220,32 @@ class SheetView:
             if self.sheet.truncated:
                 title += " [truncated]"
         title += " "
-        win.attrset(curses.A_REVERSE)
-        try:
-            win.addstr(0, 0, ljust(title, width))
-        except curses.error:
-            pass
-        win.attrset(curses.A_NORMAL)
+        theme.paint(win, 0, 0, title, "keybar", width)
 
     def _draw_headers(self, win, width: int, gutter: int, columns) -> None:
-        win.attrset(curses.A_REVERSE)
-        try:
-            win.addstr(1, 0, " " * min(gutter, width))
-        except curses.error:
-            pass
+        theme.fill(win, 1, 0, min(gutter, width), "panelhead")
         for index, x, cell_w in columns:
-            attr = curses.A_REVERSE
-            if index == self.col:
-                attr |= curses.A_BOLD
-            try:
-                win.addstr(1, gutter + x,
-                           ljust(column_name(index), cell_w), attr)
-            except curses.error:
-                pass
-        win.attrset(curses.A_NORMAL)
+            role = "panelcursor" if index == self.col else "panelhead"
+            theme.paint(win, 1, gutter + x, ljust(column_name(index), cell_w),
+                        role)
 
     def _draw_row(self, win, y: int, index: int, gutter: int, columns,
                   width: int) -> None:
-        attr = curses.A_REVERSE if index == self.row else curses.A_DIM
-        try:
-            win.addstr(y, 0, rjust(str(index + 1), gutter - 1) + " ", attr)
-        except curses.error:
-            pass
+        role = "panelcursor" if index == self.row else "editnum"
+        theme.paint(win, y, 0, rjust(str(index + 1), gutter - 1) + " ", role)
         for col, x, cell_w in columns:
             text = self.cell(index, col)
             shown = (rjust(text, cell_w) if looks_numeric(text)
                      else ljust(text, cell_w))
-            cell_attr = curses.A_NORMAL
+            cell_role = "edit"
             if index == self.row and col == self.col:
-                cell_attr = curses.A_REVERSE
+                cell_role = "panelcursor"
             elif index == self.row:
-                cell_attr = curses.A_BOLD
+                cell_role = "editbold"
             # No guard here, unlike the writes around it: layout() only hands
             # back columns that end inside the window, and a body row is never
             # the last row, so this write is always one curses accepts.
-            win.addstr(y, gutter + x, shown, cell_attr)
+            win.addstr(y, gutter + x, shown, theme.attr(cell_role))
 
     def _draw_footer(self, win, height: int, width: int) -> None:
         if self.notice:
@@ -277,12 +261,7 @@ class SheetView:
                 parts.append(f"/{self.search}")
             parts.append("Tab sheet  [/]find  n/N  [w]idth  [q]uit")
             hint = "  ".join(parts)
-        win.attrset(curses.A_REVERSE)
-        try:
-            win.addstr(height - 1, 0, ljust(f" {hint} ", width))
-        except curses.error:
-            pass
-        win.attrset(curses.A_NORMAL)
+        theme.paint(win, height - 1, 0, f" {hint} ", "keybar", width)
 
     # -- interaction --------------------------------------------------------
     def switch_sheet(self, delta: int) -> None:

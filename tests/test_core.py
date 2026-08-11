@@ -1020,6 +1020,44 @@ def test_config_defaults_and_plugin_settings(tmp_path, monkeypatch):
     assert merged["username"] == "fallback"
 
 
+def test_the_colour_scheme_defaults_and_round_trips(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    from meridian_commander import config as config_mod
+
+    # Nothing written yet: the default scheme, not an error.
+    assert config_mod.colour_scheme() == "turbo"
+    config_mod.ensure_config()
+    assert config_mod.colour_scheme() == "turbo"
+
+    assert config_mod.save_scheme("midnight") is True
+    assert config_mod.colour_scheme() == "midnight"
+    # Saving what is already saved leaves the file alone.
+    before = open(config_mod.config_path()).read()
+    assert config_mod.save_scheme("midnight") is True
+    assert open(config_mod.config_path()).read() == before
+
+
+def test_a_blank_scheme_setting_falls_back(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    from meridian_commander import config as config_mod
+
+    os.makedirs(str(tmp_path / "meridian-commander"), exist_ok=True)
+    (tmp_path / "meridian-commander" / "config.ini").write_text(
+        "[ui]\nscheme =\n")
+    assert config_mod.colour_scheme() == "turbo"
+
+
+def test_a_scheme_that_cannot_be_written_is_reported(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nowhere"))
+    from meridian_commander import config as config_mod
+
+    def refuse(*args, **kwargs):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(config_mod.os, "makedirs", refuse)
+    assert config_mod.save_scheme("mono") is False
+
+
 def test_io_plugin_input_and_process():
     from meridian_commander.plugin_api import InputOutputPlugin
 
