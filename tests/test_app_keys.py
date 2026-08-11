@@ -895,16 +895,30 @@ def test_main_copes_with_a_terminal_that_refuses_colour_and_mouse(monkeypatch):
 
     monkeypatch.setattr(curses, "wrapper", fake_wrapper)
     monkeypatch.setattr(app_mod, "App", _FakeApp)
-    for name in ("use_default_colors", "raw"):
-        monkeypatch.setattr(curses, name, lambda: None)
+    monkeypatch.setattr(curses, "raw", lambda: None)
     monkeypatch.setattr(curses, "has_colors", lambda: True)
     monkeypatch.setattr(curses, "start_color", lambda: None)
 
     def refuse(*args):
         raise curses.error("not supported")
 
+    # Even the terminal's own default colours are refused here, which is a
+    # thing an unusual terminfo entry does.
+    monkeypatch.setattr(curses, "use_default_colors", refuse)
     monkeypatch.setattr(curses, "init_pair", refuse)
     monkeypatch.setattr(curses, "mousemask", refuse)
+    assert main([]) == 0
+
+
+def test_main_copes_with_a_locale_the_system_will_not_set(monkeypatch):
+    """A container with no locales generated: the frames go ASCII, not away."""
+    import locale
+
+    def refuse(*args):
+        raise locale.Error("unsupported locale setting")
+
+    monkeypatch.setattr(locale, "setlocale", refuse)
+    monkeypatch.setattr(curses, "wrapper", lambda fn, args: None)
     assert main([]) == 0
 
 

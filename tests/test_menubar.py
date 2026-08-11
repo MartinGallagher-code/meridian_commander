@@ -186,6 +186,44 @@ def test_a_screen_that_cannot_be_asked_for_a_key_still_opens_the_menu(
     assert opened
 
 
+def test_a_key_the_screen_cannot_be_asked_for_reads_as_escape(app,
+                                                              monkeypatch):
+    class _Refuses(_StubScreen):
+        def getch(self):
+            raise curses.error("no input")
+
+    app.stdscr = _Refuses()
+    opened = _script_dropdown(monkeypatch, [None])
+    app.handle_key(27)
+    assert opened and opened[0][1] == menu_layout()[0][0]
+
+
+def test_a_bar_narrower_than_its_captions_stops_drawing(app):
+    """The menus that fit are drawn; the rest are dropped, not wrapped."""
+    drawn: list[tuple] = []
+
+    class _Recording(_StubScreen):
+        def addstr(self, y, x, text, *args):
+            drawn.append((y, x, text))
+
+    app.stdscr = _Recording()
+    app._draw_menu_bar(14)
+    assert not any("Options" in text for _y, _x, text in drawn)
+    assert any("File" in text for _y, _x, text in drawn)
+
+
+def test_a_pane_too_small_to_frame_is_left_alone(app):
+    drawn: list[tuple] = []
+
+    class _Recording(_StubScreen):
+        def addstr(self, y, x, text, *args):
+            drawn.append((y, x, text))
+
+    app.stdscr = _Recording()
+    app._draw_panel(app.left, 0, 0, 3, 6, active=True)
+    assert drawn == []
+
+
 def test_a_click_on_the_bar_opens_the_menu_under_it(app, monkeypatch):
     start, width = menu_layout()[2]
     monkeypatch.setattr(curses, "getmouse",

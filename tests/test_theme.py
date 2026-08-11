@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import curses
+import locale
 
 import pytest
 
@@ -107,6 +108,30 @@ def test_running_out_of_pairs_leaves_the_rest_monochrome(monkeypatch):
     assert with_curses_screen(10, 40, run) == 4
 
 
+def test_a_terminal_that_cannot_say_whether_it_has_colour(monkeypatch):
+    def explode():
+        raise curses.error("no screen")
+
+    monkeypatch.setattr(curses, "has_colors", explode)
+    theme.init("turbo")
+    assert theme.in_colour() is False
+
+
+def test_a_pair_number_curses_will_not_turn_into_an_attribute(monkeypatch):
+    """``init_pair`` can succeed on a screen ``color_pair`` still refuses."""
+    def refuse(_index):
+        raise curses.error("must call initscr() first")
+
+    def run(stdscr):
+        monkeypatch.setattr(curses, "color_pair", refuse)
+        theme.init("turbo")
+        return theme.in_colour(), theme.attr("menu")
+
+    coloured, menu = with_curses_screen(10, 40, run)
+    assert coloured is False
+    assert menu == curses.A_REVERSE
+
+
 def test_an_unknown_scheme_falls_back_to_the_default():
     assert theme.init("chartreuse") == theme.DEFAULT_SCHEME
     assert "turbo" in theme.names() and "midnight" in theme.names()
@@ -132,6 +157,14 @@ def test_a_latin_1_terminal_gets_the_plain_frames(monkeypatch):
 
 def test_an_unknown_glyph_is_a_space():
     assert theme.glyph("nonesuch") == " "
+
+
+def test_an_encoding_python_has_never_heard_of_gets_the_plain_frames(
+        monkeypatch):
+    monkeypatch.setattr(locale, "getpreferredencoding",
+                        lambda do_setlocale=True: "klingon-1")
+    theme.init("turbo")
+    assert theme.glyph("v") == "|"
 
 
 # -- hot keys ------------------------------------------------------------------
@@ -287,6 +320,55 @@ def test_paint_survives_a_write_the_screen_refuses():
         return True
 
     assert with_curses_screen(4, 20, run) is True
+
+
+def test_a_window_that_refuses_a_background_is_not_fatal():
+    class _Refuses:
+        def bkgd(self, *args):
+            raise curses.error("no background here")
+
+    theme.background(_Refuses(), "panel")     # must not raise
+
+
+def test_a_shadow_with_no_cells_left_to_darken_does_nothing():
+    def run(stdscr):
+        theme.init("turbo")
+        theme.darken(stdscr, 1, 19, 4)        # only one column left
+        theme.darken(stdscr, 1, 20, 4)        # and now none at all
+        return stdscr.inch(1, 19) & curses.A_ATTRIBUTES
+
+    assert with_curses_screen(4, 20, run) == theme.attr("shadow")
+
+
+def test_a_shadow_of_no_width_darkens_nothing():
+    """A zero count must not reach chgat, which reads it as "to end of line"."""
+    def run(stdscr):
+        theme.init("turbo")
+        stdscr.addstr(1, 0, "abcdefghij")
+        theme.shadow(stdscr, 0, 0, 1, 0)
+        return stdscr.inch(1, 5) & curses.A_ATTRIBUTES
+
+    assert with_curses_screen(4, 20, run) != theme.attr("shadow")
+
+
+def test_a_shadow_curses_refuses_to_recolour_is_not_fatal():
+    class _Refuses:
+        def getmaxyx(self):
+            return (10, 40)
+
+        def chgat(self, *args):
+            raise curses.error("no such cell")
+
+    theme.darken(_Refuses(), 1, 1, 4)         # must not raise
+
+
+def test_a_scrollbar_with_no_room_for_its_arrows_is_skipped():
+    def run(stdscr):
+        theme.init("turbo")
+        theme.scrollbar(stdscr, 0, 0, 1, top=0, visible=1, total=9)
+        return stdscr.instr(0, 0).decode()
+
+    assert with_curses_screen(4, 20, run).strip() == ""
 
 
 def test_a_progress_bar_fills_from_the_left():

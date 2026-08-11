@@ -455,6 +455,9 @@ def _title_parts(caption: str, width: int, close: bool,
                  double: bool) -> tuple[str, int, int]:
     """A top border's text, and where the caption sits within it.
 
+    Only called for a window that has a caption -- :func:`frame` draws a plain
+    border when there is none, which is why there is no empty case here.
+
     Centred the way Turbo Vision centred it -- against the whole border, not
     against the space left over after the close box.  The caption's offset
     comes back with the text because the two glyph sets bracket it with
@@ -462,8 +465,6 @@ def _title_parts(caption: str, width: int, close: bool,
     """
     h = glyph("h" if double else "h1")
     box = glyph("close") if close else ""
-    if not caption:
-        return box + h * max(0, width - len(box)), 0, 0
     label = f"{glyph('lcap')} {caption} {glyph('rcap')}"
     if len(box) + len(label) + 2 > width:
         # No room to centre anything: keep the caption, lose the decoration.
@@ -472,11 +473,6 @@ def _title_parts(caption: str, width: int, close: bool,
     lead = max(1, (width - len(label)) // 2 - len(box))
     text = box + h * lead + label
     return (text + h * max(0, width - len(text)), len(box) + lead, len(label))
-
-
-def frame_title(caption: str, width: int, close: bool = True) -> str:
-    """The text of a window's top border: close box, then ``╡ caption ╞``."""
-    return _title_parts(caption, width, close, True)[0]
 
 
 def frame(win, y: int, x: int, height: int, width: int, role: str,

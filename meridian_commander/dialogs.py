@@ -284,10 +284,13 @@ NEXT_MENU = "<next>"
 
 
 def _first_selectable(items: list[dict], start: int, step: int) -> int:
-    """The next item that can hold the highlight, wrapping around."""
+    """The next item that can hold the highlight, wrapping around.
+
+    ``items`` is never empty -- :func:`dropdown` declines to open one that is
+    -- and ``start`` comes back unchanged when nothing in the menu can hold
+    the highlight at all.
+    """
     n = len(items)
-    if n == 0:
-        return 0
     i = start
     for _ in range(n):
         i = (i + step) % n

@@ -378,6 +378,19 @@ def test_a_list_longer_than_the_alphabet_runs_out_honestly():
     assert len(set(given)) == len(given)     # and never the same letter twice
 
 
+def test_a_dialog_over_a_screen_that_cannot_cast_a_shadow(monkeypatch):
+    """A stand-in screen has no cells to darken; the dialog still opens."""
+    class _Plain:
+        def getmaxyx(self):
+            return (24, 80)
+
+    def run(stdscr):
+        window = dialogs._center(_Plain(), 6, 20)
+        return window.getmaxyx()
+
+    assert with_curses_screen(24, 80, run) == (6, 20)
+
+
 # -- drop-down menus -----------------------------------------------------------
 
 def _dropdown(monkeypatch, items, keys, rows=24, cols=70):
@@ -457,6 +470,15 @@ def test_a_ticked_entry_is_marked(monkeypatch):
     _chosen, window = _dropdown(monkeypatch, ITEMS, [27])
     assert any(d[2] == theme.glyph("check") for d in window.drawn
                if len(d) > 2)
+
+
+def test_a_drop_down_of_nothing_but_dead_entries_still_opens(monkeypatch):
+    """Nothing can hold the highlight; the menu opens anyway and closes."""
+    dead = [{"label": "~D~elete", "name": "delete", "disabled": True},
+            {"sep": True}]
+    chosen, window = _dropdown(monkeypatch, dead, [27])
+    assert chosen is None
+    assert "Delete" in _text(window)
 
 
 def test_an_empty_drop_down_opens_nothing(monkeypatch):
