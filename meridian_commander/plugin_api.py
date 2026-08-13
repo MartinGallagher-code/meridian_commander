@@ -36,7 +36,10 @@ and implement ``draw()`` and ``handle_key()``.
 from __future__ import annotations
 
 import curses
+
 from dataclasses import dataclass
+
+from . import theme
 
 
 @dataclass
@@ -143,16 +146,22 @@ class PanePlugin:
 
     # -- small drawing helper -------------------------------------------------
     @staticmethod
-    def put(stdscr, y: int, x: int, w: int, text: str, attr: int = 0,
+    def put(stdscr, y: int, x: int, w: int, text: str, attr: int | None = None,
             pad: bool = True) -> None:
-        """Write ``text`` clipped to ``w`` columns, ignoring edge errors."""
+        """Write ``text`` clipped to ``w`` columns, ignoring edge errors.
+
+        With no attribute given the pane's own colours are used, so a plug-in
+        that just prints lines lands on the same blue field as a directory
+        listing rather than on whatever the terminal's default happens to be.
+        """
         if w <= 0:
             return
         s = text[:w]
         if pad:
             s = s.ljust(w)
         try:
-            stdscr.addstr(y, x, s, attr)
+            stdscr.addstr(y, x, s,
+                          theme.attr("panel") if attr is None else attr)
         except curses.error:
             pass
 
@@ -308,7 +317,7 @@ class InputOutputPlugin(PanePlugin):
     # -- drawing ----------------------------------------------------------------
     def draw(self, stdscr, y: int, x: int, h: int, w: int) -> None:
         title = f" [plugin] {self.name} "
-        self.put(stdscr, y, x, w, title, curses.A_REVERSE)
+        self.put(stdscr, y, x, w, title, theme.attr("keybar"))
 
         out_h = h - 5          # header, separator, 2 input rows, hint bar
         if out_h < 1:
@@ -323,7 +332,8 @@ class InputOutputPlugin(PanePlugin):
             self.put(stdscr, y + 1 + row, x, w, text)
 
         sep_y = y + 1 + out_h
-        self.put(stdscr, sep_y, x, w, "-" * w, curses.A_DIM)
+        self.put(stdscr, sep_y, x, w, theme.glyph("h1") * w,
+                 theme.attr("framenc"))
 
         # Input area: two rows, wrapping long input.
         avail = max(1, 2 * w - len(self.prompt) - 1)
@@ -338,8 +348,9 @@ class InputOutputPlugin(PanePlugin):
         cy, cx = (sep_y + 1, cur) if cur < w else (sep_y + 2, cur - w)
         if cx < w:
             ch = full[cur] if cur < len(full) else " "
-            self.put(stdscr, cy, x + cx, 1, ch, curses.A_REVERSE, pad=False)
+            self.put(stdscr, cy, x + cx, 1, ch, theme.attr("inputcursor"),
+                     pad=False)
 
         status = " working... " if self.busy else \
             " Enter run   Esc close   PgUp/PgDn scroll   Up/Down history "
-        self.put(stdscr, y + h - 1, x, w, status, curses.A_REVERSE)
+        self.put(stdscr, y + h - 1, x, w, status, theme.attr("keybar"))

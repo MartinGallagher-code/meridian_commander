@@ -11,6 +11,7 @@ from __future__ import annotations
 import curses
 import fnmatch
 
+from . import theme
 from .filesystems import DirEntry, FileSystem
 from .util import human_size, human_time, ljust
 
@@ -104,6 +105,7 @@ class FindBrowser:
 
     # -- drawing -------------------------------------------------------------
     def draw(self, win) -> None:
+        theme.background(win, "panel")
         win.erase()
         height, width = win.getmaxyx()
         body_h = height - 2
@@ -112,12 +114,7 @@ class FindBrowser:
         title = (f" Find '{self.pattern}': {len(self.matches)} match(es)"
                  f"{' (truncated)' if self.truncated else ''}"
                  f" under {self.fs.label()}:{self.root} ")
-        win.attrset(curses.A_REVERSE)
-        try:
-            win.addstr(0, 0, title.ljust(width)[:width])
-        except curses.error:
-            pass
-        win.attrset(curses.A_NORMAL)
+        theme.paint(win, 0, 0, title, "keybar", width)
 
         # Keep the cursor visible.
         if self.cursor < self.top:
@@ -135,22 +132,15 @@ class FindBrowser:
             time_s = human_time(entry.mtime)
             name_w = max(10, width - 24)
             line = f" {ljust(rel + marker, name_w)}{size_s:>7} {time_s[:12]:>12}"
-            attr = curses.A_REVERSE if idx == self.cursor else curses.A_NORMAL
-            if entry.is_dir:
-                attr |= curses.A_BOLD
-            try:
-                win.addstr(row + 1, 0, ljust(line, width), attr)
-            except curses.error:
-                pass
+            if idx == self.cursor:
+                role = "panelcursordir" if entry.is_dir else "panelcursor"
+            else:
+                role = "paneldir" if entry.is_dir else "panel"
+            theme.paint(win, row + 1, 0, line, role, width)
 
         hint = self.notice or \
             " Enter/g goto dir   v/F3 view   e/F4 edit   q/Esc close "
-        win.attrset(curses.A_REVERSE)
-        try:
-            win.addstr(height - 1, 0, f"{hint}".ljust(width)[:width])
-        except curses.error:
-            pass
-        win.attrset(curses.A_NORMAL)
+        theme.paint(win, height - 1, 0, hint, "keybar", width)
         win.noutrefresh()
 
     # -- main loop -------------------------------------------------------------

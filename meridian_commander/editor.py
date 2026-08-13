@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import curses
 
+from . import theme
 from .filesystems import FileSystem
 
 MAX_EDIT_BYTES = 8 * 1024 * 1024
@@ -165,6 +166,7 @@ class Editor:
 
     # -- rendering --------------------------------------------------------
     def draw(self, win) -> None:
+        theme.background(win, "edit")
         win.erase()
         height, width = win.getmaxyx()
         body_h = height - 2
@@ -172,9 +174,7 @@ class Editor:
         flag = "*" if self.dirty else " "
         ro = " [RO]" if self.readonly else ""
         title = f" Edit{ro}: {self.name} {flag}"
-        win.attrset(curses.A_REVERSE)
-        win.addstr(0, 0, title.ljust(width)[:width])
-        win.attrset(curses.A_NORMAL)
+        theme.paint(win, 0, 0, title, "keybar", width)
 
         # Keep the cursor on screen.
         if self.cy < self.top:
@@ -195,24 +195,14 @@ class Editor:
             y = row + 1
             if self.show_line_numbers:
                 num = str(idx + 1).rjust(gutter - 1)
-                win.attrset(curses.A_DIM)
-                win.addstr(y, 0, num + " ")
-                win.attrset(curses.A_NORMAL)
+                theme.paint(win, y, 0, num + " ", "editnum")
             line = self.lines[idx].expandtabs(4)
             visible = line[self.left : self.left + text_w]
-            try:
-                win.addstr(y, gutter, visible)
-            except curses.error:
-                pass
+            theme.paint(win, y, gutter, visible, "edit")
 
         hint = " F2/^S save  F10/^Q quit  ^Y/^K del-line  ^L numbers "
         status = self.message or hint
-        win.attrset(curses.A_REVERSE)
-        try:
-            win.addstr(height - 1, 0, status.ljust(width)[:width])
-        except curses.error:
-            pass
-        win.attrset(curses.A_NORMAL)
+        theme.paint(win, height - 1, 0, status, "keybar", width)
 
         # Position the hardware cursor.
         scr_y = self.cy - self.top + 1
@@ -306,14 +296,9 @@ class Editor:
     def _confirm_discard(self, win) -> bool:
         height, width = win.getmaxyx()
         prompt = " Unsaved changes. Discard? (y/n) "
-        win.attrset(curses.A_REVERSE)
-        try:
-            # Filling the last row writes into the bottom-right cell, which
-            # curses always refuses; the prompt is still readable without it.
-            win.addstr(height - 1, 0, prompt.ljust(width)[:width])
-        except curses.error:
-            pass
-        win.attrset(curses.A_NORMAL)
+        # Filling the last row writes into the bottom-right cell, which curses
+        # always refuses; the prompt is still readable without it.
+        theme.paint(win, height - 1, 0, prompt, "dialogerror", width)
         win.refresh()
         while True:
             k = win.getch()

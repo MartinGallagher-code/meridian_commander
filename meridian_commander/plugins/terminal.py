@@ -33,6 +33,7 @@ import shlex
 import signal
 import struct
 
+from .. import theme
 from ..plugin_api import PanePlugin
 
 SCROLLBACK = 2000
@@ -337,7 +338,7 @@ class TerminalPlugin(PanePlugin):
         fs = self.ctx.own_fs
         where = f"{fs.label()}:{self.ctx.own_path}"
         title = f" [terminal] {where} "
-        self.put(stdscr, y, x, w, title, curses.A_REVERSE)
+        self.put(stdscr, y, x, w, title, theme.attr("keybar"))
 
         visible = self.term.visible(rows, self.scroll)
         pad = rows - len(visible)
@@ -351,7 +352,7 @@ class TerminalPlugin(PanePlugin):
             footer = f" scrollback ({self.scroll} lines back)  PgDn: forward "
         else:
             footer = " Ctrl-] switch pane   F10 close   PgUp/PgDn scroll "
-        self.put(stdscr, y + h - 1, x, w, footer, curses.A_REVERSE)
+        self.put(stdscr, y + h - 1, x, w, footer, theme.attr("keybar"))
 
         if not self.status and self.scroll == 0 and visible:
             # Draw the cursor as a reverse cell on the last rendered row.
@@ -359,7 +360,8 @@ class TerminalPlugin(PanePlugin):
             cx = x + min(self.term.col, w - 1)
             line = visible[-1]
             ch = line[self.term.col] if self.term.col < len(line) else " "
-            self.put(stdscr, cy, cx, 1, ch, curses.A_REVERSE, pad=False)
+            self.put(stdscr, cy, cx, 1, ch, theme.attr("inputcursor"),
+                     pad=False)
 
     def _resize(self, rows: int, cols: int) -> None:
         if self._fd is not None:

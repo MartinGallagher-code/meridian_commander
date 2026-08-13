@@ -9,25 +9,46 @@
 
 *The meridian is noon — the other end of the clock from midnight.*
 
-A two-pane terminal file manager in the spirit of **Midnight Commander**,
-written in pure Python. It browses local **and networked** locations, copies and
-moves files between the two panes regardless of where each side lives,
-synchronizes directories so both panes hold the newest version of every file,
-and ships with a built-in file viewer and editor.
+A two-pane terminal file manager with the keys of **Midnight Commander** and
+the face of **Turbo Vision**, written in pure Python. It browses local **and
+networked** locations, copies and moves files between the two panes regardless
+of where each side lives, synchronizes directories so both panes hold the
+newest version of every file, and ships with a built-in file viewer and editor.
 
 ```
-+- local:/home/user ---------------+- sftp://me@server:/srv/www ------+
-| Name                Size  Modify | Name                Size  Modify |
-| ..                               | ..                               |
-| projects/          <DIR>  Jul 20 | assets/            <DIR>  Jul 19 |
-|*report.pdf          1.2M  Jul 21 | index.html          4.3K  Jul 18 |
-| notes.txt           842   Jul 22 | style.css           1.1K  Jul 18 |
-+----------------------------------+----------------------------------+
- F1 Help  F5 Copy  F6 Move  F9 Sync  F10 Quit
+  ≡  File  Command  Options  Help                                    14:06
+╔══[■]═╡ local:/home/user ╞═══════╗┌──╡ sftp://me@server:/srv/www ╞───┐
+║ Name                Size  Modify║│ Name                Size  Modify │
+║ ..                <DIR>       ..▲│ ..                <DIR>       .. ▲
+║ projects/         <DIR> Jul 20 ..█│ assets/           <DIR> Jul 19 ..░
+║*report.pdf         1.2M Jul 21 ..░│ index.html        4.3K Jul 18 ..░
+║ notes.txt           842 Jul 22 ..░│ style.css         1.1K Jul 18 ..▼
+╚═╡ 1 tagged, 1.2M ╞══════════════╝└─╡ 12 items ╞──────────────────────┘
+░Esc menu   Tab switch pane   F1 Help   F9 Sync   F10 Quit░░░░░░░░░░░░░░
+1Help  2Conn  3View  4Edit  5Copy  6Move  7Mkdir 8Del   9Sync  10Quit
 ```
+
+Yellow on Borland blue, grey chrome, a shaded desktop, double-line frames on
+the pane that has the keyboard and single on the one that does not, red
+accelerator letters, green buttons and drop shadows under every dialog — the
+1991 look, on a terminal that was not built in 1991.
 
 ## Features
 
+- **Turbo Vision looks** — a grey menu bar with a clock, a shaded blue desktop,
+  each pane a framed window (double-line for the active one, single for the
+  other) with its path in the caption and a scrollbar down its edge, dialogs in
+  grey with red accelerators, green buttons and drop shadows, and the F-key bar
+  along the bottom. Three schemes — `turbo` (Borland blue), `midnight` (black
+  ground) and `mono` — switch from **Options ▸ Colours**, and everything falls
+  back to plain attributes on a terminal with no colour and to ASCII frames on
+  one that cannot encode box-drawing characters. See
+  [Look and feel](#look-and-feel).
+- **A menu bar that reaches everything** — press `Esc` for the menus (or
+  `Alt+F`, `Alt+C`, `Alt+O`, `Alt+H`, or click one), arrow between them, and
+  pick an entry by its red letter. Every entry is something a key binding also
+  does, so the menu is a way to *find* the keys rather than a place features
+  hide.
 - **Two independent panes** — browse two locations side by side, `Tab` between
   them, and swap them with `Ctrl-U`.
 - **Home and mirror shortcuts** — `~` jumps a pane to its own home directory
@@ -736,6 +757,7 @@ workbook is refused outright rather than shown in part.
 | `Ctrl-U` | swap panes | `F9` | synchronize panes |
 | `Ctrl-R` | reload panes | `F10` | quit |
 | `Ctrl-G` | go to path | `Ctrl-T` | change sort order |
+| `Esc` | the menu bar | `Alt+F`/`C`/`O`/`H` | a menu by name |
 | `~` | home directory (this pane) | `=` | other pane: same location |
 | `b` | presets: saved locations | | |
 | `.` | show/hide hidden files | `t` | terminal inside this pane |
@@ -748,8 +770,12 @@ workbook is refused outright rather than shown in part.
 `v` view, `e` edit, `c` copy, `m` move, `d` delete, `s` sync, `q` quit.
 
 **Mouse**: click to select and focus a pane, double-click to open a
-file/directory, scroll wheel to move through the listing, and **right-click** for
-a context menu of actions.
+file/directory, scroll wheel to move through the listing, **click the menu bar**
+to open a menu, and **right-click** for a context menu of actions.
+
+In the **menus and dialogs**: `Tab`/arrows move, the red letter of a caption
+chooses it outright, `Enter` accepts and `Esc` closes. In a drop-down, `←`/`→`
+walk to the neighbouring menu without closing the bar.
 
 In the **viewer**: `/` (or F7) searches — smart case (a lowercase pattern is
 case-insensitive), matches highlighted, `n`/`N` next/previous with wrap-around;
@@ -867,14 +893,44 @@ and `self.print(...)` emits output at any time. The plug-in context is at
 `ctx.refresh_other()` give access to the opposite pane. For full control of
 drawing and keys, subclass `PanePlugin` instead.
 
+## Look and feel
+
+The screen is laid out the way a Borland IDE laid one out, and for the same
+reasons:
+
+| Part | What it is |
+| --- | --- |
+| Menu bar | Grey, along the top, with the clock in the corner. `Esc`, `Alt+`letter, or a click. |
+| Desktop | The shaded blue field the windows sit on (character `░`, as Turbo Vision used). |
+| Panes | Framed windows: double-line and a yellow caption for the pane with the keyboard, single and grey for the other. The path is the caption, what is tagged (or under the cursor) is the footer, and the scrollbar rides the right-hand frame. |
+| Listing | Directories white, symlinks cyan, tagged files yellow, the cursor a cyan bar. |
+| Dialogs | Grey, double-framed, `╡ captioned ╞`, with red accelerators, blue input fields, green buttons with their own shadow, and a drop shadow two columns right and one row down. |
+| Key bar | Grey, along the bottom, the F-keys and what they do. |
+
+`meridian_commander/theme.py` holds the whole palette: the sixteen EGA colours,
+a table of *roles* ("what colour is a dialog button"), and the drawing
+primitives — frames, shadows, scrollbars, hot-key captions — that everything
+else is built from. Three things follow from having it in one place:
+
+- **Schemes.** `turbo` is Turbo C++ 3.0; `midnight` keeps the chrome and puts
+  it on black; `mono` is the monochrome adapter. Switch with **Options ▸
+  Colours** (it is remembered in `config.ini`, `[ui] scheme`).
+- **No colour, no problem.** Every role carries a monochrome fallback, so a
+  terminal with no colour — or one that has run out of colour pairs — still
+  gets the shape of the screen: which strip is chrome, which row is the bar.
+- **ASCII frames when the encoding needs them.** The box-drawing characters are
+  used when the locale can encode them and `+-|` when it cannot. Set
+  `MERIDIAN_ASCII=1` to force the plain set on a terminal that claims UTF-8 and
+  then draws it badly.
+
 ## Configuration
 
 Press **`C`** for the configuration menu:
 
 - **Edit configuration** opens `~/.config/meridian-commander/config.ini` in the
-  built-in editor (created with commented defaults on first use). Plug-ins read
-  their settings from `[plugin:<name>]` sections; `[plugins] dirs` adds extra
-  plug-in directories.
+  built-in editor (created with commented defaults on first use). `[ui] scheme`
+  is the colour scheme; plug-ins read their settings from `[plugin:<name>]`
+  sections; `[plugins] dirs` adds extra plug-in directories.
 - **Edit a plug-in file** lists every discovered plug-in file (built-in and
   user) and opens the chosen one in the editor.
 - **Open user plug-in folder in this pane** jumps the pane to
@@ -976,8 +1032,9 @@ the sync engine are written once and work across any pair of backends.
 | `pdf.py` | PDF text extraction, page images, and the PDF browser |
 | `imageview.py` | colour quantising, half-block drawing, the image browser |
 | `termimage.py` | Sixel and kitty graphics: detection, encoding, placement |
-| `dialogs.py` | prompts, menus, confirmations, progress bars |
-| `app.py` | curses UI, key bindings, orchestration |
+| `theme.py` | the EGA palette, the role table, and the chrome: frames, shadows, scrollbars, buttons |
+| `dialogs.py` | prompts, menus, drop-downs, confirmations, progress bars |
+| `app.py` | curses UI, the menu bar, key bindings, orchestration |
 
 ## Utility scripts
 

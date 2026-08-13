@@ -112,8 +112,9 @@ def test_a_transfer_with_nothing_selected_does_nothing(app, tmp_path,
                                                        monkeypatch):
     app.left.move_to(0)                      # the ".." entry
     _ScriptedDialogs(monkeypatch)
+    opening = app.message
     app._copy()
-    assert app.message.startswith("F1/?")     # unchanged
+    assert app.message == opening             # unchanged
 
 
 def test_a_transfer_can_be_cancelled_at_the_prompt(app, tmp_path, monkeypatch):

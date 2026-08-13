@@ -740,13 +740,16 @@ def _mouse(monkeypatch, mx, my, bstate):
 
 @pytest.fixture
 def boxed(app):
-    """Give the app the pane rectangles draw() would have recorded."""
-    app._panel_boxes = [(app.left, 0, 0, 22, 39), (app.right, 0, 40, 22, 40)]
+    """Give the app the pane rectangles draw() would have recorded.
+
+    The panes start on row 1: row 0 belongs to the menu bar.
+    """
+    app._panel_boxes = [(app.left, 1, 0, 21, 40), (app.right, 1, 40, 21, 40)]
     return app
 
 
 def test_a_click_focuses_a_pane_and_moves_the_cursor(boxed, monkeypatch):
-    _mouse(monkeypatch, 41, 3, curses.BUTTON1_CLICKED)
+    _mouse(monkeypatch, 41, 4, curses.BUTTON1_CLICKED)
     boxed.handle_key(curses.KEY_MOUSE)
     assert boxed.active is boxed.right
     assert boxed.right.cursor == 1
@@ -768,21 +771,22 @@ def test_a_mouse_report_that_cannot_be_read_is_ignored(boxed, monkeypatch):
 
 def test_a_double_click_opens_the_entry(boxed, tmp_path, monkeypatch):
     row = _names(boxed.left).index("sub")
-    _mouse(monkeypatch, 5, 2 + row, curses.BUTTON1_DOUBLE_CLICKED)
+    _mouse(monkeypatch, 5, 3 + row, curses.BUTTON1_DOUBLE_CLICKED)
     boxed.handle_key(curses.KEY_MOUSE)
     assert boxed.left.path == str(tmp_path / "left" / "sub")
 
 
 def test_a_right_click_on_an_entry_opens_the_menu(boxed, monkeypatch):
     row = _names(boxed.left).index("file.txt")
-    _mouse(monkeypatch, 5, 2 + row, curses.BUTTON3_CLICKED)
+    _mouse(monkeypatch, 5, 3 + row, curses.BUTTON3_CLICKED)
     scripted = _ScriptedDialogs(monkeypatch, menu=[None])
     boxed.handle_key(curses.KEY_MOUSE)
     assert scripted.menus
 
 
 def test_a_right_click_on_the_header_still_opens_the_menu(boxed, monkeypatch):
-    _mouse(monkeypatch, 5, 0, curses.BUTTON3_CLICKED)
+    """The pane's own caption row -- row 1, under the menu bar."""
+    _mouse(monkeypatch, 5, 1, curses.BUTTON3_CLICKED)
     scripted = _ScriptedDialogs(monkeypatch, menu=[None])
     boxed.handle_key(curses.KEY_MOUSE)
     assert scripted.menus
@@ -828,7 +832,7 @@ def test_a_plugin_that_fails_to_scroll_is_ignored(boxed, monkeypatch):
 
 
 def test_a_click_below_the_last_entry_selects_nothing(boxed, monkeypatch):
-    _mouse(monkeypatch, 5, 18, curses.BUTTON1_CLICKED)
+    _mouse(monkeypatch, 5, 19, curses.BUTTON1_CLICKED)
     before = boxed.left.cursor
     boxed.handle_key(curses.KEY_MOUSE)
     assert boxed.left.cursor == before
@@ -891,16 +895,30 @@ def test_main_copes_with_a_terminal_that_refuses_colour_and_mouse(monkeypatch):
 
     monkeypatch.setattr(curses, "wrapper", fake_wrapper)
     monkeypatch.setattr(app_mod, "App", _FakeApp)
-    for name in ("use_default_colors", "raw"):
-        monkeypatch.setattr(curses, name, lambda: None)
+    monkeypatch.setattr(curses, "raw", lambda: None)
     monkeypatch.setattr(curses, "has_colors", lambda: True)
     monkeypatch.setattr(curses, "start_color", lambda: None)
 
     def refuse(*args):
         raise curses.error("not supported")
 
+    # Even the terminal's own default colours are refused here, which is a
+    # thing an unusual terminfo entry does.
+    monkeypatch.setattr(curses, "use_default_colors", refuse)
     monkeypatch.setattr(curses, "init_pair", refuse)
     monkeypatch.setattr(curses, "mousemask", refuse)
+    assert main([]) == 0
+
+
+def test_main_copes_with_a_locale_the_system_will_not_set(monkeypatch):
+    """A container with no locales generated: the frames go ASCII, not away."""
+    import locale
+
+    def refuse(*args):
+        raise locale.Error("unsupported locale setting")
+
+    monkeypatch.setattr(locale, "setlocale", refuse)
+    monkeypatch.setattr(curses, "wrapper", lambda fn, args: None)
     assert main([]) == 0
 
 

@@ -21,10 +21,10 @@ from __future__ import annotations
 
 import curses
 
-from . import termimage
+from . import termimage, theme
 from .filesystems import FileSystem
 from .image import Image, ImageError, MAX_BYTES, decode
-from .util import ljust, truncate
+from .util import truncate
 
 #: Upper half block: foreground is the top pixel, background the bottom.
 HALF_BLOCK = "▀"
@@ -112,11 +112,11 @@ class Pairs:
     photograph is not worth refusing to draw over.
     """
 
-    def __init__(self, limit: int | None = None) -> None:
+    def __init__(self, limit: int | None = None, start: int = 1) -> None:
         self.limit = limit if limit is not None else getattr(
             curses, "COLOR_PAIRS", 256)
         self._pairs: dict[tuple[int, int], int] = {}
-        self._next = 1
+        self._next = start
         self.exhausted = False
 
     def get(self, fg: int, bg: int) -> int:
@@ -347,7 +347,9 @@ class ImageView:
             self._plan_graphics(width, body)
             return
         if self.pairs is None:
-            self.pairs = Pairs()
+            # Above the pairs the theme has already claimed: a photograph must
+            # not repaint the desktop it is being shown on.
+            self.pairs = Pairs(start=theme.next_free_pair())
         self.clamp(width, body)
         scale_w, scale_h = self.scaled(width, body)
         rows = sample(self.image, self.frame, scale_w, scale_h,
@@ -444,12 +446,7 @@ class ImageView:
             if self.image.reduced:
                 title += " shown at 1/8"
         title += " "
-        win.attrset(curses.A_REVERSE)
-        try:
-            win.addstr(0, 0, ljust(title, width))
-        except curses.error:
-            pass
-        win.attrset(curses.A_NORMAL)
+        theme.paint(win, 0, 0, title, "keybar", width)
 
     def _draw_footer(self, win, height: int, width: int) -> None:
         if self.notice:
@@ -480,12 +477,7 @@ class ImageView:
                 keys += "  [g]raphics"
             parts.append(f"{keys}  n/p frame  [q]uit")
             hint = "  ".join(parts)
-        win.attrset(curses.A_REVERSE)
-        try:
-            win.addstr(height - 1, 0, ljust(f" {hint} ", width))
-        except curses.error:
-            pass
-        win.attrset(curses.A_NORMAL)
+        theme.paint(win, height - 1, 0, f" {hint} ", "keybar", width)
 
     # -- interaction --------------------------------------------------------
     def run(self, stdscr) -> None:
