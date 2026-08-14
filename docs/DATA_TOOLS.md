@@ -238,5 +238,5 @@ You have a messy `sales.csv` and want per-region totals from clean, deduped data
    build> groupby region sum:amount   # -> *.groupby.csv with your totals
 ```
 
-See the main [README](../README.md#plug-ins) for the plug-in system in general
+See the [plug-ins page](plugins.md) for the plug-in system in general
 and how to write your own.
