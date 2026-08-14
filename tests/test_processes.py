@@ -56,6 +56,10 @@ def test_parse_skips_garbled_lines():
     assert [p.pid for p in procs] == [5]
 
 
+def test_parse_skips_lines_with_too_few_fields():
+    assert parse_ps("  12 root\n\n", RICH) == []
+
+
 def test_parse_accepts_a_decimal_comma():
     procs = parse_ps("  5 root 0,5 1,5 100 00:01 x\n", RICH)
     assert procs[0].cpu == 0.5
@@ -182,6 +186,13 @@ def test_a_failing_ps_shows_an_error_instead_of_crashing(local_ps):
     assert "ps: not found" in plugin.error
 
 
+def test_a_failing_remote_ps_shows_its_stderr():
+    client = _FakeSSHClient(ps_status=1)
+    plugin = ProcessesPlugin(_ctx("ssh", client))
+    assert plugin.view == []
+    assert "ps: bad column" in plugin.error
+
+
 def test_falls_back_to_the_minimal_column_set(monkeypatch):
     """A ps that rejects the rich columns still yields a listing."""
     calls = []
@@ -271,6 +282,28 @@ def test_backspace_and_ctrl_u_edit_the_filter(plugin):
     assert plugin.filter == ""
 
 
+def test_tab_still_switches_panes_while_filtering(plugin):
+    plugin.handle_key(ord("/"))
+    assert plugin.handle_key(9) is None
+    assert plugin.mode == "filter"
+
+
+def test_the_filter_prompt_and_status_show_in_the_footer(plugin):
+    plugin.handle_key(ord("/"))
+    plugin.handle_key(ord("a"))
+    assert plugin._footer() == " filter> a "
+    plugin.handle_key(10)
+    plugin.status = "sent SIGTERM to 5"
+    assert "SIGTERM" in plugin._footer()
+
+
+def test_the_refresh_key_reruns_ps(plugin, local_ps):
+    calls = local_ps()
+    before = len(calls)
+    plugin.handle_key(ord("r"))
+    assert len(calls) == before + 1
+
+
 # -- navigation and closing ----------------------------------------------------
 
 def test_navigation_keys_move_and_clamp(plugin):
@@ -327,6 +360,13 @@ def test_the_signal_menu(plugin, monkeypatch, key, sig):
     plugin.handle_key(ord("k"))
     plugin.handle_key(key)
     assert sent == [sig]
+
+
+def test_a_confirm_with_nothing_pending_is_a_no_op(plugin):
+    plugin.mode = "confirm"
+    plugin.pending = None
+    assert plugin.handle_key(10) is True
+    assert plugin.mode == "list"
 
 
 def test_escape_cancels_the_kill(plugin, monkeypatch):
@@ -417,15 +457,20 @@ def test_draw_scrolls_to_keep_the_cursor_visible(local_ps):
                      for pid in range(100, 140))
     local_ps(out=rows + "\n")
     plugin = ProcessesPlugin(_ctx("local"))
-    plugin.handle_key(curses.KEY_END)
 
     def paint(stdscr):
         plugin.draw(stdscr, 0, 0, 10, 60)
         return [stdscr.instr(r, 0, 60).decode(errors="replace")
                 for r in range(10)]
 
-    lines = with_curses_screen(24, 62, paint)
-    assert any(f"cmd{plugin.view[-1].pid}" in line for line in lines)
+    def render():
+        return with_curses_screen(24, 62, paint)
+
+    plugin.handle_key(curses.KEY_END)
+    assert any(f"cmd{plugin.view[-1].pid}" in line for line in render())
+    plugin.handle_key(curses.KEY_HOME)     # scrolls back up to the top
+    assert any(f"cmd{plugin.view[0].pid}" in line for line in render())
+    assert plugin.scroll == 0
 
 
 def test_draw_shows_the_error_when_there_is_nothing_to_list(local_ps):

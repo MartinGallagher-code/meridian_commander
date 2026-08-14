@@ -324,10 +324,7 @@ class ProcessesPlugin(PanePlugin):
         elif key == 9:
             return None
         elif 32 <= key < 0x110000:
-            try:
-                self.filter += chr(key)
-            except ValueError:
-                return True
+            self.filter += chr(key)
             self._rebuild_view()
         return True
 
