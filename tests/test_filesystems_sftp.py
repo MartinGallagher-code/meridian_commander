@@ -335,6 +335,22 @@ def test_a_failed_connection_becomes_a_filesystem_error(monkeypatch, tmp_path):
                          config_path=str(tmp_path / "absent"))
 
 
+def test_a_legacy_key_error_becomes_an_actionable_message(monkeypatch, tmp_path):
+    def refuse(res, password, sock):
+        raise ValueError(
+            "error:0308010C:digital envelope routines::unsupported")
+
+    monkeypatch.setattr(fsmod, "_connect_resolved", refuse)
+    with pytest.raises(FileSystemError) as info:
+        _open_ssh_client("web1", "deploy", None, 22,
+                         config_path=str(tmp_path / "absent"))
+    message = str(info.value)
+    # The remedy is named, and the raw OpenSSL text is kept for the record.
+    assert "legacy format" in message
+    assert "ssh-keygen -p" in message
+    assert "digital envelope routines" in message
+
+
 def test_a_proxy_command_is_wired_into_the_connection(monkeypatch, tmp_path):
     import paramiko
 

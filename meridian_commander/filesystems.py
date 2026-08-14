@@ -393,6 +393,31 @@ def _resolve_ssh_connection(
 _MAX_JUMPS = 5
 
 
+def _connect_error_message(host: str, exc: Exception) -> str:
+    """Turn a paramiko/OpenSSL connect failure into something actionable.
+
+    OpenSSL 3.0 moved a raft of legacy ciphers and KDFs into a provider that
+    is not loaded by default, so a private key saved in the old PEM format
+    (``-----BEGIN RSA PRIVATE KEY-----`` with ``Proc-Type``/``DEK-Info``)
+    fails to decrypt with the infamous, opaque
+
+        error:0308010C:digital envelope routines::unsupported
+
+    The remedy has nothing to do with the server or the network, so pointing
+    the user at it beats echoing the raw string: re-save the key in the modern
+    OpenSSH format, which uses a cipher OpenSSL still ships by default.
+    """
+    text = str(exc)
+    if "digital envelope routines" in text.lower():
+        return (
+            f"Could not connect to {host}: a private key is in a legacy "
+            "format OpenSSL 3.0 no longer loads by default "
+            f"({text}). Re-save it in the modern OpenSSH format with "
+            "'ssh-keygen -p -f <keyfile>' and try again."
+        )
+    return f"Could not connect to {host}: {exc}"
+
+
 def _parse_jump_spec(spec: str) -> list[tuple[str | None, str, int | None]]:
     """Parse a ProxyJump value into ``(user, host, port)`` hops.
 
@@ -557,7 +582,7 @@ def _open_ssh_client(
     except Exception as exc:
         for c in jump_clients:
             _close_ssh_client(c)
-        raise FileSystemError(f"Could not connect to {host}: {exc}") from exc
+        raise FileSystemError(_connect_error_message(host, exc)) from exc
     # The tunnel lives only while the jump clients do; tie their lifetime to
     # this client so _close_ssh_client tears the whole chain down.
     client._mc_jump_clients = jump_clients
