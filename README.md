@@ -4,8 +4,10 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/meridian-commander)](https://pypi.org/project/meridian-commander/)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 [![CI](https://github.com/MartinGallagher-code/meridian_commander/actions/workflows/publish.yml/badge.svg)](https://github.com/MartinGallagher-code/meridian_commander/actions/workflows/publish.yml)
+[![Documentation](https://app.readthedocs.org/projects/meridian-commander/badge/?version=latest)](https://meridian-commander.readthedocs.io/en/latest/)
 
 **Website:** <https://martingallagher-code.github.io/meridian_commander/> — screenshots and a tour.
+**Manual:** <https://meridian-commander.readthedocs.io/> — installation, tutorials and the plug-in API reference.
 
 *The meridian is noon — the other end of the clock from midnight.*
 
