@@ -414,10 +414,10 @@ def test_the_plugin_menu_offers_a_letter_per_plugin(app, monkeypatch):
     assert keys[-1] == "c"
     letters = [k for k in keys if k]
     assert len(letters) == len(set(letters))
-    # Find in other pane gets its own initial, like a preset does.
+    # A plug-in with a unique initial gets it, like a preset does.
     title, options = scripted.menus[0]
-    find_row = next(i for i, o in enumerate(options) if "Find in other pane" in o)
-    assert keys[find_row] == "f"
+    disk_row = next(i for i, o in enumerate(options) if "Disk usage" in o)
+    assert keys[disk_row] == "d"
     app.left.plugin = None
 
 

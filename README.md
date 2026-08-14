@@ -862,6 +862,32 @@ Built-in plug-ins:
   regular expression, reporting `path:line: match`. Binary files are skipped
   and each file is scanned up to a byte cap, so it works on remote panes
   without dragging whole trees across the wire.
+- **Compare panes** — the *seeing* half of synchronising: diff this pane's tree
+  against the other's and list every path that is only-left, only-right, or
+  differs (by name+size+time, or `hash` to compare contents byte-for-byte).
+  Reuses the same tree index the `s` sync does, so "left"/"right" mean the same.
+- **Disk usage** — an `ncdu`-lite: size each item under the other pane,
+  biggest-first with a bar, using only `listdir`/`stat` so it measures a
+  remote pane as readily as a local one.
+- **Find duplicates** — group files with identical contents under the other
+  pane. Files are bucketed by size first and only same-size suspects are
+  hashed, so a mostly-unique tree is sorted out without reading much; the
+  summary says how much space the duplicates waste.
+- **Normalise text** — the batch-edit cousin of the CSV cleaners, for plain
+  text: fix line endings (`lf`/`crlf`), expand tabs (`untabs [n]`), strip
+  trailing whitespace (`trim`) or the final newline (`finalnl`) across tagged
+  files, in place, with `preview`. Binary files are left untouched.
+- **Tail file** — play a file into the output area, once (`tail <file> [n]`) or
+  streaming as it grows (`follow`, like `tail -f`), from whichever pane it
+  lives on. Only the trailing window is held in memory, and a rotated file is
+  noticed.
+- **Inspect file** — identify the file under the other pane's cursor from its
+  magic bytes (PNG, PDF, ELF, gzip, …), show its size, and give a classic
+  offset/hex/ASCII dump of the start. Handy for a file with no extension.
+- **Git** — a small git client for a local pane's repository: `status`, `log`,
+  `diff`, `add`, `unstage`, `branch` and `commit`. Network commands
+  (`push`/`pull`) are left out so a line-oriented plug-in can't block on a
+  credential prompt — use the shell (`!`) for those.
 - **Multi-rename** — the bulk cousin of the `R` key: rename the other pane's
   tagged files by one rule — `replace OLD NEW`, `prefix`, `suffix`, `case
   lower|upper|title`, or a `number {n:03}-{name}.{ext}` template. Prefix a rule

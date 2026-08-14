@@ -24,6 +24,23 @@ still switches panes while a plug-in is open.
   search the other pane's *files* for text (case-insensitive) or a `re:`
   regular expression, reporting `path:line: match`. Skips binary files and
   works on remote panes too.
+- **Compare panes** — diff this pane's directory tree against the other's,
+  listing what is only-left, only-right, or differs (by name+size+time, or
+  `hash` to compare contents). The *seeing* half of the `s` sync.
+- **Disk usage** — size each item under the other pane, biggest-first with a
+  bar (an `ncdu`-lite); works over SFTP/SSH too.
+- **Find duplicates** — group files with identical contents under the other
+  pane (size buckets first, then hash to confirm), and say how much is
+  recoverable.
+- **Normalise text** — batch-fix line endings (`lf`/`crlf`), tabs (`untabs`),
+  trailing space (`trim`) and final newline in the other pane's tagged files,
+  with `preview`.
+- **Tail file** — show the end of a file, once (`tail`) or streaming as it
+  grows (`follow`, like `tail -f`), from whichever pane it lives on.
+- **Inspect file** — identify the other pane's cursor file from its magic
+  bytes and show an offset/hex/ASCII dump of its start.
+- **Git** — status, log, diff, add, unstage, branch and commit in a local
+  pane's repository (no network commands, so it can't block on a prompt).
 - **Multi-rename** — rename the other pane's tagged files in bulk by one rule:
   `replace`, `prefix`, `suffix`, `case` or a `number` template. Prefix a rule
   with `preview` to see the mapping first; a rule that would collide two names
