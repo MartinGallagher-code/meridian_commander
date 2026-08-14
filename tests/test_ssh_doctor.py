@@ -86,6 +86,16 @@ def test_list_when_all_keys_are_modern(ssh_home, data_ctx):
     assert "All keys are in a format OpenSSL 3.0 loads." in "\n".join(plugin.output)
 
 
+def test_list_skips_subdirectories(ssh_home, data_ctx):
+    d, _ = ssh_home
+    _key(d, "id_ed25519", MODERN)
+    (d / "control-sockets").mkdir()             # a non-file entry is passed over
+    plugin = SshDoctor(_ctx(data_ctx))
+    out = "\n".join(plugin.output)
+    assert "id_ed25519" in out
+    assert "control-sockets" not in out
+
+
 def test_list_with_no_keys(ssh_home, data_ctx):
     d, _ = ssh_home
     out = "\n".join(SshDoctor(_ctx(data_ctx)).output)
@@ -178,3 +188,118 @@ def test_convert_restores_the_backup_when_ssh_keygen_fails(ssh_home, data_ctx,
 
 def test_unknown_command(ssh_home, data_ctx):
     assert "unknown command" in SshDoctor(_ctx(data_ctx)).process("wobble")
+
+
+# -- more listing branches -----------------------------------------------------
+
+def test_ssh_dir_points_into_home():
+    assert ssh_doctor.ssh_dir().endswith("/.ssh")
+
+
+def test_list_command_rescans(ssh_home, data_ctx):
+    d, _ = ssh_home
+    _key(d, "id_ed25519", MODERN)
+    out = "\n".join(SshDoctor(_ctx(data_ctx)).process("list"))
+    assert "id_ed25519" in out
+
+
+def test_list_when_the_directory_cannot_be_listed(ssh_home, data_ctx, monkeypatch):
+    monkeypatch.setattr(ssh_doctor.os, "listdir",
+                        lambda p: (_ for _ in ()).throw(OSError("denied")))
+    out = "\n".join(SshDoctor(_ctx(data_ctx)).output)
+    assert "No private keys found" in out
+
+
+def test_list_skips_a_key_it_cannot_read(ssh_home, data_ctx, monkeypatch):
+    d, _ = ssh_home
+    _key(d, "id_rsa", LEGACY_ENC)
+    real_open = open
+
+    def picky(path, *a, **k):
+        if str(path).endswith("/id_rsa"):
+            raise OSError("denied")
+        return real_open(path, *a, **k)
+
+    monkeypatch.setattr("builtins.open", picky)
+    out = "\n".join(SshDoctor(_ctx(data_ctx)).output)
+    assert "No private keys found" in out   # the one key was unreadable, skipped
+
+
+# -- more convert branches -----------------------------------------------------
+
+def test_convert_reports_a_read_error(ssh_home, data_ctx, monkeypatch):
+    d, _ = ssh_home
+    _key(d, "id_rsa", LEGACY_PLAIN)
+    plugin = SshDoctor(_ctx(data_ctx))   # constructed while the key is readable
+    real_open = open
+
+    def picky(path, *a, **k):
+        if str(path).endswith("/id_rsa"):
+            raise OSError("denied")
+        return real_open(path, *a, **k)
+
+    monkeypatch.setattr("builtins.open", picky)
+    assert "Could not read id_rsa" in plugin.process("convert id_rsa")
+
+
+def test_convert_of_a_non_key(ssh_home, data_ctx):
+    d, _ = ssh_home
+    (d / "random").write_text("not a key at all\n")
+    out = SshDoctor(_ctx(data_ctx)).process("convert random")
+    assert "does not look like a private key" in out
+
+
+def test_convert_reports_a_backup_failure(ssh_home, data_ctx, monkeypatch):
+    import shutil
+
+    d, _ = ssh_home
+    _key(d, "id_rsa", LEGACY_PLAIN)
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(shutil, "copy2", boom)
+    assert "Could not back up id_rsa" in SshDoctor(_ctx(data_ctx)).process(
+        "convert id_rsa")
+
+
+def test_convert_when_ssh_keygen_cannot_run(ssh_home, data_ctx, monkeypatch):
+    d, _ = ssh_home
+    _key(d, "id_rsa", LEGACY_PLAIN)
+    monkeypatch.setattr(ssh_doctor, "_run",
+                        lambda argv: (None, "", "ssh-keygen not found"))
+    out = SshDoctor(_ctx(data_ctx)).process("convert id_rsa")
+    assert "Could not run ssh-keygen" in out
+    assert (d / "id_rsa").read_text() == LEGACY_PLAIN   # restored from backup
+    assert not (d / "id_rsa.bak").exists()
+
+
+# -- the subprocess wrapper and restore, exercised directly --------------------
+
+def test_run_executes_a_command():
+    rc, out, err = ssh_doctor._run(["echo", "hi"])
+    assert rc == 0
+    assert out.strip() == "hi"
+
+
+def test_run_reports_a_missing_binary():
+    rc, out, err = ssh_doctor._run(["definitely-not-a-real-binary-xyz"])
+    assert rc is None
+    assert "not found" in err
+
+
+def test_run_reports_a_non_executable_target(tmp_path):
+    # Executing a directory raises an OSError that is not FileNotFoundError.
+    rc, out, err = ssh_doctor._run([str(tmp_path)])
+    assert rc is None
+    assert err
+
+
+def test_restore_tolerates_a_move_failure(monkeypatch):
+    import shutil
+
+    def boom(*a, **k):
+        raise OSError("no")
+
+    monkeypatch.setattr(shutil, "move", boom)
+    ssh_doctor._restore("a", "b")   # must not raise

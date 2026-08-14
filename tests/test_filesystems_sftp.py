@@ -456,6 +456,69 @@ def test_pin_policy_records_a_new_host_and_saves_it(monkeypatch):
     assert saved["saved"] == "/somewhere/known_hosts"
 
 
+def test_user_known_hosts_points_into_dot_ssh():
+    assert fsmod._user_known_hosts().endswith("/.ssh/known_hosts")
+
+
+def test_pin_policy_without_a_known_hosts_file_only_records_in_memory():
+    import paramiko
+
+    added = {}
+
+    class _HostKeys:
+        def add(self, hostname, keytype, key):
+            added["key"] = (hostname, keytype)
+
+    class _Client:
+        _host_keys_filename = None   # nowhere to save
+
+        def get_host_keys(self):
+            return _HostKeys()
+
+    class _Key:
+        def get_name(self):
+            return "ssh-ed25519"
+
+    policy = fsmod._pin_new_host_policy(paramiko)
+    policy.missing_host_key(_Client(), "h", _Key())   # returns without saving
+    assert added["key"] == ("h", "ssh-ed25519")
+
+
+def test_load_known_hosts_tolerates_a_failing_system_load(monkeypatch, tmp_path):
+    import paramiko
+
+    absent = tmp_path / "known_hosts"
+    monkeypatch.setattr(fsmod, "_user_known_hosts", lambda: str(absent))
+
+    class _Client:
+        def load_system_host_keys(self):
+            raise OSError("system file broken")
+
+    client = _Client()
+    fsmod._load_known_hosts(client, paramiko)
+    assert client._host_keys_filename == str(absent)
+
+
+def test_load_known_hosts_tolerates_a_failing_user_load(monkeypatch, tmp_path):
+    import paramiko
+
+    known = tmp_path / "known_hosts"
+    known.write_text("")                       # exists -> load_host_keys tried
+    monkeypatch.setattr(fsmod, "_user_known_hosts", lambda: str(known))
+
+    class _Client:
+        def load_system_host_keys(self):
+            pass
+
+        def load_host_keys(self, filename):
+            raise OSError("corrupt known_hosts")
+
+    client = _Client()
+    fsmod._load_known_hosts(client, paramiko)
+    # The load failed, but the file is still named as the write target.
+    assert client._host_keys_filename == str(known)
+
+
 def test_pin_policy_tolerates_an_unwritable_known_hosts(monkeypatch):
     import paramiko
 

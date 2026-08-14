@@ -273,6 +273,52 @@ def test_grep_reports_an_unreadable_directory(data_ctx, monkeypatch):
     assert any("permission denied" in line for line in plugin.output)
 
 
+def test_grep_needs_a_pattern_after_re(grep_ctx):
+    from meridian_commander.plugins.grep_files import GrepFiles
+
+    assert GrepFiles(grep_ctx).process("re:") == "Give a pattern after 're:'."
+
+
+def test_grep_respects_the_depth_cap(data_ctx, monkeypatch):
+    from meridian_commander.plugins.grep_files import GrepFiles
+
+    monkeypatch.setattr("meridian_commander.plugins.grep_files.MAX_DEPTH", 0)
+    ctx = data_ctx({"a/b/deep.txt": "hit"})
+    assert GrepFiles(ctx).process("hit") == "0 match(es)"
+
+
+def test_grep_reports_a_file_it_cannot_open(data_ctx, monkeypatch):
+    from meridian_commander.plugins.grep_files import GrepFiles
+
+    ctx = data_ctx({"a.txt": "x"})
+
+    def boom(path):
+        raise OSError("unreadable")
+
+    monkeypatch.setattr(ctx.other_fs, "open_read", boom)
+    plugin = GrepFiles(ctx)
+    plugin.process("x")
+    assert any("unreadable" in line for line in plugin.output)
+
+
+def test_grep_reports_a_file_that_fails_mid_read(data_ctx, monkeypatch):
+    from meridian_commander.plugins.grep_files import GrepFiles
+
+    ctx = data_ctx({"a.txt": "x"})
+
+    class _Stream:
+        def read(self, n):
+            raise OSError("read blew up")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(ctx.other_fs, "open_read", lambda p: _Stream())
+    plugin = GrepFiles(ctx)
+    plugin.process("x")
+    assert any("read blew up" in line for line in plugin.output)
+
+
 # -- profile -------------------------------------------------------------------
 
 def test_profile_reports_shape_types_and_stats(data_ctx):

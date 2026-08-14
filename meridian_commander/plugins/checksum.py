@@ -17,35 +17,16 @@ does by hand.
 
 from __future__ import annotations
 
-import hashlib
-
+from . import _io
 from ..plugin_api import InputOutputPlugin
 
 ALGORITHMS = ("md5", "sha1", "sha256", "sha512")
 DEFAULT_ALGO = "sha256"
-CHUNK = 64 * 1024
 #: A sums file may be large-ish, but a runaway is still capped.
 MAX_SUMS_BYTES = 16 * 1024 * 1024
 
-
-def hash_stream(fs, path: str, algo: str) -> str:
-    """The hex digest of ``path`` under ``algo``, read in bounded chunks."""
-    digest = hashlib.new(algo)
-    stream = fs.open_read(path)
-    try:
-        while True:
-            chunk = stream.read(CHUNK)
-            if not chunk:
-                break
-            digest.update(chunk)
-    finally:
-        close = getattr(stream, "close", None)
-        if callable(close):
-            try:
-                close()
-            except Exception:
-                pass
-    return digest.hexdigest()
+#: Hash a file through the shared, backend-agnostic helper.
+hash_stream = _io.hash_file
 
 
 class Checksum(InputOutputPlugin):
@@ -116,16 +97,7 @@ class Checksum(InputOutputPlugin):
 
         out_path = fs.join(root, name)
         data = ("\n".join(body) + "\n").encode("utf-8")
-        stream = fs.open_write(out_path)
-        try:
-            stream.write(data)
-        finally:
-            close = getattr(stream, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except Exception:
-                    pass
+        _io.write_bytes(fs, out_path, data)
         try:
             self.ctx.refresh_other()
         except Exception:
@@ -138,7 +110,8 @@ class Checksum(InputOutputPlugin):
         fs, root = self.ctx.other_fs, self.ctx.other_path
         sums_path = fs.join(root, name)
         try:
-            text = self._read_text(fs, sums_path)
+            raw_bytes, _ = _io.read_bytes(fs, sums_path, max_bytes=MAX_SUMS_BYTES)
+            text = raw_bytes.decode("utf-8", errors="replace")
         except Exception as exc:
             return f"Could not read {name}: {exc}"
 
@@ -176,27 +149,6 @@ class Checksum(InputOutputPlugin):
         if missing:
             summary += f", {missing} missing"
         return summary
-
-    @staticmethod
-    def _read_text(fs, path: str) -> str:
-        stream = fs.open_read(path)
-        chunks: list[bytes] = []
-        total = 0
-        try:
-            while total < MAX_SUMS_BYTES:
-                chunk = stream.read(min(CHUNK, MAX_SUMS_BYTES - total))
-                if not chunk:
-                    break
-                chunks.append(chunk)
-                total += len(chunk)
-        finally:
-            close = getattr(stream, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except Exception:
-                    pass
-        return b"".join(chunks).decode("utf-8", errors="replace")
 
 
 #: Digest hex length -> algorithm, for reading a sums file back.

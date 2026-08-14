@@ -838,7 +838,9 @@ bindings, add this to your VS Code `settings.json`:
 ## Plug-ins
 
 Press **`p`** (or F11) to put the active pane into **plug-in mode**: a menu
-lists the discovered plug-ins and the chosen one takes over that pane. The
+lists the discovered plug-ins and the chosen one takes over that pane. Each
+entry answers to a letter (as the presets menu does), so opening a plug-in is
+`p` then a single keystroke once the list is familiar. The
 plug-in can see the **opposite pane** — its filesystem (local or remote), its
 directory and entries — so it can do work on whatever you have open next to it.
 `Esc` closes the plug-in and returns the pane to its file listing; `Tab` still

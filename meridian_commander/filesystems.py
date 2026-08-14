@@ -502,10 +502,7 @@ def _load_known_hosts(client, paramiko) -> None:
         except Exception:
             pass
     # Absent or unreadable: still designate it as where new keys get saved.
-    try:
-        client._host_keys_filename = path
-    except Exception:
-        pass
+    client._host_keys_filename = path
 
 
 def _connect_resolved(res: dict, password: str | None, sock):

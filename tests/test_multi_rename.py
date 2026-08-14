@@ -32,6 +32,7 @@ def test_rename_one_rules(name, verb, args, index, expected):
 @pytest.mark.parametrize("verb, args, message", [
     ("replace", ["only"], "usage: replace"),
     ("prefix", [], "usage: prefix"),
+    ("suffix", [], "usage: suffix"),
     ("case", ["sideways"], "usage: case"),
     ("number", ["a", "b"], "usage: number"),
     ("wobble", [], "unknown verb"),
@@ -61,6 +62,11 @@ def test_greeting_lists_the_tagged_files(data_ctx):
 def test_empty_input_does_nothing(data_ctx):
     ctx = data_ctx({"a.txt": "1"}, selected={"a.txt"})
     assert MultiRename(ctx).process("") is None
+
+
+def test_process_rejects_an_unknown_verb(data_ctx):
+    ctx = data_ctx({"a.txt": "1"}, selected={"a.txt"})
+    assert "unknown verb" in MultiRename(ctx).process("wobble x")
 
 
 def test_needs_a_tagged_file(data_ctx):

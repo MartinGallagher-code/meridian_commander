@@ -23,6 +23,7 @@ import tarfile
 import time
 import zipfile
 
+from . import _io
 from ..plugin_api import InputOutputPlugin
 from ..util import human_size
 
@@ -75,16 +76,7 @@ class MakeArchive(InputOutputPlugin):
                          entry, members)
 
         data = self._pack(kind, members)
-        stream = fs.open_write(out_path)
-        try:
-            stream.write(data)
-        finally:
-            close = getattr(stream, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except Exception:
-                    pass
+        _io.write_bytes(fs, out_path, data)
 
         try:
             self.ctx.refresh_other()
@@ -106,31 +98,12 @@ class MakeArchive(InputOutputPlugin):
                              f"{arcname}/{child.name}", child, members)
             return
         try:
-            payload = self._read(fs, path)
+            payload, _ = _io.read_bytes(fs, path)
         except Exception as exc:
             self.print(f"  ! {arcname}: {exc}")
             return
         members.append((arcname, payload, entry.mtime))
         self.print(f"  + {arcname}")
-
-    @staticmethod
-    def _read(fs, path) -> bytes:
-        stream = fs.open_read(path)
-        chunks: list[bytes] = []
-        try:
-            while True:
-                chunk = stream.read(64 * 1024)
-                if not chunk:
-                    break
-                chunks.append(chunk)
-        finally:
-            close = getattr(stream, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except Exception:
-                    pass
-        return b"".join(chunks)
 
     @staticmethod
     def _pack(kind: str, members) -> bytes:

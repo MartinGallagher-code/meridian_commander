@@ -85,6 +85,16 @@ def test_a_directory_in_the_selection_is_ignored(data_ctx):
     assert "a.txt" in out and "  d" not in out
 
 
+def test_hash_reports_a_file_error(data_ctx, monkeypatch):
+    ctx = data_ctx({"a.txt": "1"}, selected={"a.txt"})
+
+    def boom(path):
+        raise OSError("nope")
+
+    monkeypatch.setattr(ctx.other_fs, "open_read", boom)
+    assert "! a.txt: nope" in _run(ctx, "sha256")
+
+
 # -- write ---------------------------------------------------------------------
 
 def test_write_produces_a_sums_file(data_ctx, tmp_path):
@@ -103,6 +113,21 @@ def test_write_takes_an_algorithm_and_a_name(data_ctx, tmp_path):
     assert "Wrote sums.txt (1 file(s), md5)" in out
     written = (tmp_path / "data" / "sums.txt").read_text()
     assert hashlib.md5(b"hello").hexdigest() in written
+
+
+def test_write_reports_errors_and_writes_nothing_when_all_fail(data_ctx,
+                                                               monkeypatch,
+                                                               tmp_path):
+    ctx = data_ctx({"a.txt": "1"}, selected={"a.txt"})
+
+    def boom(path):
+        raise OSError("nope")
+
+    monkeypatch.setattr(ctx.other_fs, "open_read", boom)
+    plugin = Checksum(ctx)
+    assert plugin.process("write") == "Nothing hashed; wrote no sums file."
+    assert any("! a.txt: nope" in line for line in plugin.output)
+    assert not (tmp_path / "data" / "SHA256SUMS").exists()
 
 
 # -- verify --------------------------------------------------------------------
@@ -140,6 +165,37 @@ def test_verify_detects_the_algorithm_from_the_digest_length(data_ctx):
 def test_verify_reports_a_missing_sums_file(data_ctx):
     ctx = data_ctx({"a.txt": "1"})
     assert "Could not read SHA256SUMS" in Checksum(ctx).process("verify")
+
+
+def test_verify_skips_blank_and_comment_lines(data_ctx):
+    sums = f"# a comment\n\n{_sha256('hi')}  a.txt\n"
+    ctx = data_ctx({"a.txt": "hi", "SHA256SUMS": sums})
+    assert Checksum(ctx).process("verify") == "1 OK"
+
+
+def test_verify_flags_an_unrecognised_hash_length(data_ctx):
+    ctx = data_ctx({"a.txt": "hi", "SHA256SUMS": "abc123  a.txt\n"})
+    plugin = Checksum(ctx)
+    summary = plugin.process("verify")
+    assert any("unrecognised hash length" in line for line in plugin.output)
+    assert summary == "0 OK"
+
+
+def test_verify_reports_a_file_that_fails_to_hash(data_ctx, monkeypatch):
+    sums = f"{_sha256('hi')}  a.txt\n"
+    ctx = data_ctx({"a.txt": "hi", "SHA256SUMS": sums})
+    real_open = ctx.other_fs.open_read
+
+    def boom(path):
+        if path.endswith("/a.txt"):
+            raise OSError("io error")
+        return real_open(path)
+
+    monkeypatch.setattr(ctx.other_fs, "open_read", boom)
+    plugin = Checksum(ctx)
+    summary = plugin.process("verify")
+    assert any("! a.txt: io error" in line for line in plugin.output)
+    assert "FAILED" in summary
 
 
 def test_survives_a_pane_that_cannot_refresh(data_ctx, monkeypatch):

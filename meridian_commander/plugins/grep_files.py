@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 
+from . import _io
 from ..plugin_api import InputOutputPlugin
 
 MAX_RESULTS = 500      # matching lines shown before the search stops
@@ -126,10 +127,5 @@ class GrepFiles(InputOutputPlugin):
             self.print(f"  ! {path}: {exc}")
             return None, False
         finally:
-            close = getattr(stream, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except Exception:
-                    pass
+            _io.close(stream)
         return b"".join(chunks).decode("utf-8", errors="replace"), truncated

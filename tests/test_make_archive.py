@@ -101,6 +101,27 @@ def test_an_existing_archive_is_not_clobbered(data_ctx, tmp_path):
     assert (tmp_path / "data" / "pack.zip").read_text() == "OLD"
 
 
+def test_numbering_steps_past_several_existing_archives(data_ctx, tmp_path):
+    ctx = data_ctx({"a.txt": "1", "pack.zip": "x", "pack2.zip": "y"},
+                   selected={"a.txt"})
+    assert "Wrote pack3.zip" in _run(ctx, "zip pack")
+
+
+def test_an_unreadable_directory_is_reported_and_skipped(data_ctx, monkeypatch):
+    ctx = data_ctx({"d/inner.txt": "x"}, selected={"d"})
+    real_listdir = ctx.other_fs.listdir
+
+    def selective(path):
+        if path.endswith("/d"):
+            raise PermissionError("denied")
+        return real_listdir(path)
+
+    monkeypatch.setattr(ctx.other_fs, "listdir", selective)
+    plugin = MakeArchive(ctx)
+    plugin.process("zip pack")
+    assert any("! d: denied" in line for line in plugin.output)
+
+
 def test_a_read_error_is_reported_and_skips_the_file(data_ctx, tmp_path, monkeypatch):
     ctx = data_ctx({"a.txt": "1", "b.txt": "2"}, selected={"a.txt", "b.txt"})
     real_open = ctx.other_fs.open_read

@@ -1,7 +1,10 @@
 # Plug-ins
 
 Press **`p`** (or F11) to put the active pane into **plug-in mode**: a menu
-lists the discovered plug-ins and the chosen one takes over that pane. The
+lists the discovered plug-ins and the chosen one takes over that pane. Each
+plug-in answers to a letter in that menu (just like the presets menu), so once
+the list is familiar, opening one is `p` then a single keystroke rather than a
+walk down the list. The
 plug-in can see the **opposite pane** — its filesystem (local or remote), its
 directory and entries — so it can do work on whatever you have open next to
 it. `Esc` closes the plug-in and returns the pane to its file listing; `Tab`
