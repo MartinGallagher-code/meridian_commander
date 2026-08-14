@@ -393,6 +393,43 @@ def _resolve_ssh_connection(
 _MAX_JUMPS = 5
 
 
+def _connect_error_message(host: str, exc: Exception) -> str:
+    """Turn a paramiko/OpenSSL connect failure into something actionable.
+
+    OpenSSL 3.0 moved a raft of legacy ciphers and KDFs into a provider that
+    is not loaded by default, so a private key saved in the old PEM format
+    (``-----BEGIN RSA PRIVATE KEY-----`` with ``Proc-Type``/``DEK-Info``)
+    fails to decrypt with the infamous, opaque
+
+        error:0308010C:digital envelope routines::unsupported
+
+    The remedy has nothing to do with the server or the network, so pointing
+    the user at it beats echoing the raw string: re-save the key in the modern
+    OpenSSH format, which uses a cipher OpenSSL still ships by default.
+
+    A changed host key is the other failure worth naming rather than echoing:
+    it is exactly what host-key checking exists to catch, so we say what it
+    means and how to clear it once the change is understood to be legitimate.
+    """
+    if exc.__class__.__name__ == "BadHostKeyException":
+        hostname = getattr(exc, "hostname", host)
+        return (
+            f"Could not connect to {host}: the server's host key has CHANGED "
+            "since it was last trusted. The server may have been reinstalled -- "
+            "or the connection may be intercepted. If you trust the change, "
+            f"remove the old key with 'ssh-keygen -R {hostname}' and reconnect."
+        )
+    text = str(exc)
+    if "digital envelope routines" in text.lower():
+        return (
+            f"Could not connect to {host}: a private key is in a legacy "
+            "format OpenSSL 3.0 no longer loads by default "
+            f"({text}). Re-save it in the modern OpenSSH format with "
+            "'ssh-keygen -p -f <keyfile>' and try again."
+        )
+    return f"Could not connect to {host}: {exc}"
+
+
 def _parse_jump_spec(spec: str) -> list[tuple[str | None, str, int | None]]:
     """Parse a ProxyJump value into ``(user, host, port)`` hops.
 
@@ -414,13 +451,67 @@ def _parse_jump_spec(spec: str) -> list[tuple[str | None, str, int | None]]:
     return hops
 
 
+def _user_known_hosts() -> str:
+    """Path to the user's writable ``known_hosts`` (``~/.ssh/known_hosts``)."""
+    return os.path.expanduser("~/.ssh/known_hosts")
+
+
+def _pin_new_host_policy(paramiko):
+    """A missing-host-key policy that pins a *new* host, tolerating a read-only
+    ``known_hosts``.
+
+    It trusts a host the first time it is seen (like ``AutoAddPolicy``) and
+    records the key so a later *change* is caught and refused -- but, unlike
+    ``AutoAddPolicy``, a failure to write the file (missing ``~/.ssh``, a
+    read-only home) only means the key is not persisted, never that the
+    connection fails.  A host already known with a *different* key never reaches
+    this policy: paramiko raises ``BadHostKeyException`` before it is consulted.
+    """
+
+    class _PinNewHost(paramiko.MissingHostKeyPolicy):
+        def missing_host_key(self, client, hostname, key):
+            client.get_host_keys().add(hostname, key.get_name(), key)
+            filename = getattr(client, "_host_keys_filename", None)
+            if not filename:
+                return
+            try:
+                os.makedirs(os.path.dirname(filename), mode=0o700, exist_ok=True)
+                client.save_host_keys(filename)
+            except Exception:
+                pass  # unwritable known_hosts: pinned in memory only
+
+    return _PinNewHost()
+
+
+def _load_known_hosts(client, paramiko) -> None:
+    """Load system and user ``known_hosts``, and mark the user file writable.
+
+    Loading the user file is what lets paramiko notice a *changed* key; naming
+    it as the writable target is what lets a genuinely new key be pinned there.
+    A missing or unparsable file must not stop us connecting.
+    """
+    try:
+        client.load_system_host_keys()
+    except Exception:
+        pass
+    path = _user_known_hosts()
+    if os.path.exists(path):
+        try:
+            client.load_host_keys(path)   # loads it *and* marks it writable
+            return
+        except Exception:
+            pass
+    # Absent or unreadable: still designate it as where new keys get saved.
+    client._host_keys_filename = path
+
+
 def _connect_resolved(res: dict, password: str | None, sock):
     """Connect a paramiko SSHClient to an already-resolved destination."""
     import paramiko
 
     client = paramiko.SSHClient()
-    client.load_system_host_keys()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    _load_known_hosts(client, paramiko)
+    client.set_missing_host_key_policy(_pin_new_host_policy(paramiko))
     client.connect(
         hostname=res["hostname"],
         port=res["port"],
@@ -557,7 +648,7 @@ def _open_ssh_client(
     except Exception as exc:
         for c in jump_clients:
             _close_ssh_client(c)
-        raise FileSystemError(f"Could not connect to {host}: {exc}") from exc
+        raise FileSystemError(_connect_error_message(host, exc)) from exc
     # The tunnel lives only while the jump clients do; tie their lifetime to
     # this client so _close_ssh_client tears the whole chain down.
     client._mc_jump_clients = jump_clients

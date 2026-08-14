@@ -830,8 +830,12 @@ class App:
             return
 
         labels = [f"{cls.name} -- {cls.description}"[:56] for cls in classes]
-        labels.append("Cancel")
-        choice = dialogs.menu(self.stdscr, "Open plug-in", labels)
+        # Every plug-in answers to a letter, like the presets menu -- so once
+        # the list is muscle-memory, opening one is "p" then a single keystroke
+        # rather than a walk down thirteen entries.  "c" is kept for Cancel.
+        keys = dialogs.accelerators([cls.name for cls in classes], reserved="c")
+        choice = dialogs.menu(self.stdscr, "Open plug-in",
+                              labels + ["Cancel"], keys=keys + ["c"])
         if choice is None or choice == len(classes):
             return
         cls = classes[choice]

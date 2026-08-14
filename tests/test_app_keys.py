@@ -404,6 +404,23 @@ def test_the_plugin_menu_can_be_cancelled(app, monkeypatch):
         assert app.left.plugin is None
 
 
+def test_the_plugin_menu_offers_a_letter_per_plugin(app, monkeypatch):
+    monkeypatch.setattr(app_mod, "dialogs", dialogs)
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Find in other pane"])
+    app._plugin_mode()
+    keys = scripted.menu_keys[0]
+    # One shortcut per plug-in plus "c" for the trailing Cancel entry, and no
+    # letter is handed to two entries at once.
+    assert keys[-1] == "c"
+    letters = [k for k in keys if k]
+    assert len(letters) == len(set(letters))
+    # A plug-in with a unique initial gets it, like a preset does.
+    title, options = scripted.menus[0]
+    disk_row = next(i for i, o in enumerate(options) if "Disk usage" in o)
+    assert keys[disk_row] == "d"
+    app.left.plugin = None
+
+
 def test_the_plugin_menu_with_nothing_to_offer(app, monkeypatch):
     monkeypatch.setattr("meridian_commander.plugins.discover",
                         lambda: ([], ["broken.py: bad"]))
