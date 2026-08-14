@@ -351,6 +351,137 @@ def test_a_legacy_key_error_becomes_an_actionable_message(monkeypatch, tmp_path)
     assert "digital envelope routines" in message
 
 
+def test_a_changed_host_key_becomes_an_actionable_message(monkeypatch, tmp_path):
+    import paramiko
+
+    class _K:
+        def get_name(self):
+            return "ssh-ed25519"
+
+        def get_base64(self):
+            return "AAAA"
+
+    def refuse(res, password, sock):
+        raise paramiko.ssh_exception.BadHostKeyException("web1", _K(), _K())
+
+    monkeypatch.setattr(fsmod, "_connect_resolved", refuse)
+    with pytest.raises(FileSystemError) as info:
+        _open_ssh_client("web1", "deploy", None, 22,
+                         config_path=str(tmp_path / "absent"))
+    message = str(info.value)
+    assert "host key has CHANGED" in message
+    assert "ssh-keygen -R web1" in message
+
+
+def test_known_hosts_are_loaded_and_the_user_file_is_writable(monkeypatch, tmp_path):
+    import paramiko
+
+    known = tmp_path / "known_hosts"
+    known.write_text("")                       # exists -> load_host_keys path
+    monkeypatch.setattr(fsmod, "_user_known_hosts", lambda: str(known))
+
+    seen = {}
+
+    class _Client:
+        def load_system_host_keys(self):
+            seen["system"] = True
+
+        def load_host_keys(self, filename):
+            seen["user"] = filename
+
+        def set_missing_host_key_policy(self, policy):
+            seen["policy"] = policy
+
+        def connect(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(paramiko, "SSHClient", _Client)
+    _connect_resolved({"hostname": "h", "port": 22, "username": "u",
+                       "key_filename": None}, None, None)
+    assert seen["system"] is True
+    assert seen["user"] == str(known)
+    assert isinstance(seen["policy"], paramiko.MissingHostKeyPolicy)
+
+
+def test_an_absent_known_hosts_is_still_named_as_the_write_target(monkeypatch,
+                                                                  tmp_path):
+    import paramiko
+
+    absent = tmp_path / "nope" / "known_hosts"
+    monkeypatch.setattr(fsmod, "_user_known_hosts", lambda: str(absent))
+
+    class _Client:
+        def load_system_host_keys(self):
+            pass
+
+        def set_missing_host_key_policy(self, policy):
+            pass
+
+        def connect(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(paramiko, "SSHClient", _Client)
+    client = paramiko.SSHClient()
+    fsmod._load_known_hosts(client, paramiko)
+    # No file to load, but new keys have somewhere to be saved.
+    assert client._host_keys_filename == str(absent)
+
+
+def test_pin_policy_records_a_new_host_and_saves_it(monkeypatch):
+    import paramiko
+
+    saved = {}
+
+    class _HostKeys:
+        def add(self, hostname, keytype, key):
+            saved["added"] = (hostname, keytype)
+
+    class _Client:
+        _host_keys_filename = "/somewhere/known_hosts"
+
+        def get_host_keys(self):
+            return _HostKeys()
+
+        def save_host_keys(self, filename):
+            saved["saved"] = filename
+
+    class _Key:
+        def get_name(self):
+            return "ssh-ed25519"
+
+    monkeypatch.setattr(fsmod.os, "makedirs", lambda *a, **k: None)
+    policy = fsmod._pin_new_host_policy(paramiko)
+    policy.missing_host_key(_Client(), "newhost", _Key())
+    assert saved["added"] == ("newhost", "ssh-ed25519")
+    assert saved["saved"] == "/somewhere/known_hosts"
+
+
+def test_pin_policy_tolerates_an_unwritable_known_hosts(monkeypatch):
+    import paramiko
+
+    class _HostKeys:
+        def add(self, *a):
+            pass
+
+    class _Client:
+        _host_keys_filename = "/somewhere/known_hosts"
+
+        def get_host_keys(self):
+            return _HostKeys()
+
+        def save_host_keys(self, filename):
+            raise OSError("read-only file system")
+
+    class _Key:
+        def get_name(self):
+            return "ssh-rsa"
+
+    monkeypatch.setattr(fsmod.os, "makedirs", lambda *a, **k: None)
+    policy = fsmod._pin_new_host_policy(paramiko)
+    # A save failure must not propagate -- the connection still succeeds.
+    policy.missing_host_key(_Client(), "h", _Key())
+
+
 def test_a_proxy_command_is_wired_into_the_connection(monkeypatch, tmp_path):
     import paramiko
 
@@ -472,6 +603,9 @@ def test_connect_resolved_passes_the_expected_arguments(monkeypatch):
         def load_system_host_keys(self):
             captured["loaded"] = True
 
+        def load_host_keys(self, filename):
+            captured["user_hosts"] = filename
+
         def set_missing_host_key_policy(self, policy):
             captured["policy"] = policy
 
@@ -479,6 +613,9 @@ def test_connect_resolved_passes_the_expected_arguments(monkeypatch):
             captured.update(kwargs)
 
     monkeypatch.setattr(paramiko, "SSHClient", _Client)
+    # Point known_hosts somewhere absent so the test does not touch a real one.
+    monkeypatch.setattr(fsmod, "_user_known_hosts",
+                        lambda: "/nonexistent/known_hosts")
     res = {"hostname": "web1", "port": 22, "username": "deploy",
            "key_filename": None}
     _connect_resolved(res, None, None)

@@ -17,6 +17,25 @@ still switches panes while a plug-in is open.
   `F8`/`k`/`Del` (choosing TERM, KILL, HUP or INT).
 - **Find in other pane** — recursively search the other pane's directory by
   glob pattern (works on remote panes too).
+- **Grep in other pane** — the content-search sibling of Find: recursively
+  search the other pane's *files* for text (case-insensitive) or a `re:`
+  regular expression, reporting `path:line: match`. Skips binary files and
+  works on remote panes too.
+- **Multi-rename** — rename the other pane's tagged files in bulk by one rule:
+  `replace`, `prefix`, `suffix`, `case` or a `number` template. Prefix a rule
+  with `preview` to see the mapping first; a rule that would collide two names
+  or overwrite an existing file is refused in full.
+- **Make archive** — pack the other pane's tagged files and directories into a
+  `zip`, `tar` or `tgz` beside them (the counterpart to browsing *into* an
+  archive). Works on remote panes.
+- **Checksum / verify** — hash the other pane's tagged files (`sha256`, `sha1`,
+  `md5`, `sha512`), `write` a `SHA256SUMS`-style file, or `verify` files
+  against one, reporting `OK`/`FAILED`/`missing`.
+- **SSH doctor** — scan `~/.ssh`, classify each private key's format, and flag
+  the legacy ones OpenSSL 3.0 may refuse to load; show what `ssh-add -l`
+  reports; and `convert` a key to the modern OpenSSH format (automatically for
+  an unencrypted key, backing the original up first; by handing you the
+  `ssh-keygen` line for an encrypted one).
 - **JSON push** — delivers each line of input as JSON to a TCP listener on a
   remote server (via an SSH channel, so the listener can stay on loopback)
   and shows the reply.

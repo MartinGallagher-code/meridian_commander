@@ -179,6 +179,100 @@ def test_find_plugin_respects_the_depth_cap(data_ctx, monkeypatch):
     assert FindFiles(ctx).process("deep") == "0 match(es)"
 
 
+# -- grep in other pane --------------------------------------------------------
+
+@pytest.fixture
+def grep_ctx(data_ctx):
+    return data_ctx({
+        "notes.txt": "alpha\nBeta line\ngamma\n",
+        "sub/deep.txt": "another beta here\n",
+        "sub/quiet.log": "nothing to see\n",
+    })
+
+
+def test_grep_greeting_names_the_target(grep_ctx):
+    from meridian_commander.plugins.grep_files import GrepFiles
+
+    assert "Searching under" in GrepFiles(grep_ctx).greeting
+
+
+def test_grep_needs_something_to_find(grep_ctx):
+    from meridian_commander.plugins.grep_files import GrepFiles
+
+    assert GrepFiles(grep_ctx).process("   ") == "Give some text to find, or re:<pattern>."
+
+
+def test_grep_matches_content_case_insensitively_and_recursively(grep_ctx):
+    from meridian_commander.plugins.grep_files import GrepFiles
+
+    plugin = GrepFiles(grep_ctx)
+    summary = plugin.process("beta")
+    printed = "\n".join(plugin.output)
+    assert "notes.txt:2:" in printed
+    assert "sub/deep.txt:1:" in printed
+    assert "quiet.log" not in printed
+    assert summary == "2 match(es)"
+
+
+def test_grep_supports_a_regex(grep_ctx):
+    from meridian_commander.plugins.grep_files import GrepFiles
+
+    plugin = GrepFiles(grep_ctx)
+    summary = plugin.process(r"re:^gamma$")
+    assert "notes.txt:3:" in "\n".join(plugin.output)
+    assert summary == "1 match(es)"
+
+
+def test_grep_reports_a_bad_regex(grep_ctx):
+    from meridian_commander.plugins.grep_files import GrepFiles
+
+    assert "Bad regular expression" in GrepFiles(grep_ctx).process("re:(")
+
+
+def test_grep_skips_binary_files(data_ctx):
+    from meridian_commander.plugins.grep_files import GrepFiles
+
+    ctx = data_ctx({"blob.bin": "AB\x00CDbeta"})
+    plugin = GrepFiles(ctx)
+    assert plugin.process("beta") == "0 match(es)"
+
+
+def test_grep_stops_at_the_result_cap(data_ctx, monkeypatch):
+    from meridian_commander.plugins.grep_files import GrepFiles
+
+    monkeypatch.setattr("meridian_commander.plugins.grep_files.MAX_RESULTS", 2)
+    ctx = data_ctx({f"f{i}.txt": "match\n" for i in range(10)})
+    assert "stopped at 2" in GrepFiles(ctx).process("match")
+
+
+def test_grep_notes_a_file_it_only_partly_scanned(data_ctx, monkeypatch):
+    from meridian_commander.plugins.grep_files import GrepFiles
+
+    monkeypatch.setattr("meridian_commander.plugins.grep_files.MAX_FILE_BYTES", 8)
+    monkeypatch.setattr("meridian_commander.plugins.grep_files.CHUNK", 8)
+    ctx = data_ctx({"big.txt": "hit\n" + "x" * 100})
+    plugin = GrepFiles(ctx)
+    plugin.process("hit")
+    assert any("scanned only the first" in line for line in plugin.output)
+
+
+def test_grep_reports_an_unreadable_directory(data_ctx, monkeypatch):
+    from meridian_commander.plugins.grep_files import GrepFiles
+
+    ctx = data_ctx({"sub/a.txt": "x"})
+    real_listdir = ctx.other_fs.listdir
+
+    def selective(path):
+        if path.endswith("/sub"):
+            raise PermissionError("permission denied")
+        return real_listdir(path)
+
+    monkeypatch.setattr(ctx.other_fs, "listdir", selective)
+    plugin = GrepFiles(ctx)
+    plugin.process("x")
+    assert any("permission denied" in line for line in plugin.output)
+
+
 # -- profile -------------------------------------------------------------------
 
 def test_profile_reports_shape_types_and_stats(data_ctx):

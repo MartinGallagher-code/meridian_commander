@@ -368,6 +368,16 @@ cannot be prompted mid-connection).
 Once connected, that pane behaves exactly like a local one — navigate, view,
 edit, and copy/move/sync to and from it.
 
+**Host keys** are checked against your `~/.ssh/known_hosts` (and the system
+file). A server you have never connected to is trusted on first use and its key
+is pinned to `known_hosts`; a server whose key has **changed** since — the thing
+host-key checking exists to catch — is refused with a clear message telling you
+how to clear the old key once you understand why it changed (`ssh-keygen -R
+<host>`). If `~/.ssh` is read-only, connecting still works — the key is trusted
+for the session but simply not saved. Keys that fail with the OpenSSL 3.0
+*digital envelope routines::unsupported* error are diagnosed and fixed by the
+**SSH doctor** plug-in (below).
+
 ### Presets — saved locations
 
 Press **`b`** for the preset list. It shows every saved location and offers
@@ -845,6 +855,32 @@ Built-in plug-ins:
   signal to send.
 - **Find in other pane** — recursively search the other pane's directory by
   glob pattern (works on remote panes too).
+- **Grep in other pane** — the content-search sibling of Find: recursively
+  search the other pane's *files* for text (case-insensitive) or a `re:`
+  regular expression, reporting `path:line: match`. Binary files are skipped
+  and each file is scanned up to a byte cap, so it works on remote panes
+  without dragging whole trees across the wire.
+- **Multi-rename** — the bulk cousin of the `R` key: rename the other pane's
+  tagged files by one rule — `replace OLD NEW`, `prefix`, `suffix`, `case
+  lower|upper|title`, or a `number {n:03}-{name}.{ext}` template. Prefix a rule
+  with `preview` to see the old → new mapping without touching anything; a rule
+  that would collide two names onto one, or land on a name that already exists,
+  is refused in full so the pane is never left half-renamed.
+- **Make archive** — the counterpart to browsing *into* an archive: pack the
+  other pane's tagged files and directories into a `zip`, `tar` or `tgz` that
+  lands beside them. Reads and writes through the pane's own filesystem, so it
+  packs remote panes as well as local.
+- **Checksum / verify** — hash the other pane's tagged files (`sha256` default,
+  or `sha1`/`md5`/`sha512`), `write` those digests to a `SHA256SUMS`-style file,
+  or `verify` files against one, reporting `OK`/`FAILED`/`missing`. Streams each
+  file in chunks, so it covers remote panes too.
+- **SSH doctor** — inspect the local machine's `~/.ssh`: list each private key
+  with its format, flagging the legacy ones OpenSSL 3.0 is liable to refuse
+  (the cause of the *digital envelope routines::unsupported* connect error);
+  show what `ssh-add -l` holds; and `convert <key>` to the modern OpenSSH
+  format — done for you for an unencrypted key (the original is backed up
+  first), or handed to you as a ready-to-run `ssh-keygen` line for an encrypted
+  one, which must prompt for its passphrase.
 - **JSON push** — the user enters input in the bottom line; the plug-in logs
   into a remote server over SSH, delivers the input as JSON to a TCP listener
   on that server (via an SSH channel, so the listener can stay on loopback),
