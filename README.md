@@ -838,6 +838,11 @@ Built-in plug-ins:
 
 - **Terminal** — the in-pane pseudo-terminal (also on the `t` key); a shell in
   the pane's directory, local or over the pane's SSH connection.
+- **Processes** — a process browser and killer for the pane's host: the local
+  machine, or the remote server over the pane's existing SSH connection (no
+  second login). The listing refreshes itself, sorts by any column, filters by
+  name, and `F8`/`k` kills the process under the cursor after asking which
+  signal to send.
 - **Find in other pane** — recursively search the other pane's directory by
   glob pattern (works on remote panes too).
 - **JSON push** — the user enters input in the bottom line; the plug-in logs

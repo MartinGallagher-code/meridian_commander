@@ -11,6 +11,10 @@ still switches panes while a plug-in is open.
 
 - **Terminal** — the in-pane pseudo-terminal (also on the `t` key); a shell
   in the pane's directory, local or over the pane's SSH connection.
+- **Processes** — a process browser and killer for the pane's host, local or
+  over the pane's SSH connection. Auto-refreshing; sort with `c`/`m`/`t`/`p`/
+  `n`/`u`, filter with `/`, and kill the process under the cursor with
+  `F8`/`k`/`Del` (choosing TERM, KILL, HUP or INT).
 - **Find in other pane** — recursively search the other pane's directory by
   glob pattern (works on remote panes too).
 - **JSON push** — delivers each line of input as JSON to a TCP listener on a
