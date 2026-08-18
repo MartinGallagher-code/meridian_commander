@@ -683,7 +683,7 @@ class App:
             "A two-pane terminal file manager: local, SFTP, SSH and FTP,\n"
             "with a viewer, an editor, archives and plug-ins.\n"
             "\n"
-            "Copyright (C) 2026 Martin Gallagher.  GPLv3 or later."
+            "Copyright (C) 2026 Martin J. Gallagher.  GPLv3 or later."
         ))
 
     def _activate_entry(self) -> None:
@@ -1725,11 +1725,11 @@ def main(argv: list[str] | None = None) -> int:
 
     version_text = (
         f"%(prog)s {__version__}\n"
-        "Copyright (C) 2026 Martin Gallagher\n"
-        "License GPLv3+: GNU GPL version 3 or later "
-        "<https://gnu.org/licenses/gpl.html>.\n"
+        "Copyright (C) 2026 Martin J. Gallagher\n"
+        "License: GPL-3.0-or-later "
+        "<https://www.gnu.org/licenses/gpl-3.0.html>\n"
         "This is free software: you are free to change and redistribute it.\n"
-        "There is NO WARRANTY, to the extent permitted by law."
+        "There is no warranty, to the extent permitted by law."
     )
     parser.add_argument("left", nargs="?", default=None,
                         help="starting directory for the left pane "
