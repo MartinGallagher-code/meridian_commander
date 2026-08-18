@@ -978,7 +978,7 @@ def test_main_reports_its_version(capsys):
     assert info.value.code == 0
     printed = capsys.readouterr().out
     assert "meridian-commander" in printed
-    assert "GPLv3+" in printed
+    assert "GPL-3.0-or-later" in printed
 
 
 # -- where the panes open ------------------------------------------------------
