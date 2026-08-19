@@ -888,6 +888,17 @@ Built-in plug-ins:
   `diff`, `add`, `unstage`, `branch` and `commit`. Network commands
   (`push`/`pull`) are left out so a line-oriented plug-in can't block on a
   credential prompt — use the shell (`!`) for those.
+- **Provost data** — a read-only browser for a
+  [provost](https://pypi.org/project/provost/) store, found from the other
+  pane's location the way provost itself finds it (the directory, a controlled
+  parent's `.provost`, or the global `~/.provost`). Datasets open as aligned,
+  scrollable tables (the `unsorted` triage queue base64-decoded, as `provost
+  triage` shows it); `l` lists the capture log newest-first and Enter shows a
+  capture's metadata, context and original output; `s` on any dataset row
+  follows its `#N` index through the store's provenance back to the exact
+  captured input that produced it, like `provost source N`. Reads through the
+  pane's own filesystem with bounded reads, so a store on an SFTP/SSH pane —
+  no provost installed on either side — browses just like a local one.
 - **Multi-rename** — the bulk cousin of the `R` key: rename the other pane's
   tagged files by one rule — `replace OLD NEW`, `prefix`, `suffix`, `case
   lower|upper|title`, or a `number {n:03}-{name}.{ext}` template. Prefix a rule
