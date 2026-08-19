@@ -88,6 +88,16 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   (or `.jar`, `.whl`, `.tgz`, `.tar.bz2`, `.tar.xz`) and the pane goes *into*
   it. Browse, tag and copy files out with `F5` exactly as from a directory;
   Backspace at the top comes back out. Read-only, and stdlib-only.
+- **Run files** — press Enter on a shell script, a Python file, anything with
+  a `#!` line, or any executable, and it *runs* (also **File ▸ Run…** and the
+  right-click menu). A small dialog takes arguments — Esc there cancels, so
+  nothing runs by accident — then the program gets the real terminal: output
+  streams live, a script that prompts can be answered, and the screen waits
+  for Enter before returning so the tail of the output stays readable. A
+  non-executable file with a `#!` line is handed to the interpreter that line
+  names, so a fresh script runs without `chmod +x`; a file with neither opens
+  in the viewer as before. On an SFTP/SSH pane the file runs on the *remote*
+  host (over `ssh -t`, like the full-screen shell); FTP panes only view.
 - **PDF viewer** (`F3` on a `.pdf`) — the text of each page, laid out as the
   page has it: lines rebuilt from glyph positions, spaces inferred from the
   gaps, columns kept side by side. `Tab` pages through, `/` searches the whole
