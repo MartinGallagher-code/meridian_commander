@@ -41,6 +41,15 @@ still switches panes while a plug-in is open.
   bytes and show an offset/hex/ASCII dump of its start.
 - **Git** — status, log, diff, add, unstage, branch and commit in a local
   pane's repository (no network commands, so it can't block on a prompt).
+- **Provost data** — browse a [provost](https://pypi.org/project/provost/)
+  store from the other pane's location: datasets as aligned, scrollable,
+  filterable tables; the capture log (`l`), each capture with its metadata and
+  original output; and `s` on a dataset row to see the exact captured input
+  behind its `#N` index (provost's provenance). The store is found the way
+  provost finds it — the pane's directory, a controlled parent's `.provost`,
+  or `~/.provost` — and read through the pane's filesystem, so remote stores
+  browse like local ones. `store =` under `[plugin:provost]` in `config.ini`
+  points it somewhere explicit.
 - **Multi-rename** — rename the other pane's tagged files in bulk by one rule:
   `replace`, `prefix`, `suffix`, `case` or a `number` template. Prefix a rule
   with `preview` to see the mapping first; a rule that would collide two names
