@@ -40,7 +40,7 @@ import shlex
 import subprocess
 import time
 
-from . import dialogs, presets, theme
+from . import dialogs, presets, runner, theme
 from .editor import Editor
 from .filesystems import (
     FileSystem,
@@ -102,6 +102,7 @@ MENUS: list[dict] = [
         "items": [
             {"label": "~V~iew", "name": "view", "key": "F3"},
             {"label": "~E~dit", "name": "edit", "key": "F4"},
+            {"label": "Ru~n~...", "name": "run", "key": "Enter"},
             {"label": "~C~opy", "name": "copy", "key": "F5"},
             {"label": "~M~ove", "name": "move", "key": "F6"},
             {"label": "~R~ename", "name": "rename"},
@@ -475,6 +476,7 @@ class App:
         return {
             "view": self._view,
             "edit": self._edit,
+            "run": self._run_current,
             "copy": self._copy,
             "move": self._move,
             "rename": self._rename,
@@ -696,7 +698,84 @@ class App:
         elif is_archive(entry.name):
             self._enter_archive()
         else:
-            self._view()
+            argv = self._run_argv_for(entry)
+            if argv is not None:
+                self._run_file(entry, argv)
+            else:
+                self._view()
+
+    # -- running a file -----------------------------------------------------
+    def _run_argv_for(self, entry) -> list[str] | None:
+        """How Enter would run the cursor entry, or ``None`` to view it.
+
+        Only local and SFTP/SSH panes have somewhere to run a program (an
+        archive or FTP pane does not), so anywhere else everything views.
+        """
+        panel = self.active
+        if not isinstance(panel.fs,
+                          (LocalFileSystem, SFTPFileSystem, SSHFileSystem)):
+            return None
+        path = panel.fs.join(panel.path, entry.name)
+        return runner.run_argv(panel.fs, path, entry.mode)
+
+    def _run_current(self) -> None:
+        """The menu's Run: the cursor file, or say why it cannot run."""
+        panel = self.active
+        entry = panel.current()
+        if entry is None or entry.name == Panel.PARENT or entry.is_dir:
+            dialogs.message(self.stdscr, "Run",
+                            "Point the cursor at a file to run.")
+            return
+        argv = self._run_argv_for(entry)
+        if argv is None:
+            dialogs.message(
+                self.stdscr, "Run",
+                f"{entry.name} is not runnable here -- it needs a '#!' line "
+                "or the executable bit, on a local or SFTP/SSH pane.")
+            return
+        self._run_file(entry, argv)
+
+    def _run_file(self, entry, argv: list[str]) -> None:
+        """Run the cursor file full-screen and hold its output on screen.
+
+        The arguments dialog doubles as the confirmation: Esc cancels, Enter
+        runs.  The program gets the real terminal (stdin included, so a script
+        that prompts still works) and runs in its own directory; a remote
+        pane's file runs on the remote host via ``ssh -t``, the same way the
+        full-screen shell (``!``) reaches it.
+        """
+        panel = self.active
+        fs = panel.fs
+        args_text = dialogs.prompt(self.stdscr, "Run",
+                                   f"Arguments for {entry.name}:")
+        if args_text is None:
+            return
+        try:
+            args = shlex.split(args_text)
+        except ValueError as exc:
+            dialogs.message(self.stdscr, "Run", f"Bad arguments: {exc}",
+                            error=True)
+            return
+
+        full = argv + args
+        if isinstance(fs, LocalFileSystem):
+            cmd, cwd = full, panel.path
+        else:   # SFTP/SSH -- _run_argv_for allowed nothing else
+            remote = "cd {} && {}".format(
+                shlex.quote(panel.path),
+                " ".join(shlex.quote(a) for a in full))
+            cmd, cwd = self._ssh_argv(fs, remote), None
+
+        banner = (f"\n[Meridian Commander] Running {entry.name} in "
+                  f"{fs.label()}:{panel.path}\n\n")
+        status = self._suspend_and_run(cmd, cwd, banner, pause_after=True,
+                                       fail_label=f"Could not run {entry.name}")
+        panel.refresh()
+        self.other.refresh()
+        if status is None:
+            self._set_message(f"{entry.name}: could not start")
+        else:
+            self._set_message(f"{entry.name} exited {status}")
 
     def _enter_archive(self) -> None:
         """Open the highlighted archive as though it were a directory."""
@@ -778,41 +857,70 @@ class App:
             cwd = panel.path
         elif isinstance(fs, (SFTPFileSystem, SSHFileSystem)):
             remote = f"cd {shlex.quote(panel.path)} && exec ${{SHELL:-/bin/sh}}"
-            # Only pass what the user typed explicitly, so ~/.ssh/config
-            # aliases keep providing their own HostName/User/Port/keys.
-            cmd = ["ssh", "-t"]
-            if fs.port not in (None, 22):
-                cmd += ["-p", str(fs.port)]
-            typed_user = _split_user_host(fs.host)[0]
-            target = fs.host
-            if fs.typed_username and not typed_user:
-                target = f"{fs.typed_username}@{fs.host}"
-            cmd += [target, remote]
+            cmd = self._ssh_argv(fs, remote)
         else:
             dialogs.message(self.stdscr, "Terminal",
                             "A terminal is only available for local or SFTP panes.")
             return
 
-        # Hand the real terminal back to the shell, then restore curses after.
+        banner = (f"\n[Meridian Commander] Shell in {fs.label()}:{panel.path}\n"
+                  "Type 'exit' to return to Meridian Commander.\n\n")
+        self._suspend_and_run(cmd, cwd, banner,
+                              fail_label="Could not start terminal")
+        panel.refresh()
+        self._set_message("Returned from shell")
+
+    @staticmethod
+    def _ssh_argv(fs, remote: str) -> list[str]:
+        """An ``ssh -t`` argv running ``remote`` on the pane's host.
+
+        Only what the user typed explicitly is passed, so ``~/.ssh/config``
+        aliases keep providing their own HostName/User/Port/keys.
+        """
+        cmd = ["ssh", "-t"]
+        if fs.port not in (None, 22):
+            cmd += ["-p", str(fs.port)]
+        typed_user = _split_user_host(fs.host)[0]
+        target = fs.host
+        if fs.typed_username and not typed_user:
+            target = f"{fs.typed_username}@{fs.host}"
+        return cmd + [target, remote]
+
+    def _suspend_and_run(self, cmd: list[str], cwd: str | None, banner: str,
+                         pause_after: bool = False,
+                         fail_label: str = "Could not start") -> int | None:
+        """Hand the real terminal to ``cmd``, then restore curses after.
+
+        Returns the exit status (``None`` if the command could not start).
+        With ``pause_after`` the screen waits for Enter before curses takes
+        the terminal back, so the command's final output stays readable.
+        """
+        status: int | None = None
         curses.def_prog_mode()
         curses.endwin()
         try:
-            os.write(1, (f"\n[Meridian Commander] Shell in {fs.label()}:{panel.path}\n"
-                         "Type 'exit' to return to Meridian Commander.\n\n").encode())
-            subprocess.call(cmd, cwd=cwd)
+            os.write(1, banner.encode())
+            status = subprocess.call(cmd, cwd=cwd)
+            if pause_after:
+                tail = "" if status == 0 else f" (exit status {status})"
+                os.write(1, f"\n[Meridian Commander]{tail} ".encode())
+                self._pause_for_enter()
         except Exception as exc:
-            os.write(2, f"\nCould not start terminal: {exc}\n".encode())
-            try:
-                input("Press Enter to return...")
-            except EOFError:
-                pass
+            os.write(2, f"\n{fail_label}: {exc}\n".encode())
+            self._pause_for_enter()
         finally:
             curses.reset_prog_mode()
             self.stdscr.clearok(True)
             curses.curs_set(0)
             self.stdscr.refresh()
-        panel.refresh()
-        self._set_message("Returned from shell")
+        return status
+
+    @staticmethod
+    def _pause_for_enter() -> None:
+        try:
+            input("Press Enter to return...")
+        except EOFError:
+            pass
 
     # -- plug-ins -----------------------------------------------------------
     def _plugin_mode(self) -> None:
@@ -980,12 +1088,13 @@ class App:
         name = entry.name if entry and entry.name != Panel.PARENT else None
         header = name or panel.fs.basename(panel.path) or panel.path
 
-        labels = ["View", "Edit", "Copy to other pane", "Move to other pane",
-                  "Rename", "Delete", "Tag / untag", "New directory",
-                  "Home directory", "Same location in other pane",
-                  "Presets (go to / save)", "Find files here",
-                  "Terminal in this pane", "Full-screen shell", "Cancel"]
-        actions = ["view", "edit", "copy", "move", "rename", "delete",
+        labels = ["View", "Edit", "Run...", "Copy to other pane",
+                  "Move to other pane", "Rename", "Delete", "Tag / untag",
+                  "New directory", "Home directory",
+                  "Same location in other pane", "Presets (go to / save)",
+                  "Find files here", "Terminal in this pane",
+                  "Full-screen shell", "Cancel"]
+        actions = ["view", "edit", "run", "copy", "move", "rename", "delete",
                    "tag", "mkdir", "home", "mirror", "presets", "find",
                    "terminal", "shell", None]
         choice = dialogs.menu(self.stdscr, header[:40], labels)
@@ -996,6 +1105,8 @@ class App:
             self._view()
         elif action == "edit":
             self._edit()
+        elif action == "run":
+            self._run_current()
         elif action == "copy":
             self._copy()
         elif action == "move":
@@ -1628,7 +1739,9 @@ class App:
             "  Tab            switch active pane\n"
             "  Up/Down j/k    move cursor      PgUp/PgDn  page\n"
             "  Home/End       first / last\n"
-            "  Enter / Right  enter dir / archive (zip, tar) / view file\n"
+            "  Enter / Right  enter dir / archive (zip, tar); run a\n"
+            "                 script ('#!' line) or executable, with an\n"
+            "                 arguments prompt (Esc cancels); view the rest\n"
             "  Backspace/Left parent directory\n"
             "  Insert / Space tag file    +/-  tag all / untag all\n"
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
