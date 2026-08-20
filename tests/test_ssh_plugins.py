@@ -10,6 +10,7 @@ import json
 
 import pytest
 
+from meridian_commander.filesystems import FileSystemError
 from meridian_commander.plugins.json_push import JsonPush
 from meridian_commander.plugins.run_remote_script import RunRemoteScript
 
@@ -331,10 +332,10 @@ def test_json_push_redials_when_the_transport_has_gone(ctx, ssh, monkeypatch):
     plugin.process("one")
     client.transport = None
     client.get_transport = lambda: None
-    # A dropped transport reaches the caller as the raw AttributeError
-    # from get_transport() answering None. Named here so that if the
-    # plug-in ever learns to report it properly, this test says so.
-    with pytest.raises(AttributeError):
+    # A transport that goes away between the redial and the channel is
+    # reported as the connection event it is, not as an AttributeError about
+    # NoneType from dereferencing what get_transport() answered.
+    with pytest.raises(FileSystemError, match="SSH connection has closed"):
         plugin.process("two")
     assert len(opened) == 2
 

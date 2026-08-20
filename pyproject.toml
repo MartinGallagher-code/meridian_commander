@@ -131,26 +131,30 @@ disable_error_code = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# A test that stops making progress must fail, not wait. The suite drives a
-# real curses screen on a pseudo-terminal, and a write to a terminal nobody
-# is reading blocks below the level any Python could interrupt -- so without
-# this a single wedged screen holds the run until the CI provider kills the
-# job, minutes or hours later, with no clue as to where it stopped.
+# A test that stops making progress must fail, not wait: without this a
+# wedged test holds the run until the CI provider kills the job, minutes or
+# hours later, with no clue as to where it stopped.
 #
-# The "thread" method is the one that works here. The default, SIGALRM, is
-# delivered to a process blocked inside curses' own write(), which retries on
-# EINTR without ever returning to Python, so the handler that would raise the
-# timeout never runs. A watchdog thread owes nothing to the stuck one: it
-# dumps every thread's stack -- naming the test and the line -- and ends the
-# process. The whole suite runs in about half a minute, so 120s is far past
-# any honest test while still failing fast.
+# The "thread" method rather than the default SIGALRM, which is delivered to
+# a process blocked inside a C write() that retries on EINTR without ever
+# returning to Python, so the handler that would raise the timeout never
+# runs. The whole suite takes about half a minute, so 120s is far past any
+# honest test while still failing fast.
+#
+# One hang this cannot catch, and it is worth knowing which: a hang *inside
+# curses*. CPython's _curses does not release the GIL, so a main thread
+# stuck in doupdate() holds it, and the watchdog thread never gets to run to
+# do the killing. Verified by reproducing it -- the run sails past 120s. For
+# that case the backstop is timeout-minutes on the CI job, and the diagnosis
+# is faulthandler below.
 timeout = 120
 timeout_method = "thread"
-# Thirty seconds before that kill, pytest's own faulthandler dumps every
-# thread's stack. It writes to the stderr pytest stashed before it started
-# capturing, so unlike anything the timeout itself prints, this survives both
-# the capture and the exit -- which is the difference between a CI log that
-# names the wedged line and one that just stops.
+# Thirty seconds before that, pytest's own faulthandler dumps every thread's
+# stack. It is the half that always works: the dump is driven from a C
+# thread that needs no GIL, and it writes to the stderr pytest stashed
+# before it started capturing, so it survives both the capture and the exit.
+# On the first macOS run it named the wedged line on the first attempt,
+# where the timeout above could not fire at all.
 faulthandler_timeout = 90
 # An xfail that starts passing is a test that has stopped testing what it
 # says; say so rather than reporting it as a pass.

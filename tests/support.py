@@ -9,13 +9,14 @@ mock it happened to call.
 from __future__ import annotations
 
 import curses
+import fcntl
 import io
 import os
 import pty
 import select
 import struct
-import sys
 import tarfile
+import termios
 import threading
 import zipfile
 import zlib
@@ -184,24 +185,20 @@ def _drain(fd: int, stop) -> None:
             return
 
 
-#: Whether a real curses screen can be put on a pseudo-terminal here.
+#: Whether a real curses screen may be put on a pseudo-terminal here.
 #:
-#: Not on macOS, where the arrangement deadlocks on the very first screen
-#: drawn.  Apple's ncurses blocks inside ``doupdate()`` while ``select()``
-#: reports the master end has nothing to drain -- so the writer waits for a
-#: reader that has been told there is nothing to read, and neither moves
-#: again.  Fifteen minutes of that is what the first macOS CI run bought.
+#: This exists because the arrangement deadlocked on macOS: ncurses blocked
+#: inside its first write while ``select()`` reported the master end had
+#: nothing to drain, and nothing in the process could break it -- CPython's
+#: _curses holds the GIL throughout, so no watchdog thread ever runs.  The
+#: cause was a pty left at its default 0x0 size, which sends ncurses off to
+#: ask the terminal how big it is and wait for an answer nobody was there to
+#: give; ``with_curses_screen`` now sets the size before curses looks.
 #:
-#: It is the harness that does not work there, not the application. The rest
-#: of the suite -- the filesystems, the parsers, the plug-ins, the sync
-#: planner, some 2,450 tests -- runs on macOS and is worth running, so the
-#: screens skip rather than the platform going untested. The coverage gate
-#: stays on Linux, where every statement is still reached.
-#:
-#: Set ``MERIDIAN_CURSES_TESTS=1`` to run them anyway: on a Mac, with a
-#: debugger, that is how this gets fixed.
-CURSES_SCREENS = (sys.platform != "darwin"
-                  or os.environ.get("MERIDIAN_CURSES_TESTS") == "1")
+#: The switch stays as the way out if some other platform finds its own
+#: version of this: ``MERIDIAN_SKIP_CURSES_TESTS=1`` skips the 378 tests that
+#: need a screen and leaves the other ~2,450 running.
+CURSES_SCREENS = os.environ.get("MERIDIAN_SKIP_CURSES_TESTS") != "1"
 
 
 def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
@@ -218,9 +215,17 @@ def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
     only useful for the paths that check the count and then decline to use it.
     """
     if not CURSES_SCREENS:
-        pytest.skip("a curses screen on a pty deadlocks on this platform; "
-                    "set MERIDIAN_CURSES_TESTS=1 to try anyway")
+        pytest.skip("curses screens disabled by MERIDIAN_SKIP_CURSES_TESTS")
     master, slave = pty.openpty()
+    # Tell the pty how big it is before curses asks. A fresh one is 0x0, and
+    # ncurses that cannot get a size out of TIOCGWINSZ falls back to asking
+    # the terminal itself: it writes the "u7" cursor-position query and waits
+    # for the "u6" reply, which on the other end of this pty is nobody. That
+    # wait is inside the library, holding the GIL, so nothing in this process
+    # can time it out -- the shape of a run that stops dead and never speaks
+    # again. With a real size there is nothing to ask.
+    fcntl.ioctl(slave, termios.TIOCSWINSZ,
+                struct.pack("HHHH", rows, cols, 0, 0))
     stop = threading.Event()
     reader = threading.Thread(target=_drain, args=(master, stop), daemon=True)
     reader.start()
