@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from . import _io
 from .. import sync
-from ..plugin_api import InputOutputPlugin
+from ..plugin_api import Command, InputOutputPlugin
 
 MAX_RESULTS = 1000    # differing paths listed before the rest are summarised
 
@@ -26,8 +26,12 @@ def _path(fs, root: str, rel: str) -> str:
 
 class ComparePanes(InputOutputPlugin):
     name = "Compare panes"
+    commands = (
+        Command("", "compare by name, size and time", label="compare"),
+        Command("hash", "compare file contents byte-for-byte"),
+    )
     description = "Diff this pane's tree against the other pane's"
-    prompt = "enter=compare, 'hash'=by content> "
+    prompt = "Enter=compare, F2 for options> "
 
     @property
     def greeting(self) -> str:

@@ -18,7 +18,7 @@ and writes through the pane's filesystem, so it normalises remote files too.
 from __future__ import annotations
 
 from . import _io
-from ..plugin_api import InputOutputPlugin
+from ..plugin_api import Command, InputOutputPlugin
 
 VERBS = ("lf", "crlf", "untabs", "trim", "finalnl")
 SNIFF = 8192      # bytes examined for a NUL before deciding a file is binary
@@ -41,8 +41,17 @@ def transform(data: bytes, verb: str, tab_width: int) -> bytes:
 
 class NormalizeText(InputOutputPlugin):
     name = "Normalise text"
+    commands = (
+        Command("lf", "line endings to LF"),
+        Command("crlf", "line endings to CRLF"),
+        Command("untabs", "expand tabs to spaces"),
+        Command("trim", "strip trailing whitespace"),
+        Command("finalnl", "give every file a final newline"),
+        Command("preview", "try a rule without writing anything",
+                choices=VERBS),
+    )
     description = "Fix line endings, tabs and trailing space in tagged files"
-    prompt = "lf|crlf|untabs|trim|finalnl> "
+    prompt = "F2 for rules, or type one> "
 
     @property
     def greeting(self) -> str:

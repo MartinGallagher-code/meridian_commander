@@ -10,7 +10,7 @@ just as well as a local one, without a shell on the far side.
 from __future__ import annotations
 
 from .. import sync
-from ..plugin_api import InputOutputPlugin
+from ..plugin_api import Command, InputOutputPlugin
 from ..util import human_size
 
 BAR_WIDTH = 20      # columns of bar drawn for the largest entry
@@ -25,6 +25,9 @@ def _tree_bytes(fs, path: str) -> tuple[int, int]:
 
 class DiskUsage(InputOutputPlugin):
     name = "Disk usage"
+    commands = (
+        Command("", "size everything under the other pane", label="measure"),
+    )
     description = "Size of each item under the other pane, biggest first"
     prompt = "enter to measure> "
 

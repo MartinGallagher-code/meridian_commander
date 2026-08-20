@@ -29,6 +29,23 @@ time the user presses Enter, ``process()`` is called with the input; whatever
 it returns (a string or a list of strings) is appended to the output, and
 ``self.print(...)`` can be used to emit output at any point during processing.
 
+A plug-in whose input is a *vocabulary* rather than free text should say so,
+by listing its :class:`Command` s -- then ``F2`` offers them for a keystroke
+each and the user need not remember how this particular plug-in spells
+``log``::
+
+    class Shout(InputOutputPlugin):
+        commands = (
+            Command("loud", "shout the line back"),
+            Command("file", "shout a file's name", arg="path"),
+        )
+
+The menu chains: a command with ``arg="path"`` follows up with the other
+pane's listing, ``choices=(...)`` with a fixed list, ``arg="options"`` with
+whatever :meth:`InputOutputPlugin.command_options` returns, and ``arg="text"``
+simply primes the input line for the part only the user can supply.  Typing
+still works exactly as before -- the menu builds the same line and submits it.
+
 For full control of drawing and keys, subclass :class:`PanePlugin` directly
 and implement ``draw()`` and ``handle_key()``.
 """
@@ -37,9 +54,48 @@ from __future__ import annotations
 
 import curses
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from . import theme
+
+
+@dataclass(frozen=True)
+class Command:
+    """One entry in an :class:`InputOutputPlugin`'s ``F2`` command menu.
+
+    A plug-in that lists its commands this way gets them for a keystroke
+    instead of for a typed word, which is the difference between "F2, l" and
+    remembering that this particular plug-in spells it ``log``.
+
+    ``arg`` says what the command still needs once it is chosen:
+
+    ``None``      run it there and then;
+    ``"text"``    put ``verb `` on the input line and let the user type the
+                  rest (a commit message, a pattern -- something only they
+                  know);
+    ``"path"``    offer the other pane's entries as a second menu, with an
+                  "everything" row for the commands that also work bare;
+    ``"options"`` offer whatever :meth:`InputOutputPlugin.command_options`
+                  returns for this command -- the table's column names, say.
+
+    ``choices`` is the fixed-list version of ``"options"``: give it here when
+    the answers are known up front (``lower|upper|title``).
+    """
+
+    verb: str
+    help: str = ""
+    arg: str | None = None
+    choices: tuple[str, ...] = field(default_factory=tuple)
+    #: Menu text, when the verb alone is not it (an Enter-only command has
+    #: no verb to show).
+    label: str = ""
+    #: Whether a ``"path"`` picker offers its "everything" row -- false for
+    #: the commands that insist on a path (``git add``, ``tail``).
+    allow_bare: bool = True
+
+    @property
+    def menu_label(self) -> str:
+        return self.label or self.verb
 
 
 @dataclass
@@ -180,6 +236,12 @@ class InputOutputPlugin(PanePlugin):
     prompt = "> "
     #: Greeting printed when the plugin opens (override or set to "").
     greeting = ""
+    #: Commands offered by the ``F2`` menu -- a tuple of :class:`Command`.
+    #: Left empty, the plug-in is typing-only and ``F2`` does nothing.
+    commands: tuple[Command, ...] = ()
+
+    #: Row offered by a path picker for the commands that also run bare.
+    ANY_PATH = "(everything -- no path)"
 
     def on_start(self) -> None:
         self.output: list[str] = []
@@ -208,6 +270,84 @@ class InputOutputPlugin(PanePlugin):
             self.output.append(line)
         self.scroll = 0
 
+    def command_options(self, command: Command) -> list[str] | None:
+        """Answers for a ``arg="options"`` command, or ``None`` if there are
+        none to offer.  Override in plug-ins whose choices are discovered
+        rather than fixed -- a table's column names, for instance."""
+        return None
+
+    # -- the command menu ------------------------------------------------------
+    def _menu(self, title: str, options: list[str]):
+        """Show a chooser and return the chosen index, or ``None``."""
+        from . import dialogs
+
+        stdscr = getattr(self.ctx.app, "stdscr", None)
+        if stdscr is None:          # no screen to draw on (headless/tests)
+            return None
+        return dialogs.menu(stdscr, title, options,
+                            dialogs.accelerators(options))
+
+    def command_menu(self) -> None:
+        """Pick a command by keystroke and run it (``F2``).
+
+        Each step is its own small menu: the command, then whatever it still
+        needs.  Cancelling any of them leaves the input line untouched, so
+        the menu is safe to open just to see what a plug-in can do.
+        """
+        if not self.commands:
+            return
+        commands = list(self.commands)
+        width = max(len(c.menu_label) for c in commands)
+        labels = [f"{c.menu_label:<{width}}  {c.help}".rstrip()
+                  for c in commands]
+        index = self._menu(f"{self.name}: commands", labels)
+        if index is None:
+            return
+        command = commands[index]
+
+        if command.arg == "text":
+            # Only the user knows the rest; hand them a primed input line.
+            self.buf = list(f"{command.verb} " if command.verb else "")
+            self.pos = len(self.buf)
+            return
+
+        argument = self._command_argument(command)
+        if argument is None:
+            return                  # cancelled at the second menu
+        self._run(f"{command.verb} {argument}".strip() if argument
+                  else command.verb)
+
+    def _command_argument(self, command: Command):
+        """The second menu for a command that needs one, or ``None``."""
+        if command.choices:
+            options = list(command.choices)
+        elif command.arg == "path":
+            options = [e.name for e in self.ctx.other_entries()]
+            if not options:
+                self.print("(nothing in the other pane to choose from)")
+                return None
+            if command.allow_bare:
+                options = [self.ANY_PATH] + options
+        elif command.arg == "options":
+            options = self.command_options(command) or []
+            if not options:
+                self.print(f"(nothing to choose for '{command.verb}')")
+                return None
+        else:
+            return ""               # the command needs no argument
+
+        index = self._menu(f"{command.verb}:", options)
+        if index is None:
+            return None
+        chosen = options[index]
+        return "" if chosen == self.ANY_PATH else chosen
+
+    def _run(self, text: str) -> None:
+        """Put ``text`` on the input line and submit it, as if typed."""
+        self.buf = list(text)
+        self.pos = len(self.buf)
+        self._submit()
+
     # -- key handling ---------------------------------------------------------
     def handle_key(self, key: int):
         if key == 27:  # Esc closes the plugin
@@ -215,6 +355,9 @@ class InputOutputPlugin(PanePlugin):
             return False
         if key == 9:   # Tab: let the app switch panes
             return None
+        if key == curses.KEY_F2 and self.commands:
+            self.command_menu()
+            return True
         if key in (10, 13, curses.KEY_ENTER):
             self._submit()
             return True
@@ -351,6 +494,12 @@ class InputOutputPlugin(PanePlugin):
             self.put(stdscr, cy, x + cx, 1, ch, theme.attr("inputcursor"),
                      pad=False)
 
-        status = " working... " if self.busy else \
-            " Enter run   Esc close   PgUp/PgDn scroll   Up/Down history "
+        if self.busy:
+            status = " working... "
+        elif self.commands:
+            status = (" F2 commands   Enter run   Esc close"
+                      "   PgUp/PgDn scroll   Up/Down history ")
+        else:
+            status = (" Enter run   Esc close   PgUp/PgDn scroll"
+                      "   Up/Down history ")
         self.put(stdscr, y + h - 1, x, w, status, theme.attr("keybar"))

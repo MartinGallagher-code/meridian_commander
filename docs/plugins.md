@@ -10,6 +10,29 @@ directory and entries — so it can do work on whatever you have open next to
 it. `Esc` closes the plug-in and returns the pane to its file listing; `Tab`
 still switches panes while a plug-in is open.
 
+## Commands without typing (`F2`)
+
+Most plug-ins take a small vocabulary — `status`, `log`, `diff`, `zip`, `trim` —
+rather than free text. Press **`F2`** inside one and it lists what it can do,
+each entry on its own letter, with a one-line description. Pick one and it
+runs; nothing is typed.
+
+Commands that need more ask for it the same way rather than making you spell it
+out:
+
+- a **file** argument (`tail`, `git diff`, `verify`) offers the other pane's
+  listing, with an *everything* row for the commands that also work bare;
+- a **fixed choice** (`case lower|upper|title`) offers the choices;
+- a **column** (`col`, `drop`, `split`) offers the table's own column names,
+  read from the file you have selected;
+- free text that only you know — a commit message, a rename pattern — puts the
+  verb on the input line and leaves the rest to you.
+
+Typing still works exactly as it always did; the menu just builds the same line
+for you. Plug-ins whose input is genuinely free text (Find, Grep, JSON push,
+Run remote script) have no menu, and the three that already run on keys
+(Terminal, Processes, Provost data) never needed one.
+
 ## Built-in plug-ins
 
 - **Terminal** — the in-pane pseudo-terminal (also on the `t` key); a shell

@@ -21,7 +21,7 @@ own filesystem, so it works on remote (SFTP/SSH/FTP) panes as well as local.
 
 from __future__ import annotations
 
-from ..plugin_api import InputOutputPlugin
+from ..plugin_api import Command, InputOutputPlugin
 
 VERBS = ("replace", "prefix", "suffix", "case", "number")
 
@@ -71,6 +71,16 @@ def rename_one(name: str, verb: str, args: list[str], index: int) -> str:
 
 class MultiRename(InputOutputPlugin):
     name = "Multi-rename"
+    commands = (
+        Command("replace", "replace OLD with NEW in every name", arg="text"),
+        Command("prefix", "put text in front of every name", arg="text"),
+        Command("suffix", "put text before every extension", arg="text"),
+        Command("case", "change the case of every name",
+                choices=("lower", "upper", "title")),
+        Command("number", "number them from a template", arg="text"),
+        Command("preview", "try a rule without renaming anything",
+                arg="text"),
+    )
     description = "Rename the other pane's tagged files by a rule"
     prompt = "rule> "
 

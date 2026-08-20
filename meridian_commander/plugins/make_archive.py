@@ -24,7 +24,7 @@ import time
 import zipfile
 
 from . import _io
-from ..plugin_api import InputOutputPlugin
+from ..plugin_api import Command, InputOutputPlugin
 from ..util import human_size
 
 # arcname -> (payload, mtime); directories are implied by their members.
@@ -37,8 +37,13 @@ VERBS = {
 
 class MakeArchive(InputOutputPlugin):
     name = "Make archive"
+    commands = (
+        Command("zip", "pack the tagged entries into a .zip"),
+        Command("tar", "pack them into a .tar"),
+        Command("tgz", "pack them into a .tar.gz"),
+    )
     description = "Pack the other pane's tagged files into a zip or tar"
-    prompt = "zip|tar|tgz [name]> "
+    prompt = "F2 for formats, or type one> "
 
     @property
     def greeting(self) -> str:

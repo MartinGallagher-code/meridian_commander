@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 
-from ..plugin_api import InputOutputPlugin
+from ..plugin_api import Command, InputOutputPlugin
 
 #: Files in ~/.ssh that are never private keys, so the scan skips them.
 _NOT_KEYS = {"known_hosts", "known_hosts.old", "config", "authorized_keys",
@@ -63,8 +63,13 @@ def classify(text: str):
 
 class SshDoctor(InputOutputPlugin):
     name = "SSH doctor"
+    commands = (
+        Command("list", "every private key in ~/.ssh, with its format"),
+        Command("agent", "what ssh-add -l reports"),
+        Command("convert", "convert a key to the modern format", arg="text"),
+    )
     description = "Inspect ~/.ssh keys and convert legacy ones to modern format"
-    prompt = "list|agent|convert <key>> "
+    prompt = "F2 for commands, or type one> "
     greeting = ("SSH key doctor. Commands:\n"
                 "  list           -- scan ~/.ssh and classify each private key\n"
                 "  agent          -- what ssh-add -l reports\n"

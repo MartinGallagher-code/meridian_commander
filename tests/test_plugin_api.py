@@ -6,7 +6,9 @@ import curses
 
 import pytest
 
+from meridian_commander import dialogs
 from meridian_commander.plugin_api import (
+    Command,
     InputOutputPlugin,
     PanePlugin,
     PluginContext,
@@ -366,3 +368,171 @@ def test_drawing_wraps_a_long_input_line_onto_the_second_row(ctx):
     first, second = with_curses_screen(24, 60, draw)
     assert first.startswith("echo> ")
     assert "x" in second        # the overflow continues on the next row
+
+
+# -- the F2 command menu -------------------------------------------------------
+
+class _Menued(_Echo):
+    """An echo plug-in with one command of every kind."""
+
+    name = "Menued"
+    commands = (
+        Command("now", "runs immediately"),
+        Command("", "the Enter-only one", label="default"),
+        Command("say", "wants typing", arg="text"),
+        Command("shade", "fixed answers", choices=("light", "dark")),
+        Command("open", "pick a file", arg="path"),
+        Command("only", "pick a file, no bare row", arg="path",
+                allow_bare=False),
+        Command("pick", "plug-in supplied answers", arg="options"),
+    )
+
+    options: list[str] | None = ["alpha", "beta"]
+
+    def command_options(self, command):
+        return self.options
+
+
+@pytest.fixture
+def menued(ctx, monkeypatch):
+    """A _Menued whose menus answer from a script, recording what they showed."""
+    shown: list[tuple[str, list[str]]] = []
+    answers: list = []
+
+    def fake_menu(stdscr, title, options, keys=None):
+        shown.append((title, list(options)))
+        answer = answers.pop(0)
+        if isinstance(answer, str):
+            return next(i for i, o in enumerate(options) if o.startswith(answer))
+        return answer
+
+    monkeypatch.setattr(dialogs, "menu", fake_menu)
+    plugin = _Menued(ctx)
+    plugin.shown = shown
+    plugin.answers = answers
+    return plugin
+
+
+def test_f2_runs_a_command_that_needs_nothing(menued):
+    menued.answers.append("now")
+    assert menued.handle_key(curses.KEY_F2) is True
+    assert "you said now" in menued.output
+    title, labels = menued.shown[0]
+    assert title == "Menued: commands"
+    assert labels[0].startswith("now ")
+    assert "runs immediately" in labels[0]
+
+
+def test_the_menu_lists_a_labelled_verbless_command(menued):
+    menued.answers.append("default")
+    menued.handle_key(curses.KEY_F2)
+    # An empty verb submits an empty line, exactly as pressing Enter would.
+    assert "you said " in menued.output
+
+
+def test_a_text_command_primes_the_input_line_without_running(menued):
+    menued.answers.append("say")
+    menued.handle_key(curses.KEY_F2)
+    assert "".join(menued.buf) == "say "
+    assert menued.pos == 4
+    assert not any("you said" in line for line in menued.output)
+
+
+def test_a_choices_command_asks_a_second_menu(menued):
+    menued.answers += ["shade", "dark"]
+    menued.handle_key(curses.KEY_F2)
+    assert menued.shown[1] == ("shade:", ["light", "dark"])
+    assert "you said shade dark" in menued.output
+
+
+def test_a_path_command_offers_the_other_panes_entries(menued):
+    menued.answers += ["open", "file.txt"]
+    menued.handle_key(curses.KEY_F2)
+    title, options = menued.shown[1]
+    assert title == "open:"
+    assert options[0] == InputOutputPlugin.ANY_PATH
+    assert "file.txt" in options
+    assert "you said open file.txt" in menued.output
+
+
+def test_the_everything_row_runs_the_command_bare(menued):
+    menued.answers += ["open", InputOutputPlugin.ANY_PATH]
+    menued.handle_key(curses.KEY_F2)
+    assert "you said open" in menued.output
+
+
+def test_a_command_that_insists_on_a_path_offers_no_bare_row(menued):
+    menued.answers += ["only", "file.txt"]
+    menued.handle_key(curses.KEY_F2)
+    assert InputOutputPlugin.ANY_PATH not in menued.shown[1][1]
+
+
+def test_a_path_command_with_an_empty_pane_says_so(menued, app, tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    app.right.chdir(str(empty))
+    menued.answers.append("open")
+    menued.handle_key(curses.KEY_F2)
+    assert "nothing in the other pane" in "\n".join(menued.output)
+
+
+def test_an_options_command_uses_what_the_plugin_supplies(menued):
+    menued.answers += ["pick", "beta"]
+    menued.handle_key(curses.KEY_F2)
+    assert menued.shown[1] == ("pick:", ["alpha", "beta"])
+    assert "you said pick beta" in menued.output
+
+
+def test_an_options_command_with_nothing_to_offer_says_so(menued):
+    menued.options = None
+    menued.answers.append("pick")
+    menued.handle_key(curses.KEY_F2)
+    assert "nothing to choose for 'pick'" in "\n".join(menued.output)
+
+
+def test_cancelling_the_command_menu_does_nothing(menued):
+    menued.answers.append(None)
+    menued.handle_key(curses.KEY_F2)
+    assert menued.output == ["welcome"]
+
+
+def test_cancelling_the_second_menu_does_nothing(menued):
+    menued.answers += ["shade", None]
+    menued.handle_key(curses.KEY_F2)
+    assert menued.output == ["welcome"]
+
+
+def test_f2_is_an_ordinary_key_for_a_plugin_with_no_commands(ctx):
+    plugin = _Echo(ctx)
+    assert plugin.handle_key(curses.KEY_F2) is True
+    assert plugin.output == ["welcome"]        # nothing ran
+
+
+def test_the_command_menu_needs_a_screen_to_draw_on(ctx):
+    plugin = _Menued(PluginContext(app=None, own_panel=ctx.own_panel,
+                                   other_panel=ctx.other_panel))
+    plugin.command_menu()                      # app is None: silently declines
+    assert plugin.output == ["welcome"]
+
+
+def test_command_options_defaults_to_nothing(ctx):
+    assert _Echo(ctx).command_options(Command("x")) is None
+
+
+def test_the_footer_advertises_the_menu_only_when_there_is_one(ctx, menued):
+    def draw(plugin):
+        def paint(stdscr):
+            plugin.draw(stdscr, 0, 0, 20, 60)
+            return stdscr.instr(19, 0, 60).decode()
+
+        return with_curses_screen(24, 62, paint)
+
+    assert "F2 commands" in draw(menued)
+    assert "F2 commands" not in draw(_Echo(ctx))
+
+
+def test_calling_the_command_menu_without_commands_does_nothing(ctx):
+    # F2 never reaches it for such a plug-in, but the method is public.
+    plugin = _Echo(ctx)
+    plugin.command_menu()
+    assert plugin.output == ["welcome"]
