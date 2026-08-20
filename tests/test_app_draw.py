@@ -249,6 +249,17 @@ class _LoopScreen(_StubScreen):
 
 @pytest.fixture
 def loop_app(panes, monkeypatch):
+    # The stub screen absorbs every drawing call that is a method on it. The
+    # loop makes two that are not -- curses.curs_set() on the way in and
+    # curses.doupdate() at the end of each draw() -- and those go to the
+    # library itself, which refuses unless a screen has been initialised.
+    # These tests passed only because a real-screen test earlier in this file
+    # had left one initialised behind them; on their own, all four failed
+    # with "must call initscr() first". Absorb the two globals as well, so
+    # they depend on nothing but themselves.
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    monkeypatch.setattr(curses, "curs_set", lambda visibility: 0)
+
     def make(keys, **kwargs):
         screen = _LoopScreen(keys, **kwargs)
         app = App(screen, str(panes / "left"), str(panes / "right"))

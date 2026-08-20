@@ -75,6 +75,20 @@ rather than about which mock it called.
 
 A test must not need the network, a server, or a particular machine.
 
+### The curses screens do not run on macOS
+
+The 378 tests that put a real curses screen on a pseudo-terminal are skipped
+on macOS, where the arrangement deadlocks: Apple's ncurses blocks inside
+`doupdate()` while `select()` reports the master end has nothing to drain, so
+the writer waits on a reader that has been told there is nothing to read. The
+other ~2,450 tests run there, and the macOS CI jobs exist for them.
+
+This is a gap in the harness, not a known fault in the application, and it is
+worth closing — it leaves the drawing code unexercised on one of the two
+supported platforms. `MERIDIAN_CURSES_TESTS=1` runs them anyway if you have a
+Mac and a debugger. The coverage gate is enforced on Linux only, for the same
+reason.
+
 ## Style
 
 Match the file you are editing. Across the tree that means:

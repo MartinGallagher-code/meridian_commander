@@ -55,6 +55,17 @@ day the version was cut.
 - A duplicated key in the PDF fallback width table, a `raise` inside an
   `except` that dropped the exception chain, and three locals assigned and
   never read.
+- Four tests in `test_app_draw.py` passed only because a test earlier in the
+  same file had left a curses screen initialised behind them; run on their
+  own, all four failed. They stub the two globals the loop reaches for and
+  now stand alone.
+
+### Known limitation
+
+- The 378 tests that drive a real curses screen on a pseudo-terminal are
+  skipped on macOS, where that arrangement deadlocks inside Apple's ncurses.
+  The rest of the suite runs there, and the coverage gate stays on Linux.
+  See `CURSES_SCREENS` in `tests/support.py`.
 
 ## [1.3.0] — 2026-08-13
 

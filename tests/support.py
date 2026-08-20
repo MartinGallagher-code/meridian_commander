@@ -14,6 +14,7 @@ import os
 import pty
 import select
 import struct
+import sys
 import tarfile
 import threading
 import zipfile
@@ -183,6 +184,26 @@ def _drain(fd: int, stop) -> None:
             return
 
 
+#: Whether a real curses screen can be put on a pseudo-terminal here.
+#:
+#: Not on macOS, where the arrangement deadlocks on the very first screen
+#: drawn.  Apple's ncurses blocks inside ``doupdate()`` while ``select()``
+#: reports the master end has nothing to drain -- so the writer waits for a
+#: reader that has been told there is nothing to read, and neither moves
+#: again.  Fifteen minutes of that is what the first macOS CI run bought.
+#:
+#: It is the harness that does not work there, not the application. The rest
+#: of the suite -- the filesystems, the parsers, the plug-ins, the sync
+#: planner, some 2,450 tests -- runs on macOS and is worth running, so the
+#: screens skip rather than the platform going untested. The coverage gate
+#: stays on Linux, where every statement is still reached.
+#:
+#: Set ``MERIDIAN_CURSES_TESTS=1`` to run them anyway: on a Mac, with a
+#: debugger, that is how this gets fixed.
+CURSES_SCREENS = (sys.platform != "darwin"
+                  or os.environ.get("MERIDIAN_CURSES_TESTS") == "1")
+
+
 def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
     """Run ``fn(stdscr)`` on a real curses screen ``rows`` x ``cols``.
 
@@ -196,6 +217,9 @@ def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
     not there -- ``init_pair`` still answers to the real terminal -- so it is
     only useful for the paths that check the count and then decline to use it.
     """
+    if not CURSES_SCREENS:
+        pytest.skip("a curses screen on a pty deadlocks on this platform; "
+                    "set MERIDIAN_CURSES_TESTS=1 to try anyway")
     master, slave = pty.openpty()
     stop = threading.Event()
     reader = threading.Thread(target=_drain, args=(master, stop), daemon=True)
