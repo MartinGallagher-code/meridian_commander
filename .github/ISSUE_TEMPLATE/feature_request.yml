@@ -1,0 +1,54 @@
+name: Feature request
+description: Suggest something Meridian Commander should do
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before writing: a great deal is already there and reachable by a key
+        you may not have found. `F1` lists the bindings, `Esc` opens the
+        menus, and the [README](../blob/main/README.md#usage) has the full
+        reference.
+
+        Note also that much of what a file manager might do belongs in a
+        **plug-in** rather than in the core — the plug-in takes over one pane
+        and can work on whatever the other pane holds. See
+        [docs/plugins.md](../blob/main/docs/plugins.md).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: >
+        The task, not the solution. "I keep having to drop to a shell to
+        compare two directories" tells us more than "add a diff key", and
+        sometimes has an answer already.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+      description: >
+        If it needs a key or a menu entry, say which — the keys are mostly
+        spoken for, and finding a free one is usually the hard part.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: shape
+    attributes:
+      label: Where do you think this belongs
+      options:
+        - In the core
+        - As a plug-in
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today
+      description: How you work around it now, and why that is not good enough.

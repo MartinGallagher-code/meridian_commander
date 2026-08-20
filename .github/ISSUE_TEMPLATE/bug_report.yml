@@ -1,0 +1,97 @@
+name: Bug report
+description: Something does not work the way it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Most bugs in a terminal program come down to
+        which terminal, so the environment questions below matter more than
+        they usually would.
+
+        Please do not report a **security** problem here — see
+        [SECURITY.md](../blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+      placeholder: |
+        Pressed F5 to copy a directory from an SFTP pane to the local pane.
+        Expected the progress dialog; got a traceback and the app quit.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: >
+        The shortest sequence that shows it. If it needs a particular file,
+        attach one if you can share it — a file that breaks a reader is the
+        single most useful thing in a report.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Meridian Commander version
+      description: "`meridian --version`"
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version and platform
+      description: "`python -V`, and Linux or macOS (which distribution or release)"
+    validations:
+      required: true
+
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal and $TERM
+      description: >
+        Which terminal program, and what `echo $TERM` prints. Also say if you
+        are inside tmux, screen, or an IDE's built-in terminal.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it was installed
+      options:
+        - pip install meridian-commander
+        - pip install "meridian-commander[ssh]"
+        - pipx
+        - Editable install from a clone (pip install -e)
+        - Distribution package
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Which pane
+      description: If a remote location is involved, which kind.
+      options:
+        - Local only
+        - SFTP
+        - SSH (shell)
+        - FTP
+        - An archive browsed as a directory
+        - Not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: traceback
+    attributes:
+      label: Traceback or error text
+      description: Paste it whole, if there was one. It is formatted as code automatically.
+      render: text

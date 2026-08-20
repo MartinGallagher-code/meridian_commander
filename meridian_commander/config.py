@@ -95,12 +95,26 @@ def config_path() -> str:
     return os.path.join(config_dir(), "config.ini")
 
 
+def _private_write(path: str):
+    """Open ``path`` for writing, readable only by its owner.
+
+    The file holds each plug-in's ``[plugin:<name>]`` section, and some of
+    those sections have a ``password`` in them, so it must not be created at
+    whatever the umask happens to allow.  The mode applies only when the file
+    is created; an existing one keeps the permissions it has, which is the
+    right answer for a file the user may have deliberately locked down
+    further.
+    """
+    return os.fdopen(
+        os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600), "w")
+
+
 def ensure_config() -> str:
     """Create the config file with commented defaults if missing; return path."""
     path = config_path()
     if not os.path.exists(path):
-        os.makedirs(config_dir(), exist_ok=True)
-        with open(path, "w") as f:
+        os.makedirs(config_dir(), mode=0o700, exist_ok=True)
+        with _private_write(path) as f:
             f.write(DEFAULT_CONFIG)
     return path
 
@@ -164,8 +178,8 @@ def save_scheme(name: str) -> bool:
         parser.add_section("ui")
     parser.set("ui", "scheme", name)
     try:
-        os.makedirs(config_dir(), exist_ok=True)
-        with open(config_path(), "w") as f:
+        os.makedirs(config_dir(), mode=0o700, exist_ok=True)
+        with _private_write(config_path()) as f:
             parser.write(f)
     except OSError:
         return False

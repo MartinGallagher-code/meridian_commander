@@ -1,0 +1,21 @@
+# Keep the workflow actions current.
+#
+# Only github-actions is watched. The package itself has no required runtime
+# dependencies -- the core runs on the standard library -- and its optional
+# and development ones are floor constraints (paramiko>=2.7, pytest>=7.0)
+# rather than pins, so there is nothing for a pip ecosystem entry to bump.
+# Actions are different: they are pinned to a major version that goes stale
+# and eventually stops running when the runner's Node does.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"
+    groups:
+      # One pull request a month rather than one per action.
+      actions:
+        patterns: ["*"]

@@ -1218,6 +1218,18 @@ fixtures; the guiding rule is that only the terminal and the blocking dialogs
 are ever replaced, so assertions are about what the application did rather
 than which mock it called.
 
+## Contributing
+
+Bug reports, patches and plug-ins are welcome.
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the setup, what CI checks and why,
+how the test harness is built, and what a pull request should look like.
+[CHANGELOG.md](CHANGELOG.md) records what changed in each release, and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) is short and says what you would
+expect.
+
+Found a security problem? Please report it privately —
+[SECURITY.md](SECURITY.md) says how, and describes what this program touches.
+
 ## License
 
 GNU General Public License v3.0 — see [LICENSE](LICENSE).
