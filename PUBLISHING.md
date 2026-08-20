@@ -68,8 +68,35 @@ git push origin v1.3.0
 ```
 
 Pushing a tag that names an already-published version is harmless: the
-workflow asks PyPI first and stops with a clear message rather than failing
-inside twine.
+workflow asks PyPI first, and for a tag it logs a notice and skips the upload
+rather than failing. (A manual dispatch or a `[release]` merge that cannot
+upload still stops loudly — there, not being able to publish means someone
+forgot to bump the version.)
+
+### The four releases that were never tagged
+
+1.0.0 through 1.3.0 are on PyPI and absent from this history. Each release
+commit carries its own version in both `pyproject.toml` and `__init__.py`, so
+the mapping is unambiguous:
+
+```bash
+git tag -a v1.0.0 be40a0d -m "meridian-commander 1.0.0"   # 2026-07-22
+git tag -a v1.1.0 b49bd6f -m "meridian-commander 1.1.0"   # 2026-07-23
+git tag -a v1.2.0 7c6792d -m "meridian-commander 1.2.0"   # 2026-08-10
+git tag -a v1.3.0 552dc66 -m "meridian-commander 1.3.0"   # 2026-08-13
+git push origin v1.0.0 v1.1.0 v1.2.0 v1.3.0
+```
+
+Expect each of those four pushes to run the workflow **as it stood at that
+commit**, not as it stands now — so the skip-the-upload behaviour above does
+not apply to them, and all four runs will go red. Nothing can actually be
+republished (PyPI never allows a filename to be reused), but the 1.2.0 and
+1.3.0 commits will stop at their own pre-check while 1.0.0 and 1.1.0, which
+predate it, will attempt an upload and be refused by PyPI. That is a one-off
+cost of backfilling; tags cut from here on behave properly.
+
+Once they exist, the links at the foot of `CHANGELOG.md` can become ordinary
+`compare/v1.2.0...v1.3.0` links instead of pointing at commit SHAs.
 
 ## Publishing manually instead
 
