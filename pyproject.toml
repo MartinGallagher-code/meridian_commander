@@ -146,6 +146,12 @@ testpaths = ["tests"]
 # any honest test while still failing fast.
 timeout = 120
 timeout_method = "thread"
+# Thirty seconds before that kill, pytest's own faulthandler dumps every
+# thread's stack. It writes to the stderr pytest stashed before it started
+# capturing, so unlike anything the timeout itself prints, this survives both
+# the capture and the exit -- which is the difference between a CI log that
+# names the wedged line and one that just stops.
+faulthandler_timeout = 90
 # An xfail that starts passing is a test that has stopped testing what it
 # says; say so rather than reporting it as a pass.
 xfail_strict = true

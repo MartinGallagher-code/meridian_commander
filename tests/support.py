@@ -162,15 +162,23 @@ def _drain(fd: int, stop) -> None:
     inside curses, below any Python that could notice -- this loop stops for
     exactly one reason: the master is gone, so there is nothing left that
     could block.  In particular a zero-length read is *not* treated as the
-    end.  A pty master signals a vanished slave with ``EIO`` rather than EOF,
-    so an empty read here means only "nothing to read this time"; returning on
-    it retired the drain while the terminal was still live, and the next
-    screen large enough to fill the buffer then hung the whole run.
+    end.  On Linux a pty master signals a vanished slave with ``EIO``, so an
+    empty read there means only "nothing to read this time"; returning on it
+    retired the drain while the terminal was still live, and the next screen
+    large enough to fill the buffer then hung the whole run.
+
+    macOS reports that same vanished slave as an ordinary end-of-file, and
+    keeps reporting it: the master stays readable and every read comes back
+    empty.  So an empty read cannot end the loop and cannot be spun on
+    either -- wait out the same interval as ``select`` would have, and leave
+    ending the loop to the stop flag, which teardown sets.
     """
     while not stop.is_set():
         try:
-            if select.select([fd], [], [], 0.05)[0]:
-                os.read(fd, 65536)
+            if not select.select([fd], [], [], 0.05)[0]:
+                continue
+            if not os.read(fd, 65536):
+                stop.wait(0.05)
         except OSError:
             return
 
