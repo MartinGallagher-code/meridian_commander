@@ -96,12 +96,14 @@ def find_store(fs, path: str, environ, configured: str = ""):
                 return override, "PROVOST_WORKSPACE"
             tried.append(override)
 
-    if is_store(fs, path):
-        return path, "this directory"
-
-    # A controlled directory holds its instance at <dir>/.provost; walk up.
-    here = fs.normpath(path)
+    # Walk up from the pane's directory looking for either a store itself (the
+    # pane may be sitting inside one -- in its captures/ or datasets/) or a
+    # controlled directory, which holds its instance at <dir>/.provost.
+    start = fs.normpath(path)
+    here = start
     while True:
+        if is_store(fs, here):
+            return here, "this directory" if here == start else f"store: {here}"
         candidate = fs.join(here, ".provost")
         if is_store(fs, candidate):
             return candidate, f"controlled: {here}"
@@ -255,6 +257,7 @@ class _View:
 class ProvostBrowser(PanePlugin):
     name = "Provost data"
     description = "Browse the other pane's provost store: datasets, log, sources"
+    wants_timer = True     # the app polls tick() so the store follows the pane
 
     def on_start(self) -> None:
         self.cfg = plugin_settings("provost", DEFAULTS)
@@ -271,7 +274,40 @@ class ProvostBrowser(PanePlugin):
                 "[plugin:provost]." % how)
         self.store = store
         self.store_kind = how
+        self._followed = (self.fs, self.ctx.other_path)
         self.stack: list[_View] = [self._datasets_view()]
+
+    # -- following the other pane ---------------------------------------------
+    def tick(self) -> None:
+        """Re-resolve the store when the other pane moves.
+
+        provost picks its store from the directory it runs in, so browsing to
+        a controlled directory in the other pane should show *that* instance.
+        The comparison is a cheap identity/string test; the filesystem is only
+        consulted when the pane has actually moved (or reconnected, which
+        replaces the backend object).
+        """
+        here = (self.ctx.other_fs, self.ctx.other_path)
+        if here == self._followed:
+            return
+        self._followed = here
+        self._follow()
+
+    def _follow(self) -> None:
+        """Point the browser at whatever store the other pane sits in now."""
+        fs, path = self.ctx.other_fs, self.ctx.other_path
+        store, how = find_store(fs, path, os.environ,
+                                str(self.cfg.get("store", "")).strip())
+        if store is None:
+            # A directory outside any store is not worth throwing the view
+            # away for -- say so and keep showing what is already open.
+            self.status = f"no store under {path} -- still showing {self.store}"
+            return
+        if store == self.store and fs is self.fs:
+            return
+        self.fs, self.store, self.store_kind = fs, store, how
+        self.stack = [self._datasets_view()]
+        self.status = f"followed pane -- {how}: {store}"
 
     # -- reading through the pane's filesystem --------------------------------
     def _read(self, path: str, max_bytes: int):
@@ -436,6 +472,13 @@ class ProvostBrowser(PanePlugin):
                 self.status = "row has no #N index"
 
     def _reload(self) -> None:
+        # Re-check the pane first: 'r' should be enough to catch up after a
+        # move, without waiting for the timer.
+        self._followed = (self.ctx.other_fs, self.ctx.other_path)
+        before = self.store
+        self._follow()
+        if self.store != before:
+            return                    # _follow already rebuilt the view
         view = self.stack[-1]
         if view.kind == "datasets":
             self.stack[-1] = self._datasets_view()
