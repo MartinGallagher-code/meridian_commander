@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from meridian_commander.plugins.find_dupes import FindDupes
 

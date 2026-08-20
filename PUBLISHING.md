@@ -26,16 +26,22 @@ distribution name is **`meridian-commander`**; the import package is
    checks that they are, and PyPI refuses a version it already has):
    - `pyproject.toml` → `[project] version`
    - `meridian_commander/__init__.py` → `__version__`
-2. Run the checks locally:
+2. Move everything under `## [Unreleased]` in `CHANGELOG.md` into a new
+   section for the version, dated today, and add the link at the foot of the
+   file.
+3. Run the checks locally:
 
    ```bash
    pip install -e ".[dev]"
    pytest
+   coverage run -m pytest && coverage report
+   ruff check .
+   mypy meridian_commander
    python -m build            # builds sdist + wheel into dist/
    twine check dist/*
    ```
 
-3. Commit, tag and push:
+4. Commit, tag and push:
 
    ```bash
    git tag v1.0.0
@@ -44,6 +50,53 @@ distribution name is **`meridian-commander`**; the import package is
 
    With trusted publishing configured, the `publish.yml` workflow runs the
    test suite, builds, and uploads to PyPI on the tag push.
+
+### Tag the release even when you cut it the other way
+
+The workflow also publishes when a push to `main` carries `[release]` in its
+commit message, which lets a release be cut by merging a pull request with
+that marker in the squash title. That route is convenient and it skips the
+tag, which is why releases 1.0.0 through 1.3.0 exist on PyPI but nowhere in
+this repository's history — there is no `v1.2.0` to check out, diff against,
+or link a changelog entry to.
+
+If you release that way, tag the merge commit afterwards:
+
+```bash
+git tag v1.3.0 <the merge commit>
+git push origin v1.3.0
+```
+
+Pushing a tag that names an already-published version is harmless: the
+workflow asks PyPI first, and for a tag it logs a notice and skips the upload
+rather than failing. (A manual dispatch or a `[release]` merge that cannot
+upload still stops loudly — there, not being able to publish means someone
+forgot to bump the version.)
+
+### The four releases that were never tagged
+
+1.0.0 through 1.3.0 are on PyPI and absent from this history. Each release
+commit carries its own version in both `pyproject.toml` and `__init__.py`, so
+the mapping is unambiguous:
+
+```bash
+git tag -a v1.0.0 be40a0d -m "meridian-commander 1.0.0"   # 2026-07-22
+git tag -a v1.1.0 b49bd6f -m "meridian-commander 1.1.0"   # 2026-07-23
+git tag -a v1.2.0 7c6792d -m "meridian-commander 1.2.0"   # 2026-08-10
+git tag -a v1.3.0 552dc66 -m "meridian-commander 1.3.0"   # 2026-08-13
+git push origin v1.0.0 v1.1.0 v1.2.0 v1.3.0
+```
+
+Expect each of those four pushes to run the workflow **as it stood at that
+commit**, not as it stands now — so the skip-the-upload behaviour above does
+not apply to them, and all four runs will go red. Nothing can actually be
+republished (PyPI never allows a filename to be reused), but the 1.2.0 and
+1.3.0 commits will stop at their own pre-check while 1.0.0 and 1.1.0, which
+predate it, will attempt an upload and be refused by PyPI. That is a one-off
+cost of backfilling; tags cut from here on behave properly.
+
+Once they exist, the links at the foot of `CHANGELOG.md` can become ordinary
+`compare/v1.2.0...v1.3.0` links instead of pointing at commit SHAs.
 
 ## Publishing manually instead
 

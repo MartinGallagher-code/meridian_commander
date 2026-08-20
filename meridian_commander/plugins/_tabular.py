@@ -17,8 +17,7 @@ import csv
 import io
 import json
 import re
-import statistics
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 # Streaming reads happen in 64 KiB chunks; a single logical read is capped so a
 # huge file cannot exhaust memory or hang the TUI.

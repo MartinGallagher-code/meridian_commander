@@ -8,7 +8,6 @@ import re
 import pytest
 
 from meridian_commander.app import App
-from meridian_commander.panel import Panel
 
 from support import _StubScreen, with_curses_screen, write
 
@@ -83,7 +82,7 @@ def test_sizes_and_times_are_rendered(panes):
 
 def test_a_symlink_is_marked(panes):
     text, _ = _render(panes, cols=200)
-    link_line = [l for l in text.splitlines() if "alias" in l][0]
+    link_line = [line for line in text.splitlines() if "alias" in line][0]
     # The marker column, just inside the window frame, carries "@".
     assert link_line[1] == "@"
 
@@ -93,7 +92,7 @@ def test_tagged_entries_are_marked(panes):
         app.left.selected = {"readme.txt"}
 
     text, _ = _render(panes, prepare=tag)
-    tagged = [l for l in text.splitlines() if "readme.txt" in l][0]
+    tagged = [line for line in text.splitlines() if "readme.txt" in line][0]
     assert tagged[1] == "*"
 
 
@@ -250,6 +249,17 @@ class _LoopScreen(_StubScreen):
 
 @pytest.fixture
 def loop_app(panes, monkeypatch):
+    # The stub screen absorbs every drawing call that is a method on it. The
+    # loop makes two that are not -- curses.curs_set() on the way in and
+    # curses.doupdate() at the end of each draw() -- and those go to the
+    # library itself, which refuses unless a screen has been initialised.
+    # These tests passed only because a real-screen test earlier in this file
+    # had left one initialised behind them; on their own, all four failed
+    # with "must call initscr() first". Absorb the two globals as well, so
+    # they depend on nothing but themselves.
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    monkeypatch.setattr(curses, "curs_set", lambda visibility: 0)
+
     def make(keys, **kwargs):
         screen = _LoopScreen(keys, **kwargs)
         app = App(screen, str(panes / "left"), str(panes / "right"))

@@ -69,14 +69,17 @@ class Command:
 
     ``arg`` says what the command still needs once it is chosen:
 
-    ``None``      run it there and then;
-    ``"text"``    put ``verb `` on the input line and let the user type the
-                  rest (a commit message, a pattern -- something only they
-                  know);
-    ``"path"``    offer the other pane's entries as a second menu, with an
-                  "everything" row for the commands that also work bare;
-    ``"options"`` offer whatever :meth:`InputOutputPlugin.command_options`
-                  returns for this command -- the table's column names, say.
+    ``None``
+        Run it there and then.
+    ``"text"``
+        Put the verb, and a space, on the input line and let the user type
+        the rest -- a commit message, a pattern, something only they know.
+    ``"path"``
+        Offer the other pane's entries as a second menu, with an "everything"
+        row for the commands that also work bare.
+    ``"options"``
+        Offer whatever :meth:`InputOutputPlugin.command_options` returns for
+        this command -- the table's column names, say.
 
     ``choices`` is the fixed-list version of ``"options"``: give it here when
     the answers are known up front (``lower|upper|title``).
@@ -234,8 +237,17 @@ class InputOutputPlugin(PanePlugin):
 
     #: Prompt shown in front of the input line.
     prompt = "> "
-    #: Greeting printed when the plugin opens (override or set to "").
-    greeting = ""
+
+    @property
+    def greeting(self) -> str:
+        """Greeting printed when the plugin opens; "" for none.
+
+        A property rather than a plain attribute because nearly every
+        plug-in's greeting depends on what the panes hold when it opens, and
+        a subclass cannot narrow a writeable attribute to a computed one.
+        """
+        return ""
+
     #: Commands offered by the ``F2`` menu -- a tuple of :class:`Command`.
     #: Left empty, the plug-in is typing-only and ``F2`` does nothing.
     commands: tuple[Command, ...] = ()

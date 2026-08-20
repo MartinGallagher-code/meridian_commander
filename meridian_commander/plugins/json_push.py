@@ -105,8 +105,11 @@ class JsonPush(InputOutputPlugin):
 
         client = self._connect()
         cfg = self.config
-        transport = client.get_transport()
-        chan = transport.open_channel(
+        # _connect() hands back a client whose transport was live a moment
+        # ago; a moment is long enough for a server to drop it, so ask again
+        # through the guard rather than dereferencing a None.
+        from ..filesystems import _live_transport
+        chan = _live_transport(client).open_channel(
             "direct-tcpip",
             (cfg["listener_host"], int(cfg["listener_port"])),
             ("127.0.0.1", 0),
@@ -143,4 +146,4 @@ class JsonPush(InputOutputPlugin):
             pretty = json.dumps(json.loads(text_reply), indent=2)
             return ["<-"] + pretty.splitlines()
         except ValueError:
-            return [f"<- {l}" for l in text_reply.splitlines() or [""]]
+            return [f"<- {line}" for line in text_reply.splitlines() or [""]]

@@ -9,12 +9,15 @@ mock it happened to call.
 from __future__ import annotations
 
 import curses
+import fcntl
 import io
 import os
 import pty
 import select
 import struct
+import sys
 import tarfile
+import termios
 import threading
 import zipfile
 import zlib
@@ -157,13 +160,64 @@ def _drain(fd: int, stop) -> None:
     buffer fills the write blocks for ever.  A blank screen fitted; a screen
     with a painted background does not, which is a property of the terminal
     rather than of the code under test.
+
+    Because the writer cannot recover once that happens -- it is blocked
+    inside curses, below any Python that could notice -- this loop stops for
+    exactly one reason: the master is gone, so there is nothing left that
+    could block.  In particular a zero-length read is *not* treated as the
+    end.  On Linux a pty master signals a vanished slave with ``EIO``, so an
+    empty read there means only "nothing to read this time"; returning on it
+    retired the drain while the terminal was still live, and the next screen
+    large enough to fill the buffer then hung the whole run.
+
+    macOS reports that same vanished slave as an ordinary end-of-file, and
+    keeps reporting it: the master stays readable and every read comes back
+    empty.  So an empty read cannot end the loop and cannot be spun on
+    either -- wait out the same interval as ``select`` would have, and leave
+    ending the loop to the stop flag, which teardown sets.
     """
     while not stop.is_set():
         try:
-            if select.select([fd], [], [], 0.05)[0] and not os.read(fd, 65536):
-                return
+            if not select.select([fd], [], [], 0.05)[0]:
+                continue
+            if not os.read(fd, 65536):
+                stop.wait(0.05)
         except OSError:
             return
+
+
+#: Whether a real curses screen can be put on a pseudo-terminal here.
+#:
+#: Not on macOS.  There the very first screen deadlocks: the main thread
+#: blocks inside ``doupdate()`` and never returns, while the thread draining
+#: the master end sits in ``select()`` being told there is nothing to read.
+#: Nothing in the process can break it either -- CPython's _curses holds the
+#: GIL throughout, so no watchdog thread runs -- which is why the CI job's
+#: timeout-minutes is what ends such a run.
+#:
+#: Two explanations have been tried against CI and are wrong, so nobody need
+#: try them again:
+#:
+#: * *The drain gave up too early.*  It does read on; the faulthandler dump
+#:   shows it idle in ``select()`` with the master reporting nothing to read,
+#:   not stopped.
+#: * *ncurses was asking the terminal how big it was.*  A fresh pty is 0x0,
+#:   and ncurses that cannot get a size from ``TIOCGWINSZ`` will write the
+#:   "u7" cursor-position query and wait for a reply nobody is there to
+#:   send.  ``with_curses_screen`` now sets the window size before curses
+#:   looks -- worth keeping, since a pty ought to have a size -- and macOS
+#:   hangs in exactly the same place regardless.
+#:
+#: What is left needs a Mac and a debugger on the stuck process; it cannot be
+#: chased from a Linux machine at fifteen minutes an attempt.  Meanwhile the
+#: 378 tests that need a screen skip there and the other ~2,450 run, which is
+#: worth much more than not testing macOS at all.  The coverage gate stays on
+#: Linux, where every statement is still reached.
+#:
+#: ``MERIDIAN_CURSES_TESTS=1`` runs them anyway, which is where that debugging
+#: session starts.
+CURSES_SCREENS = (sys.platform != "darwin"
+                  or os.environ.get("MERIDIAN_CURSES_TESTS") == "1")
 
 
 def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
@@ -179,7 +233,19 @@ def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
     not there -- ``init_pair`` still answers to the real terminal -- so it is
     only useful for the paths that check the count and then decline to use it.
     """
+    if not CURSES_SCREENS:
+        pytest.skip("a curses screen on a pty deadlocks on this platform; "
+                    "set MERIDIAN_CURSES_TESTS=1 to try anyway")
     master, slave = pty.openpty()
+    # Tell the pty how big it is before curses asks. A fresh one is 0x0, and
+    # ncurses that cannot get a size out of TIOCGWINSZ falls back to asking
+    # the terminal itself: it writes the "u7" cursor-position query and waits
+    # for the "u6" reply, which on the other end of this pty is nobody. That
+    # wait is inside the library, holding the GIL, so nothing in this process
+    # can time it out -- the shape of a run that stops dead and never speaks
+    # again. With a real size there is nothing to ask.
+    fcntl.ioctl(slave, termios.TIOCSWINSZ,
+                struct.pack("HHHH", rows, cols, 0, 0))
     stop = threading.Event()
     reader = threading.Thread(target=_drain, args=(master, stop), daemon=True)
     reader.start()
@@ -214,10 +280,21 @@ def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
                 curses.COLORS = saved_colours
             curses.endwin()
         stop.set()
-        reader.join(timeout=2)
+        reader.join(timeout=5)
         os.dup2(saved_out, 1)
         os.dup2(saved_in, 0)
-        for fd in (saved_out, saved_in, master, slave):
+        closing = [saved_out, saved_in, slave]
+        # Closing the master out from under a reader that is still selecting
+        # on it hands that thread a stale descriptor, and the very next
+        # openpty() is entitled to the number it just gave up -- so the
+        # straggler would sit and eat the *next* screen's output.  The loop
+        # wakes every 50ms, so failing to join inside five seconds means it is
+        # wedged rather than slow; leak the descriptor to it instead.  A
+        # handful of leaked fds in a test process is cheap next to a thread
+        # quietly reading someone else's terminal.
+        if not reader.is_alive():
+            closing.append(master)
+        for fd in closing:
             os.close(fd)
         if saved_term is None:
             os.environ.pop("TERM", None)

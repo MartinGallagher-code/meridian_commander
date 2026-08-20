@@ -55,14 +55,14 @@ class ComparePanes(InputOutputPlugin):
         shown = 0
         truncated = False
         for rel in sorted(set(left) | set(right)):
-            l, r = left.get(rel), right.get(rel)
-            if l and not r:
+            here, there = left.get(rel), right.get(rel)
+            if here and not there:
                 only_left += 1
                 mark, detail = "<--", "only left"
-            elif r and not l:
+            elif there and not here:
                 only_right += 1
                 mark, detail = "-->", "only right"
-            elif self._differs(rel, l, r, by_hash):
+            elif self._differs(rel, here, there, by_hash):
                 differ += 1
                 mark, detail = "!= ", "differs"
             else:
@@ -80,8 +80,8 @@ class ComparePanes(InputOutputPlugin):
             summary += f" (listing stopped at {MAX_RESULTS})"
         return summary
 
-    def _differs(self, rel: str, l, r, by_hash: bool) -> bool:
-        if (l.size or 0) != (r.size or 0):
+    def _differs(self, rel: str, here, there, by_hash: bool) -> bool:
+        if (here.size or 0) != (there.size or 0):
             return True   # different sizes settle it without reading anything
         c = self.ctx
         if by_hash:
@@ -93,7 +93,7 @@ class ComparePanes(InputOutputPlugin):
             except Exception:
                 return True   # unreadable on a side: report it rather than hide it
             return lh != rh
-        lt, rt = l.mtime, r.mtime
+        lt, rt = here.mtime, there.mtime
         if lt is None or rt is None:
             return False   # same size, no clock to compare: treat as identical
         return abs(lt - rt) > sync.MTIME_TOLERANCE

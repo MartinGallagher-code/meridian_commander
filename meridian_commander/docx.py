@@ -220,7 +220,7 @@ def _table_rows(elem) -> list[list[str]]:
     for tr in elem:
         if local(tr.tag) != "tr":
             continue
-        cells = []
+        cells: list[str] = []
         for tc in tr:
             if local(tc.tag) != "tc":
                 continue

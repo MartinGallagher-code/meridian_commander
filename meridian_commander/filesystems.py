@@ -134,7 +134,7 @@ class FileSystem(abc.ABC):
     def open_write(self, path: str):
         """Return a binary file-like object supporting ``write(bytes)``."""
 
-    def utime(self, path: str, mtime: float) -> None:
+    def utime(self, path: str, mtime: float) -> None:  # noqa: B027
         """Set ``path``'s modification (and access) time to ``mtime``.
 
         Used to give a copied file the same timestamp as its source.  This is
@@ -182,8 +182,13 @@ class FileSystem(abc.ABC):
     def rename(self, src: str, dst: str) -> None:
         """Rename within the same filesystem (used for same-fs moves)."""
 
-    def close(self) -> None:
-        """Release any resources (network connections)."""
+    def close(self) -> None:  # noqa: B027
+        """Release any resources (network connections).
+
+        A backend with nothing to release -- the local disk, an archive read
+        from a file already closed -- inherits this no-op rather than being
+        made to write one, so the default is deliberately not abstract.
+        """
 
 
 # ---------------------------------------------------------------------------
@@ -528,6 +533,24 @@ def _connect_resolved(res: dict, password: str | None, sock):
     return client
 
 
+def _live_transport(client):
+    """The client's transport, or a :class:`FileSystemError` saying it has gone.
+
+    ``get_transport()`` answers ``None`` once the connection has dropped, so
+    the ``client.get_transport().open_session()`` that reads so naturally
+    turns a server that went away -- an idle timeout, a suspended laptop, a
+    VPN that blinked -- into ``AttributeError: 'NoneType' object has no
+    attribute 'open_session'``.  That reaches the user as a bug in the
+    program rather than as the network event it is, and tells them nothing
+    about what to do next.
+    """
+    transport = client.get_transport() if client is not None else None
+    if transport is None:
+        raise FileSystemError(
+            "the SSH connection has closed -- reopen the pane with F2")
+    return transport
+
+
 def _close_ssh_client(client) -> None:
     """Close a client and any jump-host clients its tunnel runs through."""
     if client is None:
@@ -570,13 +593,13 @@ def _open_jump_sock(spec: str, target_host: str, target_port: int,
             else:
                 hres = _resolve_ssh_connection(hhost, user, hport, None,
                                                config_path=config_path)
-                chan = prev.get_transport().open_channel(
+                chan = _live_transport(prev).open_channel(
                     "direct-tcpip", (hres["hostname"], hres["port"]),
                     ("127.0.0.1", 0))
                 c = _connect_resolved(hres, None, chan)
             clients.append(c)
             prev = c
-        chan = prev.get_transport().open_channel(
+        chan = _live_transport(prev).open_channel(
             "direct-tcpip", (target_host, target_port), ("127.0.0.1", 0))
         return chan, clients
     except Exception:
@@ -1354,7 +1377,7 @@ class SSHFileSystem(FileSystem):
     # "C<mode> <size> <name>\n" followed by <size> raw bytes; each step is
     # acknowledged with a zero byte. "scp -t file" is the mirror image.
     def _scp_read(self, path: str):
-        chan = self._client.get_transport().open_session()
+        chan = _live_transport(self._client).open_session()
         try:
             chan.exec_command(f"scp -f {self._q(path)}")
             chan.sendall(b"\x00")
@@ -1376,7 +1399,7 @@ class SSHFileSystem(FileSystem):
             raise
 
     def _scp_write(self, path: str, data: bytes) -> None:
-        chan = self._client.get_transport().open_session()
+        chan = _live_transport(self._client).open_session()
         try:
             chan.exec_command(f"scp -t {self._q(path)}")
             _scp_expect_ok(chan)

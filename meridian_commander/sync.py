@@ -205,29 +205,31 @@ def build_sync_plan(
     progress(0, 0, f"comparing {len(set(left) | set(right)):,} paths")
     actions: list[SyncAction] = []
     for rel in sorted(set(left) | set(right)):
-        l = left.get(rel)
-        r = right.get(rel)
+        here = left.get(rel)
+        there = right.get(rel)
 
-        if l and not r:
-            actions.append(SyncAction(rel, "->", "new on left", l.size or 0))
-        elif r and not l:
-            actions.append(SyncAction(rel, "<-", "new on right", r.size or 0))
+        if here and not there:
+            actions.append(SyncAction(rel, "->", "new on left", here.size or 0))
+        elif there and not here:
+            actions.append(SyncAction(rel, "<-", "new on right", there.size or 0))
         else:
-            assert l and r
-            lt = l.mtime
-            rt = r.mtime
+            assert here and there
+            lt = here.mtime
+            rt = there.mtime
             if lt is None or rt is None:
                 # Cannot compare ages; only copy when sizes differ, preferring
                 # the left side as the source of truth for that case.
-                if (l.size or 0) != (r.size or 0):
+                if (here.size or 0) != (there.size or 0):
                     actions.append(
-                        SyncAction(rel, "->", "differs (no mtime)", l.size or 0)
+                        SyncAction(rel, "->", "differs (no mtime)", here.size or 0)
                     )
                 continue
             if lt - rt > MTIME_TOLERANCE:
-                actions.append(SyncAction(rel, "->", "left is newer", l.size or 0))
+                actions.append(
+                    SyncAction(rel, "->", "left is newer", here.size or 0))
             elif rt - lt > MTIME_TOLERANCE:
-                actions.append(SyncAction(rel, "<-", "right is newer", r.size or 0))
+                actions.append(
+                    SyncAction(rel, "<-", "right is newer", there.size or 0))
             # else: same age within tolerance -> already in sync, skip.
 
     return SyncPlan(left_root, right_root, actions)

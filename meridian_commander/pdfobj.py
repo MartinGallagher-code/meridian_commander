@@ -259,7 +259,7 @@ class Lexer:
         if isinstance(token, String):
             return token
         if isinstance(token, bytes) and token == b"[":
-            out = []
+            out: list = []
             while True:
                 nxt = self.token()
                 if nxt is None or (is_keyword(nxt, b"]")):
@@ -293,7 +293,7 @@ class Lexer:
         return int(text)
 
     def _dictionary(self, depth: int) -> dict:
-        out = {}
+        out: dict = {}
         while True:
             key = self.token()
             if key is None or (is_keyword(key, b">>")):
@@ -545,7 +545,10 @@ class Document:
                     self.xref[start + i] = int(offset)
 
     def _read_xref_stream(self, lexer: Lexer):
-        number = lexer.token()
+        # The object number and generation are read past rather than used:
+        # this entry is reached by offset, so its own header says nothing the
+        # caller does not already know.
+        _number = lexer.token()
         _gen = lexer.token()
         keyword = lexer.token()
         if not (is_keyword(keyword, b"obj")):

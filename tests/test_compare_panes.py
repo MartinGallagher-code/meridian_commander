@@ -109,10 +109,10 @@ def test_differs_treats_missing_mtimes_as_identical(compare_ctx):
 
     ctx = compare_ctx({"a.txt": "12345"}, {"a.txt": "12345"})
     plugin = ComparePanes(ctx)
-    l = DirEntry(name="a", is_dir=False, size=5, mtime=None)
-    r = DirEntry(name="a", is_dir=False, size=5, mtime=None)
+    here = DirEntry(name="a", is_dir=False, size=5, mtime=None)
+    there = DirEntry(name="a", is_dir=False, size=5, mtime=None)
     # Same size, no clock to compare -> not treated as differing.
-    assert plugin._differs("a", l, r, False) is False
+    assert plugin._differs("a", here, there, False) is False
 
 
 def test_listing_stops_at_the_cap_but_the_count_is_whole(compare_ctx, monkeypatch):

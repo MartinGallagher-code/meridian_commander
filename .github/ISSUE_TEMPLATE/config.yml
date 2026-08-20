@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/MartinGallagher-code/meridian_commander/security/advisories/new
+    about: Report privately instead of opening an issue. See SECURITY.md.
+  - name: The manual
+    url: https://meridian-commander.readthedocs.io/
+    about: Installation, tutorials and the plug-in API reference.
+  - name: Key bindings and the full usage guide
+    url: https://meridian-commander.readthedocs.io/en/latest/usage.html
+    about: Most "how do I" questions are answered here.

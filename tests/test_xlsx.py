@@ -64,7 +64,7 @@ def test_column_name(index, name):
 
 
 def test_column_names_and_indices_are_inverses():
-    for i in range(0, 800):
+    for i in range(800):
         assert xlsx.column_index(xlsx.column_name(i) + "1") == i
 
 

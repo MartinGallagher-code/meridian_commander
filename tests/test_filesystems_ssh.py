@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import time
+
+import types
 
 import pytest
 
@@ -10,6 +11,7 @@ from meridian_commander import filesystems as fsmod
 from meridian_commander.filesystems import (
     FileSystemError,
     SSHFileSystem,
+    _live_transport,
     _parse_scp_header,
     _scp_expect_ok,
     _scp_read_line,
@@ -660,3 +662,46 @@ def test_a_writer_that_starts_with_scp_sends_at_close(ssh_fs):
     writer.close()
     assert channel.sent.endswith(b"hello\x00")
     assert fs._write_templates[0] == "scp"
+
+
+# -- a connection that went away -----------------------------------------------
+
+def test_a_dropped_transport_is_reported_rather_than_dereferenced():
+    """paramiko answers None once the connection has gone.
+
+    The natural ``client.get_transport().open_session()`` turns that into an
+    AttributeError about NoneType, which reads as a bug in the program rather
+    than as the server having dropped. Every caller goes through the guard.
+    """
+    class _Dropped:
+        def get_transport(self):
+            return None
+
+    with pytest.raises(FileSystemError, match="SSH connection has closed"):
+        _live_transport(_Dropped())
+    with pytest.raises(FileSystemError, match="reopen the pane with F2"):
+        _live_transport(None)
+
+
+def test_a_live_transport_is_handed_straight_back():
+    transport = _Transport()
+
+    class _Live:
+        def get_transport(self):
+            return transport
+
+    assert _live_transport(_Live()) is transport
+
+
+def test_scp_read_on_a_dropped_connection_says_so(ssh_fs):
+    fs, _ = ssh_fs()
+    fs._client = types.SimpleNamespace(get_transport=lambda: None)
+    with pytest.raises(FileSystemError, match="SSH connection has closed"):
+        fs._scp_read("/a.txt")
+
+
+def test_scp_write_on_a_dropped_connection_says_so(ssh_fs):
+    fs, _ = ssh_fs()
+    fs._client = types.SimpleNamespace(get_transport=lambda: None)
+    with pytest.raises(FileSystemError, match="SSH connection has closed"):
+        fs._scp_write("/a.txt", b"hello")

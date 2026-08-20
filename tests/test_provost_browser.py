@@ -347,8 +347,8 @@ def test_source_of_the_row_under_the_cursor(plugin):
     view = plugin.stack[-1]
     assert view.kind == "capture"
     assert "row #2" in view.title and "c0001" in view.title
-    assert any("original source (capture c0001)" in l for l in view.lines)
-    assert any("/dev/sda1 100G" in l for l in view.lines)
+    assert any("original source (capture c0001)" in line for line in view.lines)
+    assert any("/dev/sda1 100G" in line for line in view.lines)
 
 
 def test_a_row_with_no_provenance_reports_it(plugin, store):
@@ -372,8 +372,8 @@ def test_provenance_to_a_vanished_capture_still_shows_a_view(plugin, store):
     keys(plugin, 10, 10)
     view = plugin.stack[-1]
     assert view.kind == "capture"
-    assert any("no metadata" in l for l in view.lines)
-    assert any("no stored output" in l for l in view.lines)
+    assert any("no metadata" in line for line in view.lines)
+    assert any("no stored output" in line for line in view.lines)
 
 
 # -- the captures log ---------------------------------------------------------------------
@@ -393,14 +393,14 @@ def test_enter_on_a_capture_shows_meta_context_and_output(plugin):
     assert view.kind == "capture"
     assert "capture c0001" in view.title
     assert "id: c0001" in view.lines[0]
-    assert any("df -h" in l for l in view.lines)
+    assert any("df -h" in line for line in view.lines)
 
 
 def test_a_capture_with_context_shows_it(plugin):
     keys(plugin, "l", 10)                     # c0002, the newest
     view = plugin.stack[-1]
-    assert any("----- context -----" in l for l in view.lines)
-    assert any("#% host=box" in l for l in view.lines)
+    assert any("----- context -----" in line for line in view.lines)
+    assert any("#% host=box" in line for line in view.lines)
 
 
 def test_a_capture_missing_its_output_says_so(plugin, store):
@@ -408,7 +408,7 @@ def test_a_capture_missing_its_output_says_so(plugin, store):
 
     os.remove(f"{store}/captures/c0002/output.txt")
     keys(plugin, "l", 10)
-    assert any("no stored output" in l for l in plugin.stack[-1].lines)
+    assert any("no stored output" in line for line in plugin.stack[-1].lines)
 
 
 def test_an_unreadable_context_is_skipped(plugin, store, tmp_path):
@@ -418,8 +418,8 @@ def test_an_unreadable_context_is_skipped(plugin, store, tmp_path):
     (tmp_path / "store" / "captures" / "c0002" / "context.txt").mkdir()
     keys(plugin, "l", 10)
     view = plugin.stack[-1]
-    assert not any("----- context -----" in l for l in view.lines)
-    assert any("original source" in l for l in view.lines)
+    assert not any("----- context -----" in line for line in view.lines)
+    assert any("original source" in line for line in view.lines)
 
 
 def test_log_skips_strays_and_reloads(plugin, store, tmp_path):
@@ -533,7 +533,7 @@ def test_the_store_follows_the_pane_to_a_controlled_directory(plugin, tmp_path):
 
 def test_it_follows_from_a_subdirectory_of_a_controlled_directory(plugin,
                                                                   tmp_path):
-    project = _second_store(tmp_path)
+    _second_store(tmp_path)
     plugin.ctx.other_panel.chdir(str(tmp_path / "proj" / "src"))
     plugin.tick()
     assert plugin.store == str(tmp_path / "proj" / ".provost")

@@ -466,8 +466,9 @@ def test_a_predictor_row_shorter_than_its_stride_is_padded():
 def test_lzw_handles_the_self_referential_code_and_grows_the_width():
     """Enough distinct output to push the code width past nine bits."""
     payload = bytes(range(256)) * 3
-    codes, table, previous = [256], {}, b""
-    # A literal-only encoder, with the table tracked so the width matches.
+    # A literal-only encoder: it emits no table codes at all, so the table
+    # itself need not be modelled -- only its *size* is, in ``count``, since
+    # that is what decides when the code width has to grow.
     size, count = 9, 258
     bits = ""
     for byte in payload:

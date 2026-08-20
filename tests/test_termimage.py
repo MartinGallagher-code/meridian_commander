@@ -279,7 +279,7 @@ def kitty_chunks(payload: bytes):
 
 def test_kitty_carries_the_pixels_untouched():
     """No palette and no quantising: the bytes handed over are the bytes."""
-    pixels = bytes(range(0, 96))              # 32 RGB triples
+    pixels = bytes(range(96))              # 32 RGB triples
     payload = termimage.kitty_encode(pixels, 8, 4, 2, 1)
     chunks = kitty_chunks(payload)
     assert base64.b64decode(b"".join(data for _c, data in chunks)) == pixels

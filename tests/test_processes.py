@@ -12,7 +12,7 @@ import pytest
 from meridian_commander.plugin_api import PluginContext
 from meridian_commander.plugins import processes as processes_mod
 from meridian_commander.plugins.processes import (
-    Process, ProcessesPlugin, _etime_seconds, parse_ps, PS_COLUMNS,
+    ProcessesPlugin, _etime_seconds, parse_ps, PS_COLUMNS,
 )
 
 from support import with_curses_screen

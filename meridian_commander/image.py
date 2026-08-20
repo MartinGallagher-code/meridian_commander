@@ -389,7 +389,7 @@ PNM_KIND = {
 
 def _pnm_tokens(data: bytes, at: int, count: int) -> tuple[list[int], int]:
     """Read ``count`` whitespace-separated integers, skipping ``#`` comments."""
-    values = []
+    values: list[int] = []
     while len(values) < count:
         while at < len(data) and data[at:at + 1].isspace():
             at += 1
@@ -640,7 +640,7 @@ def _lzw_decode(data: bytes, min_code_size: int, expected: int) -> bytearray:
 
 def _gif_blocks(data: bytes, at: int) -> tuple[bytes, int]:
     """Read a chain of length-prefixed sub-blocks, returning the joined bytes."""
-    parts = []
+    parts: list[bytes] = []
     while at < len(data):
         size = data[at]
         at += 1

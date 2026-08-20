@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import subprocess
 
-import pytest
 
 from meridian_commander.plugins import git_status
 from meridian_commander.plugins.git_status import GitStatus

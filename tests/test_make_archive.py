@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import tarfile
 import zipfile
 
@@ -133,7 +132,7 @@ def test_a_read_error_is_reported_and_skips_the_file(data_ctx, tmp_path, monkeyp
 
     monkeypatch.setattr(ctx.other_fs, "open_read", flaky)
     plugin = MakeArchive(ctx)
-    summary = plugin.process("zip pack")
+    plugin.process("zip pack")
     assert any("! a.txt: unreadable" in line for line in plugin.output)
     assert _zip_names(tmp_path / "data" / "pack.zip") == ["b.txt"]
 

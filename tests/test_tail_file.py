@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from meridian_commander.plugins.tail_file import TailFile, read_tail
 
@@ -52,7 +51,7 @@ def test_tail_defaults_to_twenty_lines(data_ctx):
     ctx = data_ctx({"log": "".join(f"{i}\n" for i in range(100))})
     plugin = TailFile(ctx)
     plugin.process("tail log")
-    shown = [l for l in plugin.output if l.strip().isdigit()]
+    shown = [line for line in plugin.output if line.strip().isdigit()]
     assert len(shown) == 20
 
 
