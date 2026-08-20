@@ -69,14 +69,17 @@ class Command:
 
     ``arg`` says what the command still needs once it is chosen:
 
-    ``None``      run it there and then;
-    ``"text"``    put ``verb `` on the input line and let the user type the
-                  rest (a commit message, a pattern -- something only they
-                  know);
-    ``"path"``    offer the other pane's entries as a second menu, with an
-                  "everything" row for the commands that also work bare;
-    ``"options"`` offer whatever :meth:`InputOutputPlugin.command_options`
-                  returns for this command -- the table's column names, say.
+    ``None``
+        Run it there and then.
+    ``"text"``
+        Put the verb, and a space, on the input line and let the user type
+        the rest -- a commit message, a pattern, something only they know.
+    ``"path"``
+        Offer the other pane's entries as a second menu, with an "everything"
+        row for the commands that also work bare.
+    ``"options"``
+        Offer whatever :meth:`InputOutputPlugin.command_options` returns for
+        this command -- the table's column names, say.
 
     ``choices`` is the fixed-list version of ``"options"``: give it here when
     the answers are known up front (``lower|upper|title``).

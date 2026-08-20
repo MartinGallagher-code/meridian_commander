@@ -6,6 +6,6 @@ contact_links:
   - name: The manual
     url: https://meridian-commander.readthedocs.io/
     about: Installation, tutorials and the plug-in API reference.
-  - name: Key bindings and the full feature guide
-    url: https://github.com/MartinGallagher-code/meridian_commander#usage
+  - name: Key bindings and the full usage guide
+    url: https://meridian-commander.readthedocs.io/en/latest/usage.html
     about: Most "how do I" questions are answered here.

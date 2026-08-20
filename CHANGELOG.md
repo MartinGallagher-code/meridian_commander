@@ -34,6 +34,16 @@ day the version was cut.
   per command.
 - `--version` reports the right copyright name, and the wording is consistent
   with the rest of the application.
+- **The manual is the manual.** The README had grown to 1,211 lines and held
+  the whole reference — usage, key bindings, configuration, architecture —
+  while the Sphinx site linked back to it for "the complete feature guide".
+  Two copies of the plug-in and installation chapters existed and had already
+  drifted apart in wording. The reference now lives on
+  [Read the Docs](https://meridian-commander.readthedocs.io/) as
+  `usage`, `look-and-feel`, `configuration`, `transfers` and `development`
+  pages; the README keeps the tour, the feature list and installation, and
+  points at the rest. A CI job builds the manual with `-W`, so a broken
+  cross-reference fails rather than shipping.
 
 ### Fixed
 
