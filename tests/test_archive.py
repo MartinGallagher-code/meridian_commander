@@ -313,7 +313,7 @@ def test_a_tar_that_is_not_a_tar(tmp_path):
 
 
 def test_an_archive_that_is_not_there(tmp_path):
-    with pytest.raises(Exception):
+    with pytest.raises(FileSystemError, match="cannot open"):
         ArchiveFileSystem(LocalFileSystem(), str(tmp_path / "missing.zip"))
 
 

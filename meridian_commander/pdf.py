@@ -129,7 +129,7 @@ class Font:
         ":": 278, ";": 278, "'": 191, "!": 278, "|": 260, "`": 333,
         "f": 278, "t": 278, "r": 333, "s": 500, "c": 500, "z": 500,
         "(": 333, ")": 333, "[": 278, "]": 278, "{": 334, "}": 334,
-        "/": 278, "\\": 278, "-": 333, " ": 278,
+        "/": 278, "\\": 278, "-": 333,
         "m": 833, "w": 722, "M": 833, "W": 944, "@": 1015, "%": 889,
     }
     ESTIMATE_UPPER = 667
@@ -345,7 +345,7 @@ def parse_cmap(data: bytes) -> dict[int, str]:
 
 
 def _cmap_array(lexer: Lexer) -> list:
-    out = []
+    out: list = []
     while True:
         token = lexer.token()
         if token is None or (isinstance(token, bytes) and token == b"]"):
@@ -613,7 +613,7 @@ def page_images(doc: Document, page: dict) -> list:
     """
     resources = doc.get(page, "Resources", {})
     table = doc.get(resources, "XObject", {})
-    out = []
+    out: list = []
     if not isinstance(table, dict):
         return out
     for name in sorted(table):

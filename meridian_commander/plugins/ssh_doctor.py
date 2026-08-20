@@ -70,7 +70,9 @@ class SshDoctor(InputOutputPlugin):
     )
     description = "Inspect ~/.ssh keys and convert legacy ones to modern format"
     prompt = "F2 for commands, or type one> "
-    greeting = ("SSH key doctor. Commands:\n"
+    @property
+    def greeting(self) -> str:
+        return ("SSH key doctor. Commands:\n"
                 "  list           -- scan ~/.ssh and classify each private key\n"
                 "  agent          -- what ssh-add -l reports\n"
                 "  convert <key>  -- re-save a key in the modern OpenSSH format")
@@ -145,7 +147,8 @@ class SshDoctor(InputOutputPlugin):
         if rc is None:
             return f"Could not run ssh-add: {err}"
         text = (out or err).strip() or "(no output)"
-        return [f"ssh-add -l (exit {rc}):"] + [f"  {l}" for l in text.splitlines()]
+        return ([f"ssh-add -l (exit {rc}):"]
+                + [f"  {line}" for line in text.splitlines()])
 
     # -- conversion ----------------------------------------------------------
     def _convert(self, name: str):

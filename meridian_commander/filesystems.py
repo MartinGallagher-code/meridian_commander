@@ -134,7 +134,7 @@ class FileSystem(abc.ABC):
     def open_write(self, path: str):
         """Return a binary file-like object supporting ``write(bytes)``."""
 
-    def utime(self, path: str, mtime: float) -> None:
+    def utime(self, path: str, mtime: float) -> None:  # noqa: B027
         """Set ``path``'s modification (and access) time to ``mtime``.
 
         Used to give a copied file the same timestamp as its source.  This is
@@ -182,8 +182,13 @@ class FileSystem(abc.ABC):
     def rename(self, src: str, dst: str) -> None:
         """Rename within the same filesystem (used for same-fs moves)."""
 
-    def close(self) -> None:
-        """Release any resources (network connections)."""
+    def close(self) -> None:  # noqa: B027
+        """Release any resources (network connections).
+
+        A backend with nothing to release -- the local disk, an archive read
+        from a file already closed -- inherits this no-op rather than being
+        made to write one, so the default is deliberately not abstract.
+        """
 
 
 # ---------------------------------------------------------------------------

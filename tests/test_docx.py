@@ -12,13 +12,12 @@ import pytest
 
 from meridian_commander import docx, ooxml
 from meridian_commander.browsers import viewer_for
-from meridian_commander.docx import BULLET, HEADING, NUMBER, PARAGRAPH, TABLE
+from meridian_commander.docx import BULLET, HEADING, NUMBER, PARAGRAPH
 from meridian_commander.filesystems import LocalFileSystem
 from meridian_commander.viewer import Viewer
 
 from support import (
     XLSX_PKG,
-    XLSX_REL,
     docx_numbering,
     docx_p,
     docx_parts,

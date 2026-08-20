@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from .filesystems import CHUNK_SIZE, DirEntry, FileSystem
+from .filesystems import CHUNK_SIZE, FileSystem
 
 ProgressCB = Callable[[int, int, str], None]
 CancelCB = Callable[[], bool]

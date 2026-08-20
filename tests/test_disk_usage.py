@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from meridian_commander.plugins.disk_usage import DiskUsage
 
@@ -30,7 +29,7 @@ def test_sizes_items_biggest_first_with_a_total(data_ctx):
     })
     plugin = DiskUsage(ctx)
     summary = plugin.process("")
-    lines = [l for l in plugin.output if "small.txt" in l or "big/" in l]
+    lines = [line for line in plugin.output if "small.txt" in line or "big/" in line]
     # The directory (800 bytes) is listed before the small file.
     assert "big/" in lines[0]
     assert "small.txt" in lines[1]

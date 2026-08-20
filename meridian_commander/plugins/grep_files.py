@@ -47,10 +47,17 @@ class GrepFiles(InputOutputPlugin):
                 matcher = re.compile(expr, re.IGNORECASE)
             except re.error as exc:
                 return f"Bad regular expression: {exc}"
-            predicate = lambda text: matcher.search(text) is not None
+            def by_pattern(text: str) -> bool:
+                return matcher.search(text) is not None
+
+            predicate = by_pattern
         else:
             lowered = needle.lower()
-            predicate = lambda text: lowered in text.lower()
+
+            def by_substring(text: str) -> bool:
+                return lowered in text.lower()
+
+            predicate = by_substring
 
         fs = self.ctx.other_fs
         matches = 0

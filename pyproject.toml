@@ -77,6 +77,58 @@ Issues = "https://github.com/MartinGallagher-code/meridian_commander/issues"
 [tool.setuptools]
 packages = ["meridian_commander", "meridian_commander.plugins"]
 
+[tool.ruff]
+# The tree's own habit is to wrap around 79; this is the ceiling rather than
+# the target, set where the handful of deliberately longer lines already sit
+# so that enforcing it costs no reflow.
+line-length = 100
+# Every version the classifiers promise has to accept the result, so the
+# oldest of them decides what counts as valid syntax.
+target-version = "py39"
+
+[tool.ruff.lint]
+# Bugs, not taste. E/F/W are the pycodestyle-and-pyflakes baseline that
+# catches dead names and typos -- a duplicated dictionary key and three
+# variables assigned and never read were sitting in the tree before this was
+# turned on. B, C4 and PIE add patterns that are wrong rather than merely
+# unfashionable. Deliberately absent: I (import order), UP, SIM and RET,
+# which would rewrite a great deal of working, readable code to taste.
+select = ["E", "F", "W", "B", "C4", "PIE"]
+
+[tool.mypy]
+# The oldest interpreter the classifiers promise, so a 3.10-only idiom is
+# caught here rather than by a user on 3.9.
+python_version = "3.9"
+# paramiko is optional and ships no stubs. Both halves of that matter:
+# ignore_missing_imports covers the environment where it is not installed at
+# all (a supported state -- every import of it is guarded), and disabling
+# import-untyped below covers the one where it is, since types-paramiko is
+# not worth making a hard requirement of running the type checker.
+ignore_missing_imports = true
+#
+# The tree is annotated throughout but had never been type-checked, so this
+# starts as a ratchet rather than a clean sweep: everything mypy can already
+# prove is enforced, and the seventy-odd findings in the categories below are
+# a backlog to be worked off a file at a time, deleting each line as its last
+# case goes. Turning them all on today would mean either seventy unreviewed
+# edits through the PDF, image and curses code or a blanket ignore, and both
+# are worse than an honest list.
+#
+#   attr-defined  (19)  mostly PluginContext.app, deliberately typed `object`
+#                       and duck-called; wants a Protocol
+#   union-attr    (15)  paramiko handles that are None until connected
+#   index         (10)  a loop variable reused for a different type further
+#                       down the same function -- real confusion, no bug yet
+#   arg-type      (13)
+#   assignment    (10)
+#   list-item      (1)
+#   call-overload  (1)
+disable_error_code = [
+    "attr-defined", "union-attr", "index", "arg-type", "assignment",
+    "list-item", "call-overload",
+    "import-untyped",   # paramiko, per the note above
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # A test that stops making progress must fail, not wait. The suite drives a

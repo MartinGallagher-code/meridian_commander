@@ -91,7 +91,7 @@ def test_the_accelerators_within_a_menu_are_distinct():
 def test_the_layout_leaves_a_gap_around_every_caption():
     spans = menu_layout()
     assert len(spans) == len(MENUS)
-    for (start, width), menu in zip(spans, MENUS):
+    for (_start, width), menu in zip(spans, MENUS):
         assert width == len(theme.strip_hotkey(menu["label"])) + 2
     # The captions follow one another without overlapping.
     for (start, width), (next_start, _w) in zip(spans, spans[1:]):

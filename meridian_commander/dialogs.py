@@ -74,7 +74,8 @@ def _buttons(win, y: int, specs: list[tuple[str, bool]], width: int) -> None:
 def message(stdscr, title: str, text: str, error: bool = False) -> None:
     """Show a modal message; dismissed with any key."""
     lines = text.split("\n")
-    width = max(len(title) + 8, max((len(l) for l in lines), default=0) + 6, 34)
+    width = max(len(title) + 8,
+                max((len(line) for line in lines), default=0) + 6, 34)
     height = len(lines) + 5
     win = _center(stdscr, height, width)
     _box(win, title, "press any key")
@@ -91,7 +92,8 @@ def message(stdscr, title: str, text: str, error: bool = False) -> None:
 def confirm(stdscr, title: str, text: str, default_yes: bool = False) -> bool:
     """Yes/No confirmation.  Returns True for yes."""
     lines = text.split("\n")
-    width = max(len(title) + 8, max((len(l) for l in lines), default=0) + 6, 36)
+    width = max(len(title) + 8,
+                max((len(line) for line in lines), default=0) + 6, 36)
     height = len(lines) + 5
     win = _center(stdscr, height, width)
     choice = default_yes
@@ -307,7 +309,7 @@ def dropdown(stdscr, items: list[dict], y: int, x: int) -> str | None:
     ``sep``, ``disabled`` and ``checked``.  Returns None when the user gives
     up, or one of the sentinels above when they arrow off the sides.
     """
-    entries = [i for i in items]
+    entries = list(items)
     if not entries:
         return None
     width = max(

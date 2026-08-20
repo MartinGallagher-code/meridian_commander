@@ -1514,7 +1514,6 @@ class App:
             grand_total = 0
 
         dlg = dialogs.ProgressDialog(self.stdscr, verb)
-        moved_bytes = [0]
 
         def progress(cur: int, total: int, label: str) -> None:
             dlg.update(cur, total, label)

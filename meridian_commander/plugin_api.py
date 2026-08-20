@@ -234,8 +234,17 @@ class InputOutputPlugin(PanePlugin):
 
     #: Prompt shown in front of the input line.
     prompt = "> "
-    #: Greeting printed when the plugin opens (override or set to "").
-    greeting = ""
+
+    @property
+    def greeting(self) -> str:
+        """Greeting printed when the plugin opens; "" for none.
+
+        A property rather than a plain attribute because nearly every
+        plug-in's greeting depends on what the panes hold when it opens, and
+        a subclass cannot narrow a writeable attribute to a computed one.
+        """
+        return ""
+
     #: Commands offered by the ``F2`` menu -- a tuple of :class:`Command`.
     #: Left empty, the plug-in is typing-only and ``F2`` does nothing.
     commands: tuple[Command, ...] = ()

@@ -331,7 +331,10 @@ def test_json_push_redials_when_the_transport_has_gone(ctx, ssh, monkeypatch):
     plugin.process("one")
     client.transport = None
     client.get_transport = lambda: None
-    with pytest.raises(Exception):
+    # A dropped transport reaches the caller as the raw AttributeError
+    # from get_transport() answering None. Named here so that if the
+    # plug-in ever learns to report it properly, this test says so.
+    with pytest.raises(AttributeError):
         plugin.process("two")
     assert len(opened) == 2
 

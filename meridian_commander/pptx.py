@@ -139,7 +139,7 @@ def _table_lines(table) -> list[str]:
     for tr in table:
         if local(tr.tag) != "tr":
             continue
-        cells = []
+        cells: list[str] = []
         for tc in tr:
             if local(tc.tag) != "tc":
                 continue

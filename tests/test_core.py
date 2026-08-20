@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import curses
 import os
-import pty
 import time
 
 import pytest
@@ -25,7 +24,6 @@ from meridian_commander.filesystems import (
 )
 from meridian_commander import app as app_mod
 from meridian_commander import dialogs, presets
-from meridian_commander.app import App
 from meridian_commander.operations import copy_path, count_tree, move_path
 from meridian_commander.panel import Panel
 from meridian_commander.sync import build_sync_plan, execute_sync_plan
@@ -1093,7 +1091,7 @@ def test_io_plugin_catches_process_errors():
     for ch in "hi":
         plug.handle_key(ord(ch))
     plug.handle_key(10)
-    assert any("kapow" in l for l in plug.output)
+    assert any("kapow" in line for line in plug.output)
 
 
 def test_find_files_plugin_searches_other_pane(fs, tmp_path):

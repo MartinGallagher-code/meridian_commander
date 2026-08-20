@@ -10,7 +10,6 @@ none of those libraries is a dependency.
 from __future__ import annotations
 
 import curses
-import zlib
 
 import pytest
 
@@ -30,7 +29,7 @@ from meridian_commander.pdf import (
     page_images,
     parse_cmap,
 )
-from meridian_commander.pdfobj import Document, PdfError
+from meridian_commander.pdfobj import Document
 
 from support import (
     pdf_bytes,

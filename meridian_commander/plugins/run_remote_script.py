@@ -150,9 +150,9 @@ class RunRemoteScript(InputOutputPlugin):
         status = stdout.channel.recv_exit_status()
 
         result: list[str] = []
-        for l in out.splitlines():
-            result.append(l)
-        for l in err.splitlines():
-            result.append(f"! {l}")
+        for line in out.splitlines():
+            result.append(line)
+        for line in err.splitlines():
+            result.append(f"! {line}")
         result.append(f"(exit {status})")
         return result

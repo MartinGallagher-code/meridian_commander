@@ -92,10 +92,10 @@ class GitStatus(InputOutputPlugin):
         if rc is None:
             return f"Could not run git: {err}"
 
-        lines: list[str] = [f"  {l}" for l in out.splitlines()]
+        lines: list[str] = [f"  {line}" for line in out.splitlines()]
         # git prints plenty of ordinary information (commit summaries, hints) to
         # stderr, so show it too rather than hiding it.
-        lines += [f"  {l}" for l in err.splitlines()]
+        lines += [f"  {line}" for line in err.splitlines()]
         if not lines:
             lines.append(f"(git {verb}: nothing to show)")
         if rc != 0:

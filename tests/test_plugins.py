@@ -12,7 +12,7 @@ from meridian_commander.plugins.csv_clean import CsvClean
 from meridian_commander.plugins.csv_profile import CsvProfile
 from meridian_commander.plugins.find_files import FindFiles
 
-from support import read, write
+from support import read
 
 
 # -- discovery -----------------------------------------------------------------

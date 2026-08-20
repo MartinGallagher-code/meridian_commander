@@ -1171,7 +1171,19 @@ pytest
 
 # with a coverage report
 coverage run -m pytest && coverage report
+
+# what CI checks before either of those
+ruff check .
+mypy meridian_commander
 ```
+
+**Lint and types are gated too.** `ruff` runs the pycodestyle and pyflakes
+rules plus bugbear, chosen for the things that are *wrong* rather than merely
+unfashionable — import sorting and the modernising rewrites are deliberately
+left off. `mypy` starts as a ratchet: everything it can already prove is
+enforced, and the categories still to be worked off are listed, with counts,
+in `[tool.mypy]` in `pyproject.toml`. Deleting a line from that list as its
+last case goes is the intended way to tighten it.
 
 **Coverage is 100%, and CI fails if it drops.** Every statement in the package
 is executed by the suite; `fail_under = 100` in `pyproject.toml` enforces it.

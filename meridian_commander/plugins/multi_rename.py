@@ -65,7 +65,7 @@ def rename_one(name: str, verb: str, args: list[str], index: int) -> str:
         try:
             return args[0].format(n=index, name=stem, ext=ext)
         except (KeyError, IndexError, ValueError) as exc:
-            raise ValueError(f"bad template: {exc}")
+            raise ValueError(f"bad template: {exc}") from exc
     raise ValueError(f"unknown verb '{verb}' (try {', '.join(VERBS)})")
 
 

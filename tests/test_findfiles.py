@@ -6,7 +6,6 @@ import curses
 
 import pytest
 
-from meridian_commander import findfiles
 from meridian_commander.filesystems import LocalFileSystem
 from meridian_commander.findfiles import FindBrowser, collect_matches
 

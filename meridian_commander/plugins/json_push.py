@@ -143,4 +143,4 @@ class JsonPush(InputOutputPlugin):
             pretty = json.dumps(json.loads(text_reply), indent=2)
             return ["<-"] + pretty.splitlines()
         except ValueError:
-            return [f"<- {l}" for l in text_reply.splitlines() or [""]]
+            return [f"<- {line}" for line in text_reply.splitlines() or [""]]

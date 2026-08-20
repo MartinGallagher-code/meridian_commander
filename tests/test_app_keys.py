@@ -18,7 +18,7 @@ from meridian_commander.filesystems import (
     SFTPFileSystem,
 )
 
-from support import _FakeRemoteBackend, _ScriptedDialogs, _StubScreen, read, write
+from support import _ScriptedDialogs, _StubScreen, write
 
 
 class _RemoteLike:

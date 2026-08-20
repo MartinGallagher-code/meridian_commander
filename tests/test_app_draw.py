@@ -8,7 +8,6 @@ import re
 import pytest
 
 from meridian_commander.app import App
-from meridian_commander.panel import Panel
 
 from support import _StubScreen, with_curses_screen, write
 
@@ -83,7 +82,7 @@ def test_sizes_and_times_are_rendered(panes):
 
 def test_a_symlink_is_marked(panes):
     text, _ = _render(panes, cols=200)
-    link_line = [l for l in text.splitlines() if "alias" in l][0]
+    link_line = [line for line in text.splitlines() if "alias" in line][0]
     # The marker column, just inside the window frame, carries "@".
     assert link_line[1] == "@"
 
@@ -93,7 +92,7 @@ def test_tagged_entries_are_marked(panes):
         app.left.selected = {"readme.txt"}
 
     text, _ = _render(panes, prepare=tag)
-    tagged = [l for l in text.splitlines() if "readme.txt" in l][0]
+    tagged = [line for line in text.splitlines() if "readme.txt" in line][0]
     assert tagged[1] == "*"
 
 

@@ -19,7 +19,7 @@ import pytest
 from meridian_commander import jpeg
 from meridian_commander.image import ImageError, decode
 
-from support import JPEG_AC_VALUES, exif_bytes, jpeg_bytes, jpeg_segment
+from support import exif_bytes, jpeg_bytes, jpeg_segment
 
 
 def px(image, x=0, y=0):

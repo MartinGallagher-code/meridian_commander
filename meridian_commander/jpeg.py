@@ -256,7 +256,6 @@ def _decode_scan(bits, scan, mcus_x, mcus_y, hmax, vmax, width, height,
         # component's own raster order, which is not the MCU grid.
         across = -(-(width * single.h // hmax) // 8)
         down = -(-(height * single.v // vmax) // 8)
-        units = [(0, 0)] * 0
         total = across * down
     else:
         across = down = 0

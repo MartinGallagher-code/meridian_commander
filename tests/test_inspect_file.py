@@ -78,7 +78,7 @@ def test_bytes_sets_the_dump_length(data_ctx):
     plugin = InspectFile(ctx)
     assert "Dump length set to 16" in plugin.process("bytes 16")
     result = plugin.process("")
-    dump_rows = [l for l in result if l.strip().startswith("000000")]
+    dump_rows = [line for line in result if line.strip().startswith("000000")]
     assert len(dump_rows) == 1                  # 16 bytes -> one row
 
 
