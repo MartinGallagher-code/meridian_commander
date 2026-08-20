@@ -15,11 +15,46 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  # Style and types, once. Neither depends on the interpreter under test, so
+  # running them across the matrix would only buy the same answer five times.
+  lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Ruff
+        run: python -m ruff check .
+      - name: Mypy
+        run: python -m mypy meridian_commander
+
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
+      # One version failing is worth knowing about on the others too, so let
+      # the rest of the matrix finish rather than cancelling it.
+      fail-fast: false
       matrix:
-        python-version: ["3.9", "3.12", "3.13"]
+        os: [ubuntu-latest]
+        # Every version the classifiers in pyproject.toml promise. Claiming
+        # support for one that nothing runs is how a release ships broken to
+        # exactly the people who read the metadata.
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        include:
+          # macOS is a supported platform in the classifiers, and it is the
+          # one where this project's foundations differ: a BSD curses with
+          # its own terminfo, and Apple's pty. One job on the oldest and one
+          # on the newest catch that without paying for the full grid at ten
+          # times the minutes of a Linux runner.
+          - os: macos-latest
+            python-version: "3.9"
+          - os: macos-latest
+            python-version: "3.13"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -48,8 +83,9 @@ jobs:
           fi
 
   build:
-    needs: test
+    needs: [lint, test]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -79,6 +115,7 @@ jobs:
       ))
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: pypi
     permissions:
       id-token: write   # required for PyPI trusted publishing

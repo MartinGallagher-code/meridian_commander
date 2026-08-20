@@ -157,11 +157,20 @@ def _drain(fd: int, stop) -> None:
     buffer fills the write blocks for ever.  A blank screen fitted; a screen
     with a painted background does not, which is a property of the terminal
     rather than of the code under test.
+
+    Because the writer cannot recover once that happens -- it is blocked
+    inside curses, below any Python that could notice -- this loop stops for
+    exactly one reason: the master is gone, so there is nothing left that
+    could block.  In particular a zero-length read is *not* treated as the
+    end.  A pty master signals a vanished slave with ``EIO`` rather than EOF,
+    so an empty read here means only "nothing to read this time"; returning on
+    it retired the drain while the terminal was still live, and the next
+    screen large enough to fill the buffer then hung the whole run.
     """
     while not stop.is_set():
         try:
-            if select.select([fd], [], [], 0.05)[0] and not os.read(fd, 65536):
-                return
+            if select.select([fd], [], [], 0.05)[0]:
+                os.read(fd, 65536)
         except OSError:
             return
 
@@ -214,10 +223,21 @@ def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
                 curses.COLORS = saved_colours
             curses.endwin()
         stop.set()
-        reader.join(timeout=2)
+        reader.join(timeout=5)
         os.dup2(saved_out, 1)
         os.dup2(saved_in, 0)
-        for fd in (saved_out, saved_in, master, slave):
+        closing = [saved_out, saved_in, slave]
+        # Closing the master out from under a reader that is still selecting
+        # on it hands that thread a stale descriptor, and the very next
+        # openpty() is entitled to the number it just gave up -- so the
+        # straggler would sit and eat the *next* screen's output.  The loop
+        # wakes every 50ms, so failing to join inside five seconds means it is
+        # wedged rather than slow; leak the descriptor to it instead.  A
+        # handful of leaked fds in a test process is cheap next to a thread
+        # quietly reading someone else's terminal.
+        if not reader.is_alive():
+            closing.append(master)
+        for fd in closing:
             os.close(fd)
         if saved_term is None:
             os.environ.pop("TERM", None)
