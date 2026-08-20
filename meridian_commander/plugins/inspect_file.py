@@ -13,7 +13,7 @@ length.
 from __future__ import annotations
 
 from . import _io
-from ..plugin_api import InputOutputPlugin
+from ..plugin_api import Command, InputOutputPlugin
 from ..util import human_size
 
 DEFAULT_DUMP = 256
@@ -71,6 +71,11 @@ def hexdump(data: bytes) -> list[str]:
 
 class InspectFile(InputOutputPlugin):
     name = "Inspect file"
+    commands = (
+        Command("", "identify the cursor file and dump its start",
+                label="inspect"),
+        Command("bytes", "change how many bytes are dumped", arg="text"),
+    )
     description = "Identify the other pane's file and hex-dump its start"
     prompt = "enter to inspect | bytes <n>> "
 

@@ -856,6 +856,13 @@ directory and entries — so it can do work on whatever you have open next to it
 `Esc` closes the plug-in and returns the pane to its file listing; `Tab` still
 switches panes while a plug-in is open.
 
+Inside a plug-in, **`F2`** lists its commands — one letter each, with a line of
+description — so `status`, `zip` or `trim` is a keystroke rather than a word to
+remember. A command that needs a file offers the other pane's listing; one that
+takes a column offers the table's own column names; one that takes a fixed
+choice offers the choices. Only genuinely free text (a commit message, a search
+pattern) is still typed, and typing a command by hand works exactly as before.
+
 Built-in plug-ins:
 
 - **Terminal** — the in-pane pseudo-terminal (also on the `t` key); a shell in

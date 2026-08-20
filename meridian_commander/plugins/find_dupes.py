@@ -15,7 +15,7 @@ from collections import defaultdict
 
 from . import _io
 from .. import sync
-from ..plugin_api import InputOutputPlugin
+from ..plugin_api import Command, InputOutputPlugin
 from ..util import human_size
 
 ALGO = "sha256"
@@ -28,6 +28,9 @@ def _path(fs, root: str, rel: str) -> str:
 
 class FindDupes(InputOutputPlugin):
     name = "Find duplicates"
+    commands = (
+        Command("", "scan the other pane for identical files", label="scan"),
+    )
     description = "Group identical files under the other pane by content"
     prompt = "enter to scan> "
 

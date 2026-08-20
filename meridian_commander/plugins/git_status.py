@@ -19,7 +19,7 @@ full-screen shell (``!``) or the Terminal plug-in for those.
 
 from __future__ import annotations
 
-from ..plugin_api import InputOutputPlugin
+from ..plugin_api import Command, InputOutputPlugin
 
 DEFAULT_LOG = 15
 
@@ -27,7 +27,18 @@ DEFAULT_LOG = 15
 class GitStatus(InputOutputPlugin):
     name = "Git"
     description = "Status, stage and commit in the other pane's repository"
-    prompt = "status|log|diff|add|unstage|branch|commit> "
+    prompt = "F2 for commands, or type one> "
+    commands = (
+        Command("status", "short status with the branch line"),
+        Command("log", f"the last {DEFAULT_LOG} commits, one line each"),
+        Command("diff", "working-tree diff, whole tree or one path",
+                arg="path"),
+        Command("add", "stage one file", arg="path", allow_bare=False),
+        Command("add .", "stage everything"),
+        Command("unstage", "unstage everything"),
+        Command("branch", "list branches"),
+        Command("commit", "commit the staged changes", arg="text"),
+    )
 
     @property
     def greeting(self) -> str:
@@ -36,8 +47,10 @@ class GitStatus(InputOutputPlugin):
             return ("Git works on a local pane only. Point the other pane at a "
                     "repository on this machine.")
         return (f"Repository: {self.ctx.other_path}\n"
-                "Commands: status | log [n] | diff [path] | add <path> | "
-                "unstage [path] | branch | commit <message>")
+                "Press F2 for the commands -- one keystroke each, and the "
+                "ones that take a file offer the other pane's listing.\n"
+                "Typed still works: status | log [n] | diff [path] | "
+                "add <path> | unstage [path] | branch | commit <message>")
 
     def process(self, line: str):
         parts = line.split()

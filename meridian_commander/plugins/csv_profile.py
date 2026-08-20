@@ -22,7 +22,7 @@ import statistics
 from collections import Counter
 
 from ..config import plugin_settings
-from ..plugin_api import InputOutputPlugin
+from ..plugin_api import Command, InputOutputPlugin
 from . import _tabular as tabular
 
 DEFAULTS = {
@@ -37,6 +37,12 @@ DEFAULTS = {
 
 class CsvProfile(InputOutputPlugin):
     name = "Profile table"
+    commands = (
+        Command("", "profile every column", label="profile"),
+        Command("col", "drill into one column", arg="options"),
+        Command("head", "the first rows"),
+        Command("tail", "the last rows"),
+    )
     description = "Profile the CSV/TSV selected in the other pane"
     prompt = "profile> "
     config_section = "csv_profile"
@@ -71,6 +77,13 @@ class CsvProfile(InputOutputPlugin):
             max_bytes=int(cfg["max_bytes"]),
         )
         return entry.name, table
+
+    def command_options(self, command):
+        """The table's own column names, for the ``col`` menu."""
+        try:
+            return list(self._read()[1].header)
+        except Exception:
+            return None
 
     # -- command dispatch --------------------------------------------------
     def process(self, line: str):

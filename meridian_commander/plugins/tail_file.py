@@ -16,7 +16,7 @@ is rotated (it shrinks), following notices and picks up the new file.
 from __future__ import annotations
 
 from . import _io
-from ..plugin_api import InputOutputPlugin
+from ..plugin_api import Command, InputOutputPlugin
 
 DEFAULT_LINES = 20
 MAX_TAIL_BYTES = 256 * 1024      # rolling window kept while reading
@@ -49,8 +49,15 @@ def read_tail(fs, path: str, max_bytes: int | None = None):
 
 class TailFile(InputOutputPlugin):
     name = "Tail file"
+    commands = (
+        Command("tail", "show the end of a file", arg="path",
+                allow_bare=False),
+        Command("follow", "stream a file as it grows", arg="path",
+                allow_bare=False),
+        Command("stop", "stop following"),
+    )
     description = "Show the end of a file, once or as it grows (tail -f)"
-    prompt = "tail|follow <file> [n] | stop> "
+    prompt = "F2 for commands, or type one> "
     wants_timer = True     # the app polls tick() so 'follow' can stream
 
     def on_start(self) -> None:

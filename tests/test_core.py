@@ -1807,3 +1807,77 @@ def test_open_location_reports_a_refused_connection(app, monkeypatch):
     monkeypatch.setattr(app, "_connect", broken)
     app.handle_key(ord("o"))
     assert "ValueError: port must be an integer" in scripted.last_message
+
+
+# -- the data plug-ins' column menus -------------------------------------------
+
+def test_profile_plugin_offers_its_columns_to_the_menu(fs, tmp_path,
+                                                       monkeypatch):
+    from meridian_commander.plugin_api import Command
+    from meridian_commander.plugins.csv_profile import CsvProfile
+
+    write(str(tmp_path / "d" / "data.csv"), "id,name,score\n1,alice,10\n")
+    ctx = _data_ctx(fs, tmp_path / "d", {"data.csv"}, monkeypatch)
+    plug = CsvProfile(ctx)
+    assert plug.command_options(Command("col")) == ["id", "name", "score"]
+
+
+def test_profile_plugin_offers_nothing_when_no_file_is_selected(fs, tmp_path,
+                                                                monkeypatch):
+    from meridian_commander.plugin_api import Command
+    from meridian_commander.plugins.csv_profile import CsvProfile
+
+    (tmp_path / "d").mkdir(exist_ok=True)
+    ctx = _data_ctx(fs, tmp_path / "d", set(), monkeypatch)
+    assert CsvProfile(ctx).command_options(Command("col")) is None
+
+
+def test_clean_plugin_offers_its_columns_to_the_menu(fs, tmp_path, monkeypatch):
+    from meridian_commander.plugin_api import Command
+    from meridian_commander.plugins.csv_clean import CsvClean
+
+    write(str(tmp_path / "d" / "data.csv"), "a,b\n1,2\n")
+    ctx = _data_ctx(fs, tmp_path / "d", {"data.csv"}, monkeypatch)
+    assert CsvClean(ctx).command_options(Command("drop")) == ["a", "b"]
+
+
+def test_clean_plugin_offers_nothing_without_a_file(fs, tmp_path, monkeypatch):
+    from meridian_commander.plugin_api import Command
+    from meridian_commander.plugins.csv_clean import CsvClean
+
+    (tmp_path / "d").mkdir(exist_ok=True)
+    ctx = _data_ctx(fs, tmp_path / "d", set(), monkeypatch)
+    assert CsvClean(ctx).command_options(Command("drop")) is None
+
+
+def test_build_plugin_offers_the_first_tagged_files_columns(fs, tmp_path,
+                                                            monkeypatch):
+    from meridian_commander.plugin_api import Command
+    from meridian_commander.plugins.csv_build import CsvBuild
+
+    write(str(tmp_path / "d" / "a.csv"), "id,name\n1,alice\n")
+    ctx = _data_ctx(fs, tmp_path / "d", {"a.csv"}, monkeypatch)
+    assert CsvBuild(ctx).command_options(Command("join")) == ["id", "name"]
+
+
+def test_build_plugin_offers_nothing_with_nothing_tagged(fs, tmp_path,
+                                                         monkeypatch):
+    from meridian_commander.plugin_api import Command
+    from meridian_commander.plugins.csv_build import CsvBuild
+
+    (tmp_path / "d").mkdir(exist_ok=True)
+    ctx = _data_ctx(fs, tmp_path / "d", set(), monkeypatch)
+    assert CsvBuild(ctx).command_options(Command("join")) is None
+
+
+def test_build_plugin_menu_options_survive_an_unreadable_file(fs, tmp_path,
+                                                              monkeypatch):
+    from meridian_commander.plugin_api import Command
+    from meridian_commander.plugins.csv_build import CsvBuild
+
+    write(str(tmp_path / "d" / "a.csv"), "id\n1\n")
+    ctx = _data_ctx(fs, tmp_path / "d", {"a.csv"}, monkeypatch)
+    plug = CsvBuild(ctx)
+    monkeypatch.setattr(plug, "_read",
+                        lambda entry: (_ for _ in ()).throw(OSError("gone")))
+    assert plug.command_options(Command("join")) is None

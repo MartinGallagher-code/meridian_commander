@@ -25,7 +25,7 @@ auto-detect), ``encoding``, ``has_header`` (yes/no), ``max_bytes``.
 from __future__ import annotations
 
 from ..config import plugin_settings
-from ..plugin_api import InputOutputPlugin
+from ..plugin_api import Command, InputOutputPlugin
 from . import _tabular as tabular
 
 DEFAULTS = {
@@ -48,6 +48,17 @@ def has_pandas() -> bool:
 
 class CsvBuild(InputOutputPlugin):
     name = "Build dataset"
+    commands = (
+        Command("concat", "stack all tagged files (union of columns)"),
+        Command("join", "join the first two tagged files on a key",
+                arg="options"),
+        Command("sample", "a head sample of the tagged file", arg="text"),
+        Command("split", "one file per value of a column", arg="options"),
+        Command("to-jsonl", "convert the tagged CSV to JSON-lines"),
+        Command("from-jsonl", "convert the tagged JSON-lines to CSV"),
+        Command("groupby", "aggregate rows (count/sum/mean/min/max)",
+                arg="text"),
+    )
     description = "Concat/join/sample/split/convert files from the other pane"
     prompt = "build> "
     config_section = "csv_build"
@@ -70,6 +81,14 @@ class CsvBuild(InputOutputPlugin):
 
     def _has_header(self) -> bool:
         return str(self.config["has_header"]).strip().lower() not in ("no", "false", "0")
+
+    def command_options(self, command):
+        """Columns of the first tagged file, for ``join`` and ``split``."""
+        try:
+            files = tabular.selected_files(self.ctx)
+            return list(self._read(files[0]).header) if files else None
+        except Exception:
+            return None
 
     def _read(self, entry):
         fs = self._fs()

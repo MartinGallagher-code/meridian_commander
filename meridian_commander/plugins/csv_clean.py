@@ -28,7 +28,7 @@ from __future__ import annotations
 import re
 
 from ..config import plugin_settings
-from ..plugin_api import InputOutputPlugin
+from ..plugin_api import Command, InputOutputPlugin
 from . import _tabular as tabular
 
 DEFAULTS = {
@@ -43,6 +43,19 @@ _FILTER_OPS = ("contains", ">=", "<=", "!=", "==", ">", "<")
 
 class CsvClean(InputOutputPlugin):
     name = "Clean table"
+    commands = (
+        Command("trim", "strip whitespace from every cell"),
+        Command("dedupe", "drop repeated rows"),
+        Command("dropnull", "drop rows with an empty cell"),
+        Command("fillnull", "fill empty cells with a value", arg="text"),
+        Command("drop", "drop one column", arg="options"),
+        Command("keep", "keep only the columns you name", arg="text"),
+        Command("rename", "rename a column (old new)", arg="text"),
+        Command("filter", "keep rows matching col op value", arg="text"),
+        Command("retype", "retype a column to int or float", arg="text"),
+        Command("normalize-headers", "snake_case the header row"),
+        Command("preview", "try a command without writing", arg="text"),
+    )
     description = "Clean the CSV/TSV selected in the other pane (writes a copy)"
     prompt = "clean> "
     config_section = "csv_clean"
@@ -77,6 +90,13 @@ class CsvClean(InputOutputPlugin):
             max_bytes=int(cfg["max_bytes"]),
         )
         return fs, path, table
+
+    def command_options(self, command):
+        """The table's own column names, for the column-taking commands."""
+        try:
+            return list(self._read()[2].header)
+        except Exception:
+            return None
 
     def process(self, line: str):
         cmd = line.strip()

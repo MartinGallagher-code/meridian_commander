@@ -18,7 +18,7 @@ does by hand.
 from __future__ import annotations
 
 from . import _io
-from ..plugin_api import InputOutputPlugin
+from ..plugin_api import Command, InputOutputPlugin
 
 ALGORITHMS = ("md5", "sha1", "sha256", "sha512")
 DEFAULT_ALGO = "sha256"
@@ -31,8 +31,16 @@ hash_stream = _io.hash_file
 
 class Checksum(InputOutputPlugin):
     name = "Checksum / verify"
+    commands = (
+        Command("sha256", "hash the tagged files (the default)"),
+        Command("sha1", "hash them with SHA-1"),
+        Command("md5", "hash them with MD5"),
+        Command("sha512", "hash them with SHA-512"),
+        Command("write", "write the digests to a SHA256SUMS-style file"),
+        Command("verify", "check files against a sums file", arg="path"),
+    )
     description = "Hash the other pane's tagged files, or verify a sums file"
-    prompt = "sha256|write|verify> "
+    prompt = "F2 for commands, or type one> "
 
     @property
     def greeting(self) -> str:
