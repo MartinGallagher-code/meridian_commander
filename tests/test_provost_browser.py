@@ -52,11 +52,21 @@ def make_store(root) -> str:
     return store
 
 
+class _Panel:
+    """Enough of a panel for the browser: a backend, a path, and moving."""
+
+    def __init__(self, fs, path: str) -> None:
+        self.fs = fs
+        self.path = path
+
+    def chdir(self, path: str) -> None:
+        self.path = path
+
+
 def _ctx(path: str):
     fs = LocalFileSystem()
-    other = types.SimpleNamespace(fs=fs, path=path)
-    own = types.SimpleNamespace(fs=fs, path=path)
-    return PluginContext(app=None, own_panel=own, other_panel=other)
+    return PluginContext(app=None, own_panel=_Panel(fs, path),
+                         other_panel=_Panel(fs, path))
 
 
 @pytest.fixture
@@ -170,6 +180,14 @@ def test_find_store_honours_workspace_env(store, tmp_path):
 def test_find_store_takes_the_pane_directory_itself(store):
     found, how = find_store(LocalFileSystem(), store, {})
     assert (found, how) == (store, "this directory")
+
+
+def test_find_store_finds_the_store_from_inside_it(store):
+    """Standing in the store's own captures/ still resolves to the store."""
+    fs = LocalFileSystem()
+    found, how = find_store(fs, fs.join(store, "captures"), {})
+    assert found == store
+    assert how == f"store: {store}"
 
 
 def test_find_store_walks_up_to_a_controlled_directory(store, tmp_path):
@@ -489,6 +507,79 @@ def test_reload_picks_up_a_new_dataset(plugin, store):
     write(f"{store}/datasets/new.tsv", "#\tx\n5\ty\n")
     keys(plugin, "r")
     assert "new" in plugin.stack[-1].items
+
+
+# -- following the other pane ------------------------------------------------------
+
+def _second_store(tmp_path) -> str:
+    """A controlled directory with a store of its own, unlike the fixture's."""
+    project = tmp_path / "proj"
+    (project / "src").mkdir(parents=True)
+    ws = project / ".provost"
+    write(str(ws / "CONTROLLED"), str(project))
+    write(str(ws / "datasets" / "ps.tsv"), "#\tpid\tcmd\n7\t1\tinit\n")
+    write(str(ws / "provenance.tsv"), "7\tps\tc0001\n")
+    return str(project)
+
+
+def test_the_store_follows_the_pane_to_a_controlled_directory(plugin, tmp_path):
+    project = _second_store(tmp_path)
+    plugin.ctx.other_panel.chdir(project)
+    plugin.tick()
+    assert plugin.store == str(tmp_path / "proj" / ".provost")
+    assert plugin.stack[-1].items == ["ps"]          # rebuilt on the new store
+    assert "followed pane" in plugin.status
+
+
+def test_it_follows_from_a_subdirectory_of_a_controlled_directory(plugin,
+                                                                  tmp_path):
+    project = _second_store(tmp_path)
+    plugin.ctx.other_panel.chdir(str(tmp_path / "proj" / "src"))
+    plugin.tick()
+    assert plugin.store == str(tmp_path / "proj" / ".provost")
+
+
+def test_tick_does_nothing_while_the_pane_stays_put(plugin, monkeypatch):
+    calls = []
+    monkeypatch.setattr(mod, "find_store",
+                        lambda *a, **k: calls.append(a) or (None, ""))
+    view = plugin.stack[-1]
+    plugin.tick()
+    plugin.tick()
+    assert calls == []                                # no filesystem work
+    assert plugin.stack[-1] is view
+
+
+def test_moving_outside_any_store_keeps_the_current_one(plugin, tmp_path,
+                                                        monkeypatch):
+    monkeypatch.delenv("PROVOST_HOME", raising=False)
+    monkeypatch.setenv("PROVOST_HOME", str(tmp_path / "nowhere"))
+    was = plugin.store
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    plugin.ctx.other_panel.chdir(str(elsewhere))
+    plugin.tick()
+    assert plugin.store == was                        # view survives the move
+    assert "no store under" in plugin.status
+
+
+def test_moving_within_the_same_store_does_not_rebuild(plugin, store):
+    import os
+
+    os.mkdir(f"{store}/captures/sub")
+    view = plugin.stack[-1]
+    plugin.ctx.other_panel.chdir(f"{store}/captures")
+    plugin.tick()
+    assert plugin.stack[-1] is view                   # same store, same view
+    assert plugin.status == ""
+
+
+def test_reload_catches_up_without_waiting_for_the_timer(plugin, tmp_path):
+    project = _second_store(tmp_path)
+    plugin.ctx.other_panel.chdir(project)
+    keys(plugin, "r")
+    assert plugin.store == str(tmp_path / "proj" / ".provost")
+    assert plugin.stack[-1].items == ["ps"]
 
 
 # -- drawing ------------------------------------------------------------------------------------

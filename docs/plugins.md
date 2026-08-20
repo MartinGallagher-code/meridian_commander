@@ -46,10 +46,14 @@ still switches panes while a plug-in is open.
   filterable tables; the capture log (`l`), each capture with its metadata and
   original output; and `s` on a dataset row to see the exact captured input
   behind its `#N` index (provost's provenance). The store is found the way
-  provost finds it — the pane's directory, a controlled parent's `.provost`,
-  or `~/.provost` — and read through the pane's filesystem, so remote stores
-  browse like local ones. `store =` under `[plugin:provost]` in `config.ini`
-  points it somewhere explicit.
+  provost finds it — the pane's directory (or any parent, including the store
+  you are standing inside), a controlled parent's `.provost`, or `~/.provost` —
+  and read through the pane's filesystem, so remote stores browse like local
+  ones. It **follows the other pane**: browse to a controlled directory and the
+  view switches to that instance, exactly as running `provost` there would;
+  `r` catches up immediately. Moving somewhere with no store keeps the current
+  one rather than closing the view. `store =` under `[plugin:provost]` in
+  `config.ini` pins it to one place.
 - **Multi-rename** — rename the other pane's tagged files in bulk by one rule:
   `replace`, `prefix`, `suffix`, `case` or a `number` template. Prefix a rule
   with `preview` to see the mapping first; a rule that would collide two names

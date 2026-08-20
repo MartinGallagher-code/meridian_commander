@@ -900,8 +900,10 @@ Built-in plug-ins:
   credential prompt — use the shell (`!`) for those.
 - **Provost data** — a read-only browser for a
   [provost](https://pypi.org/project/provost/) store, found from the other
-  pane's location the way provost itself finds it (the directory, a controlled
-  parent's `.provost`, or the global `~/.provost`). Datasets open as aligned,
+  pane's location the way provost itself finds it (the directory or any parent,
+  a controlled parent's `.provost`, or the global `~/.provost`) and **following
+  that pane** as it moves, so browsing into a controlled directory switches to
+  its instance just as running `provost` there would. Datasets open as aligned,
   scrollable tables (the `unsorted` triage queue base64-decoded, as `provost
   triage` shows it); `l` lists the capture log newest-first and Enter shows a
   capture's metadata, context and original output; `s` on any dataset row
