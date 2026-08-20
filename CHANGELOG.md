@@ -13,6 +13,11 @@ day the version was cut.
 
 ### Added
 
+- A tag pushed for a version already on PyPI is now a no-op with a notice
+  rather than a failure. `PUBLISHING.md` asks for exactly that — the
+  `[release]` route publishes without leaving a tag — and a tag that records
+  a release which already happened has nothing to upload. An intentional
+  publish that cannot succeed still stops loudly.
 - A **Provost data plug-in**: browse a provost store's datasets, its log and
   the sources behind each row. Its pane browser follows the other pane to
   whichever store that pane is standing in.
@@ -59,6 +64,13 @@ day the version was cut.
   same file had left a curses screen initialised behind them; run on their
   own, all four failed. They stub the two globals the loop reaches for and
   now stand alone.
+- **A dropped SSH connection is reported as one.** `get_transport()` answers
+  `None` once the connection has gone, and four call sites dereferenced it
+  immediately — both scp paths and both ends of the ProxyJump chain — so an
+  idle timeout or a suspended laptop surfaced as `AttributeError: 'NoneType'
+  object has no attribute 'open_session'`. They now raise a `FileSystemError`
+  that names the connection and says to reopen the pane with `F2`. The JSON
+  push plug-in had the same hole between its redial and its channel.
 
 ### Known limitation
 

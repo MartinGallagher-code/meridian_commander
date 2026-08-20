@@ -15,6 +15,7 @@ import os
 import pty
 import select
 import struct
+import sys
 import tarfile
 import termios
 import threading
@@ -185,20 +186,38 @@ def _drain(fd: int, stop) -> None:
             return
 
 
-#: Whether a real curses screen may be put on a pseudo-terminal here.
+#: Whether a real curses screen can be put on a pseudo-terminal here.
 #:
-#: This exists because the arrangement deadlocked on macOS: ncurses blocked
-#: inside its first write while ``select()`` reported the master end had
-#: nothing to drain, and nothing in the process could break it -- CPython's
-#: _curses holds the GIL throughout, so no watchdog thread ever runs.  The
-#: cause was a pty left at its default 0x0 size, which sends ncurses off to
-#: ask the terminal how big it is and wait for an answer nobody was there to
-#: give; ``with_curses_screen`` now sets the size before curses looks.
+#: Not on macOS.  There the very first screen deadlocks: the main thread
+#: blocks inside ``doupdate()`` and never returns, while the thread draining
+#: the master end sits in ``select()`` being told there is nothing to read.
+#: Nothing in the process can break it either -- CPython's _curses holds the
+#: GIL throughout, so no watchdog thread runs -- which is why the CI job's
+#: timeout-minutes is what ends such a run.
 #:
-#: The switch stays as the way out if some other platform finds its own
-#: version of this: ``MERIDIAN_SKIP_CURSES_TESTS=1`` skips the 378 tests that
-#: need a screen and leaves the other ~2,450 running.
-CURSES_SCREENS = os.environ.get("MERIDIAN_SKIP_CURSES_TESTS") != "1"
+#: Two explanations have been tried against CI and are wrong, so nobody need
+#: try them again:
+#:
+#: * *The drain gave up too early.*  It does read on; the faulthandler dump
+#:   shows it idle in ``select()`` with the master reporting nothing to read,
+#:   not stopped.
+#: * *ncurses was asking the terminal how big it was.*  A fresh pty is 0x0,
+#:   and ncurses that cannot get a size from ``TIOCGWINSZ`` will write the
+#:   "u7" cursor-position query and wait for a reply nobody is there to
+#:   send.  ``with_curses_screen`` now sets the window size before curses
+#:   looks -- worth keeping, since a pty ought to have a size -- and macOS
+#:   hangs in exactly the same place regardless.
+#:
+#: What is left needs a Mac and a debugger on the stuck process; it cannot be
+#: chased from a Linux machine at fifteen minutes an attempt.  Meanwhile the
+#: 378 tests that need a screen skip there and the other ~2,450 run, which is
+#: worth much more than not testing macOS at all.  The coverage gate stays on
+#: Linux, where every statement is still reached.
+#:
+#: ``MERIDIAN_CURSES_TESTS=1`` runs them anyway, which is where that debugging
+#: session starts.
+CURSES_SCREENS = (sys.platform != "darwin"
+                  or os.environ.get("MERIDIAN_CURSES_TESTS") == "1")
 
 
 def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
@@ -215,7 +234,8 @@ def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
     only useful for the paths that check the count and then decline to use it.
     """
     if not CURSES_SCREENS:
-        pytest.skip("curses screens disabled by MERIDIAN_SKIP_CURSES_TESTS")
+        pytest.skip("a curses screen on a pty deadlocks on this platform; "
+                    "set MERIDIAN_CURSES_TESTS=1 to try anyway")
     master, slave = pty.openpty()
     # Tell the pty how big it is before curses asks. A fresh one is 0x0, and
     # ncurses that cannot get a size out of TIOCGWINSZ falls back to asking

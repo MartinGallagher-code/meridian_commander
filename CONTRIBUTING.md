@@ -89,6 +89,23 @@ supported platforms. `MERIDIAN_CURSES_TESTS=1` runs them anyway if you have a
 Mac and a debugger. The coverage gate is enforced on Linux only, for the same
 reason.
 
+Two explanations have been tried against CI and are wrong, so nobody need
+spend a cycle on them again:
+
+- **The drain thread gave up too early.** It does not: the faulthandler dump
+  shows it idle in `select()`, being told the master has nothing to read.
+- **ncurses was asking the terminal how big it was.** A fresh pty is 0×0, and
+  ncurses that cannot get a size from `TIOCGWINSZ` writes the `u7`
+  cursor-position query and waits for a reply nobody will send.
+  `with_curses_screen` now sets the window size first — worth keeping, since a
+  pty ought to have one — and macOS hangs in precisely the same place.
+
+Note also that a hang *inside* curses cannot be caught by the per-test
+timeout, because CPython's `_curses` never releases the GIL: the watchdog
+thread that would kill the run never gets to execute. `faulthandler` still
+works, being driven from a C thread, and the CI job's `timeout-minutes` is
+the real backstop.
+
 ## Style
 
 Match the file you are editing. Across the tree that means:

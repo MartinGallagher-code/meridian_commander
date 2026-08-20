@@ -96,17 +96,24 @@ jobs:
         run: python -m coverage run -m pytest -q
       - name: Coverage
         # Prints the per-module table and fails below fail_under (100) from
-        # pyproject.toml.
+        # pyproject.toml. Two jobs print without the gate.
         #
-        # Except on 3.9, where the total is enforced but not the gate: precise
-        # line events arrived with PEP 626 in 3.10, and before that the tracer
-        # does not record a "break" that follows an if-block ending in its own
-        # jump, even though the statement runs. Two such statements exist here
-        # (editor.py's quit path, the FTP reader's EOF), so 3.9 tops out at
-        # 99.9%. The report is still printed there, so a genuine regression is
+        # 3.9, because precise line events arrived with PEP 626 in 3.10, and
+        # before that the tracer does not record a "break" that follows an
+        # if-block ending in its own jump, even though the statement runs.
+        # Two such statements exist here (editor.py's quit path, the FTP
+        # reader's EOF), so 3.9 tops out at 99.9%.
+        #
+        # macOS, because the 378 tests that drive a real curses screen on a
+        # pseudo-terminal skip there -- see CURSES_SCREENS in tests/support.py
+        # -- which leaves the drawing code unmeasured. The other 2,450 run,
+        # which is what these jobs are for; Linux keeps the gate honest.
+        #
+        # The report is printed either way, so a genuine regression is still
         # visible in the log.
         run: |
-          if [ "${{ matrix.python-version }}" = "3.9" ]; then
+          if [ "${{ matrix.python-version }}" = "3.9" ] \
+             || [ "${{ runner.os }}" = "macOS" ]; then
             python -m coverage report --fail-under=0
           else
             python -m coverage report
@@ -158,18 +165,47 @@ jobs:
       # already released fails -- but it fails inside twine, after the
       # attestations are signed, and the error twine prints on its own line is
       # "400 Bad Request" with the reason buried in an HTML body above it. Ask
-      # PyPI first and say the useful thing instead. Only a definite 200 (the
-      # version is there) stops the run: a network failure or any other status
-      # leaves the decision to the upload, which is the authority anyway.
-      - name: Refuse to re-upload a released version
+      # PyPI first, and let the two ways of getting here answer differently.
+      #
+      # Only a definite 200 (the version is there) counts: a network failure
+      # or any other status leaves the decision to the upload, which is the
+      # authority anyway.
+      - name: Ask PyPI whether this version is already released
+        id: pypi
         run: |
           sdist=$(ls dist/*.tar.gz | head -1)
           version=$(basename "$sdist" .tar.gz | sed -E 's/^[^-]+-//')
           status=$(curl -sS -o /dev/null -w '%{http_code}' \
             "https://pypi.org/pypi/meridian-commander/$version/json" || echo "000")
           echo "meridian-commander $version: PyPI answered $status"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           if [ "$status" = "200" ]; then
-            echo "::error::meridian-commander $version is already on PyPI, and PyPI does not allow a file name to be reused, so this upload cannot succeed. Bump the version in pyproject.toml and meridian_commander/__init__.py, then release again."
-            exit 1
+            echo "already=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
           fi
+
+      # Asked to publish -- a manual dispatch, or a "[release]" merge -- and it
+      # cannot succeed. That is someone forgetting to bump the version, and it
+      # should stop loudly with the reason.
+      - name: Refuse to re-upload a released version
+        if: >-
+          steps.pypi.outputs.already == 'true' &&
+          !startsWith(github.ref, 'refs/tags/v')
+        run: |
+          echo "::error::meridian-commander ${{ steps.pypi.outputs.version }} is already on PyPI, and PyPI does not allow a file name to be reused, so this upload cannot succeed. Bump the version in pyproject.toml and meridian_commander/__init__.py, then release again."
+          exit 1
+
+      # A tag is different: a version can be tagged after it was released --
+      # PUBLISHING.md asks for exactly that, since the "[release]" route
+      # publishes without leaving a tag behind. Such a tag has nothing to
+      # upload, and nothing to upload is done, not broken.
+      - name: Already released; the tag is the whole job
+        if: >-
+          steps.pypi.outputs.already == 'true' &&
+          startsWith(github.ref, 'refs/tags/v')
+        run: |
+          echo "::notice::meridian-commander ${{ steps.pypi.outputs.version }} is already on PyPI. This tag records a release that has already happened, so there is nothing to upload."
+
       - uses: pypa/gh-action-pypi-publish@release/v1
+        if: steps.pypi.outputs.already != 'true'
