@@ -11,6 +11,8 @@ day the version was cut.
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-08-27
+
 ### Added
 
 - **`F4` can hand the file to your own editor.** `Options > Editor` points it
@@ -70,6 +72,11 @@ day the version was cut.
   same file had left a curses screen initialised behind them; run on their
   own, all four failed. They stub the two globals the loop reaches for and
   now stand alone.
+- The coverage gate no longer depends on a race. A terminal's shell exiting
+  is noticed either by the pty master reporting `EIO` or by `waitpid` seeing
+  the child, whichever wins on the day; one test reached whichever path won,
+  so the losing branch was covered by luck, and the luck ran out on `main`
+  at 99.9%. The `waitpid` branch now has a test that picks the winner.
 - **A dropped SSH connection is reported as one.** `get_transport()` answers
   `None` once the connection has gone, and four call sites dereferenced it
   immediately — both scp paths and both ends of the ProxyJump chain — so an
@@ -164,9 +171,15 @@ message, which publishes to PyPI but leaves no tag behind, so these link to
 the release commit rather than to a "v1.2.0" that does not exist. Tagging each
 release would make these ordinary compare links and give the repository the
 same history PyPI already has; see PUBLISHING.md.
+
+1.4.0 is the first to link to a tag rather than a commit, because PUBLISHING.md
+asks for this one to be cut by pushing "v1.4.0". Those two links resolve once
+that tag exists; cutting it the "[release]" way instead would leave them
+pointing at nothing.
 -->
 
-[Unreleased]: https://github.com/MartinGallagher-code/meridian_commander/compare/552dc66...HEAD
+[Unreleased]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/552dc66...v1.4.0
 [1.3.0]: https://github.com/MartinGallagher-code/meridian_commander/commit/552dc66
 [1.2.0]: https://github.com/MartinGallagher-code/meridian_commander/commit/7c6792d
 [1.1.0]: https://github.com/MartinGallagher-code/meridian_commander/commit/b49bd6f
