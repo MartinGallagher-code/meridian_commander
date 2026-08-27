@@ -8,6 +8,7 @@ import pytest
 
 from meridian_commander import config as config_mod
 from meridian_commander import dialogs, theme
+from meridian_commander import app as app_mod
 from meridian_commander.app import MENUS, App, menu_layout
 
 from support import (
@@ -261,6 +262,103 @@ def test_alt_c_then_r_reloads_the_panes_end_to_end(app, monkeypatch, tmp_path):
     assert "Reloaded" in app.message
     # The bar was drawn under the drop-down while it was open.
     assert "Command" in screen.splitlines()[0]
+
+
+# -- Options > Editor ----------------------------------------------------------
+
+def test_the_editor_menu_offers_the_built_in_one_and_the_usual_suspects(
+        app, monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Cancel"])
+    app._editor_menu()
+    _title, options = scripted.menus[0]
+    assert options[0].startswith("Built-in editor")
+    assert "vim" in options
+    assert "Other..." in options
+    # Nothing is configured, so the built-in editor is the one marked.
+    assert "(current)" in options[0]
+
+
+def test_choosing_an_editor_remembers_it(app, monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr(app_mod.shutil, "which", lambda name: "/usr/bin/vim")
+    _ScriptedDialogs(monkeypatch, menu=["vim"])
+    app._editor_menu()
+    assert config_mod.external_editor() == "vim"
+    assert app.message == "Editor: vim"
+
+
+def test_choosing_the_built_in_editor_puts_it_back(app, monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    assert config_mod.save_editor("vim") is True
+    _ScriptedDialogs(monkeypatch, menu=["Built-in editor"])
+    app._editor_menu()
+    assert config_mod.external_editor() == ""
+    assert app.message == "Editor: built-in editor"
+
+
+def test_an_editor_not_on_the_path_is_saved_but_flagged(app, monkeypatch,
+                                                        tmp_path):
+    """Saved anyway -- it may be installed later, or live on another PATH --
+    but silently pointing F4 at a missing program would be worse."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr(app_mod.shutil, "which", lambda name: None)
+    _ScriptedDialogs(monkeypatch, menu=["nano"])
+    app._editor_menu()
+    assert config_mod.external_editor() == "nano"
+    assert "nano is not on your PATH" in app.message
+
+
+def test_other_takes_any_command_line(app, monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr(app_mod.shutil, "which", lambda name: "/usr/bin/emacs")
+    _ScriptedDialogs(monkeypatch, menu=["Other..."], prompt=["  emacs -nw  "])
+    app._editor_menu()
+    assert config_mod.external_editor() == "emacs -nw"
+
+
+def test_other_offers_the_current_command_to_edit(app, monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    assert config_mod.save_editor("vim") is True
+    defaults = []
+    _ScriptedDialogs(monkeypatch, menu=["Other..."])
+    # After the scripted set, so this is the prompt the menu actually calls.
+    monkeypatch.setattr(
+        dialogs, "prompt",
+        lambda stdscr, title, label, default="", is_password=False:
+            defaults.append(default) or None)
+    app._editor_menu()
+    assert defaults == ["vim"]
+    assert config_mod.external_editor() == "vim"
+
+
+def test_a_command_that_cannot_work_is_refused(app, monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Other..."],
+                                prompt=["vim 'unclosed"])
+    app._editor_menu()
+    assert "not a usable command" in scripted.messages[0][1]
+    assert config_mod.external_editor() == ""
+
+
+def test_the_editor_menu_can_be_cancelled(app, monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    _ScriptedDialogs(monkeypatch, menu=[None])
+    app._editor_menu()
+    assert config_mod.external_editor() == ""
+    _ScriptedDialogs(monkeypatch, menu=["Cancel"])
+    app._editor_menu()
+    assert config_mod.external_editor() == ""
+
+
+def test_an_editor_that_cannot_be_saved_is_still_reported(app, monkeypatch,
+                                                          tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr(app_mod.shutil, "which", lambda name: "/usr/bin/vim")
+    monkeypatch.setattr(config_mod, "save_editor", lambda command: False)
+    _ScriptedDialogs(monkeypatch, menu=["vim"])
+    app._editor_menu()
+    assert "could not be saved" in app.message
 
 
 # -- Options > Colours ---------------------------------------------------------

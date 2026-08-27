@@ -13,6 +13,12 @@ day the version was cut.
 
 ### Added
 
+- **`F4` can hand the file to your own editor.** `Options > Editor` points it
+  at `vi`, `vim`, `nano`, `$EDITOR` or any command line you name, remembered
+  in `[ui] editor`; blank keeps the built-in editor, which stays the default.
+  On a remote pane the file is fetched to a private temporary copy, edited,
+  and written back only if it changed — and if that write-back fails, the copy
+  is kept and the message says where, so the work is not lost.
 - A tag pushed for a version already on PyPI is now a no-op with a notice
   rather than a failure. `PUBLISHING.md` asks for exactly that — the
   `[release]` route publishes without leaving a tag — and a tag that records
