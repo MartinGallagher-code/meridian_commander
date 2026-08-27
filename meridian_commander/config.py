@@ -24,6 +24,12 @@ DEFAULT_CONFIG = """\
 ; Colour scheme: turbo (Borland blue), midnight (black ground), mono.
 ; Also switchable while running, from Options > Colours.
 scheme = turbo
+; External editor for F4.  Blank uses the built-in editor.
+; A command line in shell syntax -- "vi", "vim", "nano", "emacs -nw" -- or
+; "$EDITOR" to take whatever the environment names.  A file on a remote pane
+; is fetched to a private temporary copy, edited, and written back if it
+; changed.  Also switchable while running, from Options > Editor.
+editor =
 
 [plugins]
 ; Extra directories to search for plug-ins, colon-separated.
@@ -163,20 +169,18 @@ def colour_scheme() -> str:
     return (parser.get("ui", "scheme", fallback="") or "").strip() or "turbo"
 
 
-def save_scheme(name: str) -> bool:
-    """Remember a colour scheme chosen from the Options menu.
+def _save_ui(key: str, value: str) -> bool:
+    """Write one ``[ui]`` setting back, keeping the rest of the file.
 
     Rewritten with :mod:`configparser` rather than by hand, which loses the
-    comments in the rest of the file -- so the file is only touched when the
-    setting actually changes, and a failure to write is reported to the caller
-    instead of raising: the scheme is already applied on screen either way.
+    comments in the rest of the file -- so callers only touch it when the
+    setting actually changes, and a failure to write is reported instead of
+    raised: what was chosen from the menu is already in effect either way.
     """
-    if colour_scheme() == name:
-        return True
     parser = load()
     if not parser.has_section("ui"):
         parser.add_section("ui")
-    parser.set("ui", "scheme", name)
+    parser.set("ui", key, value)
     try:
         os.makedirs(config_dir(), mode=0o700, exist_ok=True)
         with _private_write(config_path()) as f:
@@ -184,6 +188,32 @@ def save_scheme(name: str) -> bool:
     except OSError:
         return False
     return True
+
+
+def save_scheme(name: str) -> bool:
+    """Remember a colour scheme chosen from the Options menu."""
+    if colour_scheme() == name:
+        return True
+    return _save_ui("scheme", name)
+
+
+def external_editor() -> str:
+    """The command in ``[ui] editor``, or ``""`` for the built-in editor.
+
+    Returned raw: ``$EDITOR`` is expanded when the command is about to be
+    run, not when it is read, so changing the environment takes effect
+    without editing the file.
+    """
+    parser = load()
+    return (parser.get("ui", "editor", fallback="") or "").strip()
+
+
+def save_editor(command: str) -> bool:
+    """Remember an editor chosen from the Options menu."""
+    command = command.strip()
+    if external_editor() == command:
+        return True
+    return _save_ui("editor", command)
 
 
 def extra_plugin_dirs() -> list[str]:

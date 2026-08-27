@@ -130,7 +130,10 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   `/` search. It reads the format with the **standard library alone**, so
   spreadsheets open with nothing installed — on remote panes too.
 - **File editor** (`F4`) — a real in-place editor (insert/delete, Enter/Backspace
-  line handling, save with `Ctrl-S`), also with toggleable line numbers.
+  line handling, save with `Ctrl-S`), also with toggleable line numbers. Prefer
+  your own editor? **Options > Editor** points `F4` at `vi`, `vim`, `$EDITOR` or
+  any command you name — including on a remote pane, which is fetched to a
+  private copy and written back if you changed it.
 - **Tag multiple files** (`Insert`/`Space`, `+` all, `-` none) for batch
   copy/move/delete.
 - **Find files** (`f`) — search the pane's tree by substring or glob (remote

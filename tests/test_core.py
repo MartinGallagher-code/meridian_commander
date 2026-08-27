@@ -1018,6 +1018,39 @@ def test_config_defaults_and_plugin_settings(tmp_path, monkeypatch):
     assert merged["username"] == "fallback"
 
 
+def test_the_external_editor_defaults_to_blank_and_round_trips(tmp_path,
+                                                               monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    from meridian_commander import config as config_mod
+
+    assert config_mod.external_editor() == ""
+    config_mod.ensure_config()
+    assert config_mod.external_editor() == ""      # the shipped default
+
+    assert config_mod.save_editor("  vim  ") is True
+    assert config_mod.external_editor() == "vim"
+    # Saving what is already there does not rewrite the file.
+    before = (tmp_path / "config" / "meridian-commander"
+              / "config.ini").read_text()
+    assert config_mod.save_editor("vim") is True
+    assert (tmp_path / "config" / "meridian-commander"
+            / "config.ini").read_text() == before
+
+    assert config_mod.save_editor("") is True
+    assert config_mod.external_editor() == ""
+
+
+def test_an_editor_that_cannot_be_written_is_reported(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    from meridian_commander import config as config_mod
+
+    def refuse(*args, **kwargs):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(config_mod.os, "makedirs", refuse)
+    assert config_mod.save_editor("vim") is False
+
+
 def test_the_colour_scheme_defaults_and_round_trips(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     from meridian_commander import config as config_mod

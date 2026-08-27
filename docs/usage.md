@@ -446,6 +446,33 @@ whole file has to be read before anything can be shown — a zip's index lives a
 its end, so a partial read parses as nothing — which is why an oversized
 workbook is refused outright rather than shown in part.
 
+## Editing with your own editor
+
+`F4` opens the built-in editor, which is deliberately small: it is sized for a
+config file or a quick correction, not for a day's work. If you would rather
+use your own, **Options > Editor** offers `vi`, `vim`, `nano`, `$EDITOR` — or
+`Other...` for any command line you like, `emacs -nw` and `code --wait`
+included. Choosing *Built-in editor* on the same menu puts it back.
+
+The choice is remembered in `[ui] editor` (see
+[Configuration](configuration.md)), and `$EDITOR` is expanded when the editor
+is launched rather than when the setting is read, so it follows the
+environment you started the app in.
+
+The app hands over the whole terminal while the editor runs, exactly as `!`
+and `t` do, and takes it back when the editor exits.
+
+**On a remote pane** — SFTP, SSH, FTP — there is no file on this machine for
+an editor to open, so the file is fetched to a private temporary directory
+(mode `0700`), edited there, and written back **only if it changed**: quitting
+with `:q` costs no upload. Two limits follow from that:
+
+- A file over 8 MB is refused rather than fetched, the same ceiling the
+  built-in editor applies.
+- If the write-back fails — the connection dropped, or the pane is a read-only
+  archive — the temporary copy is deliberately **kept**, and the message tells
+  you where it is. Nothing you typed is thrown away.
+
 ## Key bindings
 
 | Key | Action | Key | Action |

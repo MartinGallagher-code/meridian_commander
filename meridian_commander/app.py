@@ -37,10 +37,11 @@ import curses
 import locale
 import os
 import shlex
+import shutil
 import subprocess
 import time
 
-from . import dialogs, presets, runner, theme
+from . import dialogs, extedit, presets, runner, theme
 from .editor import Editor
 from .filesystems import (
     FileSystem,
@@ -141,6 +142,7 @@ MENUS: list[dict] = [
             {"label": "Show ~h~idden files", "name": "hidden", "key": "."},
             {"sep": True},
             {"label": "~C~olours...", "name": "colours"},
+            {"label": "~E~ditor...", "name": "editor"},
             {"label": "Confi~g~uration...", "name": "config", "key": "C"},
         ],
     },
@@ -152,6 +154,18 @@ MENUS: list[dict] = [
             {"label": "~A~bout...", "name": "about"},
         ],
     },
+]
+
+
+#: What Options > Editor offers, as (``[ui] editor`` value, label). The blank
+#: one is the default and has to be on the list: choosing an outside editor
+#: has to be undoable from the same menu that made the change.
+EDITOR_CHOICES: list[tuple[str, str]] = [
+    ("", "Built-in editor"),
+    ("vi", "vi"),
+    ("vim", "vim"),
+    ("nano", "nano"),
+    ("$EDITOR", "$EDITOR (whatever the environment names)"),
 ]
 
 
@@ -498,6 +512,7 @@ class App:
             "sort": self._sort_menu,
             "hidden": self._toggle_hidden,
             "colours": self._colour_menu,
+            "editor": self._editor_menu,
             "config": self._config_menu,
             "help": self._help,
             "about": self._about,
@@ -674,6 +689,44 @@ class App:
         theme.init(names[choice])
         saved = config_mod.save_scheme(names[choice])
         self._set_message(f"Colour scheme: {names[choice]}"
+                          + ("" if saved else "  (could not be saved)"))
+
+    def _editor_menu(self) -> None:
+        """Choose what F4 opens: the built-in editor, or one of your own."""
+        from . import config as config_mod
+
+        current = config_mod.external_editor()
+        labels = [
+            f"{label}{'   (current)' if command == current else ''}"
+            for command, label in EDITOR_CHOICES
+        ]
+        other = len(EDITOR_CHOICES)
+        choice = dialogs.menu(self.stdscr, "Editor",
+                              labels + ["Other...", "Cancel"])
+        if choice is None or choice > other:
+            return
+        if choice == other:
+            typed = dialogs.prompt(self.stdscr, "Editor", "Editor command:",
+                                   current)
+            if typed is None:
+                return
+            command = typed.strip()
+        else:
+            command = EDITOR_CHOICES[choice][0]
+
+        # Say now if the command cannot work, rather than at the next F4.
+        note = ""
+        if command:
+            try:
+                argv = extedit.editor_argv(command)
+            except ValueError as exc:
+                dialogs.message(self.stdscr, "Editor", str(exc), error=True)
+                return
+            if argv is not None and shutil.which(argv[0]) is None:
+                note = f"  ({argv[0]} is not on your PATH)"
+        saved = config_mod.save_editor(command)
+        chosen = command or "built-in editor"
+        self._set_message(f"Editor: {chosen}{note}"
                           + ("" if saved else "  (could not be saved)"))
 
     def _about(self) -> None:
@@ -1012,12 +1065,44 @@ class App:
                 "User plug-in folder -- drop .py files here to add plug-ins")
 
     def _edit_local_file(self, fs: LocalFileSystem, path: str) -> None:
+        if self._edit_externally(fs, path):
+            return
         try:
             editor = Editor(fs, path)
             editor.run(self.stdscr)
         except Exception as exc:
             dialogs.message(self.stdscr, "Edit error", str(exc), error=True)
         curses.curs_set(0)
+
+    def _external_editor(self) -> list[str] | None:
+        """The editor named by ``[ui] editor``, or ``None`` for the built-in.
+
+        A setting that cannot work is said out loud before falling back:
+        "F4 opened the wrong editor" is a great deal harder to work out from
+        the outside than a dialog naming what is wrong with the setting.
+        """
+        from . import config as config_mod
+
+        try:
+            return extedit.editor_argv(config_mod.external_editor())
+        except ValueError as exc:
+            dialogs.message(self.stdscr, "Editor",
+                            f"[ui] editor: {exc}\n\nUsing the built-in editor.",
+                            error=True)
+            return None
+
+    def _edit_externally(self, fs: FileSystem, path: str) -> bool:
+        """Edit ``path`` with the configured editor; False if there is none."""
+        argv = self._external_editor()
+        if argv is None:
+            return False
+
+        def run(cmd: list[str], cwd: str | None) -> int | None:
+            return self._suspend_and_run(
+                cmd, cwd, "", fail_label=f"Could not start {argv[0]}")
+
+        self._set_message(extedit.edit(fs, path, argv, run))
+        return True
 
     # -- mouse ------------------------------------------------------------
     def _handle_mouse(self) -> None:
@@ -1467,12 +1552,13 @@ class App:
             if not name:
                 return
             target = panel.fs.join(panel.path, name)
-        try:
-            editor = Editor(panel.fs, target)
-            editor.run(self.stdscr)
-        except Exception as exc:
-            dialogs.message(self.stdscr, "Edit error", str(exc), error=True)
-        curses.curs_set(0)
+        if not self._edit_externally(panel.fs, target):
+            try:
+                editor = Editor(panel.fs, target)
+                editor.run(self.stdscr)
+            except Exception as exc:
+                dialogs.message(self.stdscr, "Edit error", str(exc), error=True)
+            curses.curs_set(0)
         panel.refresh()
 
     def _copy(self) -> None:
@@ -1763,6 +1849,8 @@ class App:
             "  F3 on .pdf     page text: Tab page, / find, i scanned image\n"
             "  C              configuration: edit config.ini / plug-ins\n"
             "  Options>Colours  turbo (blue), midnight (black), mono\n"
+            "  Options>Editor   F4 opens vi/vim/$EDITOR instead of the\n"
+            "                   built-in editor\n"
             "\n"
             "  Function keys -- each also has digit and letter aliases,\n"
             "  for terminals that swallow the F-keys:\n"

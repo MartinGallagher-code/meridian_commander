@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import curses
+import os
 
 import pytest
 
@@ -661,6 +662,118 @@ def test_an_editor_that_fails_is_reported(app, tmp_path, monkeypatch):
     scripted = _ScriptedDialogs(monkeypatch)
     app._edit()
     assert "read-only" in scripted.last_message
+
+
+# -- editing with an outside editor --------------------------------------------
+
+def _external(monkeypatch, command):
+    """Point [ui] editor at ``command`` without touching a real config file."""
+    from meridian_commander import config as config_mod
+    monkeypatch.setattr(config_mod, "external_editor", lambda: command)
+
+
+def _no_built_in_editor(monkeypatch):
+    """Fail loudly if the built-in editor is opened after all."""
+    class _Unexpected:
+        def __init__(self, fs, path):
+            raise AssertionError("the built-in editor should not have opened")
+
+    monkeypatch.setattr(app_mod, "Editor", _Unexpected)
+
+
+def test_edit_hands_the_file_to_the_configured_editor(app, tmp_path,
+                                                      monkeypatch):
+    _files(app, tmp_path, notes="hello")
+    _point_at(app.left, "notes")
+    _external(monkeypatch, "vim")
+    _no_built_in_editor(monkeypatch)
+    calls = []
+    monkeypatch.setattr(app, "_suspend_and_run",
+                        lambda cmd, cwd, banner, **kw: calls.append((cmd, cwd)) or 0)
+
+    app._edit()
+    assert calls == [(["vim", str(tmp_path / "left" / "notes")],
+                      str(tmp_path / "left"))]
+    assert app.message == "Edited notes"
+
+
+def test_the_pane_is_refreshed_after_an_outside_editor_ran(app, tmp_path,
+                                                           monkeypatch):
+    """It may have created the file, or changed its size."""
+    app.left.entries = []
+    _external(monkeypatch, "vim")
+    _no_built_in_editor(monkeypatch)
+    _ScriptedDialogs(monkeypatch, prompt=["brand-new.txt"])
+
+    def run(cmd, cwd, banner, **kw):
+        write(cmd[-1], "made by the editor")
+        return 0
+
+    monkeypatch.setattr(app, "_suspend_and_run", run)
+    app._edit()
+    assert "brand-new.txt" in [entry.name for entry in app.left.entries]
+
+
+def test_a_setting_that_cannot_work_is_reported_and_the_built_in_used(
+        app, tmp_path, monkeypatch):
+    _files(app, tmp_path, notes="hello")
+    _point_at(app.left, "notes")
+    monkeypatch.delenv("EDITOR", raising=False)
+    _external(monkeypatch, "$EDITOR")
+    opened = []
+
+    class _Editor:
+        def __init__(self, fs, path):
+            opened.append(path)
+
+        def run(self, stdscr):
+            return None
+
+    monkeypatch.setattr(app_mod, "Editor", _Editor)
+    monkeypatch.setattr(curses, "curs_set", lambda n: None)
+    scripted = _ScriptedDialogs(monkeypatch)
+
+    app._edit()
+    assert "does not set $EDITOR" in scripted.messages[0][1]
+    assert opened == [str(tmp_path / "left" / "notes")]
+
+
+def test_an_outside_editor_really_changes_the_file(app, tmp_path, monkeypatch):
+    """End to end: the real suspend/resume path, and a real program.
+
+    Everything above stubs the subprocess out, which would not notice the
+    file never reaching the command's argv.  Here a shell writes it.
+    """
+    _files(app, tmp_path, notes="before")
+    _point_at(app.left, "notes")
+    _external(monkeypatch, """sh -c 'printf after > "$1"' --""")
+    _no_built_in_editor(monkeypatch)
+    for name in ("def_prog_mode", "endwin", "reset_prog_mode"):
+        monkeypatch.setattr(curses, name, lambda: None)
+    monkeypatch.setattr(curses, "curs_set", lambda n: None)
+    monkeypatch.setattr(os, "write", lambda fd, data: len(data))
+    monkeypatch.setattr(app.stdscr, "clearok", lambda flag: None,
+                        raising=False)
+    monkeypatch.setattr(app.stdscr, "refresh", lambda: None, raising=False)
+
+    app._edit()
+    assert read(str(tmp_path / "left" / "notes")) == "after"
+    assert app.message == "Edited notes"
+
+
+def test_a_plugin_file_is_edited_with_the_configured_editor_too(app, tmp_path,
+                                                                monkeypatch):
+    """The configuration menu's editing goes through the same choice."""
+    _external(monkeypatch, "vim")
+    _no_built_in_editor(monkeypatch)
+    calls = []
+    monkeypatch.setattr(app, "_suspend_and_run",
+                        lambda cmd, cwd, banner, **kw: calls.append(cmd) or 0)
+
+    path = str(tmp_path / "plug.py")
+    write(path, "x = 1")
+    app._edit_local_file(LocalFileSystem(), path)
+    assert calls == [["vim", path]]
 
 
 # -- misc ----------------------------------------------------------------------
