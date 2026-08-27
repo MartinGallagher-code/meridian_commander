@@ -299,6 +299,35 @@ def test_a_vanished_child_is_not_an_error(local_ctx, monkeypatch):
         plugin.on_exit()
 
 
+def test_a_reaped_child_ends_the_terminal(local_ctx, monkeypatch):
+    """The other way a shell's exit arrives: waitpid notices it first.
+
+    Two paths end the terminal and which one wins is a race. Usually the pty
+    master reports the vanished shell as EIO, and that path finishes and
+    returns before ``waitpid`` is ever consulted; occasionally the child is
+    reapable first and this branch runs instead.
+
+    ``test_a_local_terminal_notices_the_shell_exiting`` reaches whichever
+    path wins on the day, so this branch was covered by luck -- and the luck
+    ran out on main, where the coverage gate failed at 99.9% naming exactly
+    these two lines. Stubbing both syscalls picks the winner deliberately.
+    """
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    plugin = TerminalPlugin(local_ctx)
+    try:
+        def would_block(fd, size):
+            raise OSError(errno.EAGAIN, "resource temporarily unavailable")
+
+        monkeypatch.setattr(os, "read", would_block)
+        monkeypatch.setattr(os, "waitpid", lambda pid, flags: (pid, 0))
+        plugin.tick()
+        assert plugin.done is True
+        assert plugin._pid is None
+        assert "process exited" in plugin.status
+    finally:
+        plugin.on_exit()
+
+
 def test_tick_does_nothing_once_finished(local_ctx, monkeypatch):
     monkeypatch.setenv("SHELL", "/bin/sh")
     plugin = TerminalPlugin(local_ctx)

@@ -72,6 +72,11 @@ day the version was cut.
   same file had left a curses screen initialised behind them; run on their
   own, all four failed. They stub the two globals the loop reaches for and
   now stand alone.
+- The coverage gate no longer depends on a race. A terminal's shell exiting
+  is noticed either by the pty master reporting `EIO` or by `waitpid` seeing
+  the child, whichever wins on the day; one test reached whichever path won,
+  so the losing branch was covered by luck, and the luck ran out on `main`
+  at 99.9%. The `waitpid` branch now has a test that picks the winner.
 - **A dropped SSH connection is reported as one.** `get_transport()` answers
   `None` once the connection has gone, and four call sites dereferenced it
   immediately — both scp paths and both ends of the ProxyJump chain — so an
