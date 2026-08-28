@@ -446,6 +446,45 @@ whole file has to be read before anything can be shown — a zip's index lives a
 its end, so a partial read parses as nothing — which is why an oversized
 workbook is refused outright rather than shown in part.
 
+## Popping up from the shell, and taking the shell with you
+
+A file manager is most useful a keystroke away: `Ctrl-O` from your prompt,
+browse, `F10`, and the shell is now in the directory you ended up in. That
+last part is the trick, and it needs the shell's help — no program can change
+its parent shell's directory, because nothing on Unix can reach into another
+process and `chdir` it. What happens instead is that the *shell* starts
+Meridian, and Meridian tells it where to go:
+
+```console
+$ meridian --printwd=/tmp/wd     # on exit, writes the active pane's directory
+```
+
+The shell function that reads that file is printed for you, so there is
+nothing to copy out of this page and keep in step:
+
+```bash
+eval "$(meridian --shell-init bash)"                            # ~/.bashrc
+eval "$(meridian --shell-init zsh)"                             # ~/.zshrc
+meridian --shell-init fish > ~/.config/fish/conf.d/meridian.fish
+```
+
+That binds **`Ctrl-O`**, the key Midnight Commander uses for the same idea. In
+bash it replaces readline's `operate-and-get-next`; bind a different key in
+the snippet if you use it.
+
+**Nothing is written when the pane you quit from is not local.** An SFTP or
+FTP pane is a connection and an archive pane is a file inside one, and no
+shell can `cd` to either, so the file stays empty and the snippet leaves you
+where you were. Quitting with `Ctrl-C` likewise chooses no directory.
+
+One difference between the shells is worth knowing. bash and fish call the
+function from a key binding directly; zsh instead *types* the command at your
+prompt (`bindkey -s`), because a zsh `zle` widget keeps hold of the terminal
+while it runs — a full-screen program launched from inside one draws its first
+frame and then never sees a keystroke. Typing the line hands the terminal over
+the ordinary way, at the cost of replacing whatever you had half-typed and
+leaving an entry in your history.
+
 ## Editing with your own editor
 
 `F4` opens the built-in editor, which is deliberately small: it is sized for a
