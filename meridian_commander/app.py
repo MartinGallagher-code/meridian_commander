@@ -39,9 +39,10 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 
-from . import dialogs, extedit, presets, runner, theme
+from . import dialogs, extedit, presets, runner, shellinit, theme
 from .editor import Editor
 from .filesystems import (
     FileSystem,
@@ -664,6 +665,20 @@ class App:
         if dialogs.confirm(self.stdscr, "Quit", "Exit Meridian Commander?",
                            default_yes=True):
             self.running = False
+
+    def printwd_path(self) -> str | None:
+        """Where a shell should follow us to, or ``None`` for nowhere.
+
+        Only a local pane names a directory a shell could enter: an SFTP or
+        FTP pane is a connection and an archive pane is a file inside one.
+        Answering ``None`` for those leaves the shell where it was, which is
+        the honest outcome -- moving someone to the last local directory they
+        happened to visit would be a guess dressed up as a feature.
+        """
+        panel = self.active
+        if not isinstance(panel.fs, LocalFileSystem):
+            return None
+        return panel.path
 
     def _reload(self) -> None:
         self.left.refresh()
@@ -1883,7 +1898,7 @@ class App:
                 pass
 
 
-def _main(stdscr, args) -> None:
+def _main(stdscr, args) -> str | None:
     from . import config as config_mod
 
     if curses.has_colors():
@@ -1909,6 +1924,9 @@ def _main(stdscr, args) -> None:
         pass
     app = App(stdscr, left_path=args.left, right_path=args.right)
     app.run()
+    # Returned rather than written here: curses still owns the terminal at
+    # this point, so a failure to write could not be reported legibly.
+    return app.printwd_path()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1939,7 +1957,23 @@ def main(argv: list[str] | None = None) -> int:
                              "(default: your home directory)")
     parser.add_argument("-V", "--version", action="version",
                         version=version_text)
+    parser.add_argument("--printwd", metavar="FILE",
+                        help="on exit, write the active pane's directory to "
+                             "FILE, for a shell function to cd into; nothing "
+                             "is written when that pane is not local")
+    parser.add_argument("--shell-init", metavar="SHELL",
+                        choices=list(shellinit.SNIPPETS),
+                        help="print the shell integration for SHELL (%s) and "
+                             "exit: a Ctrl-O binding that leaves the shell in "
+                             "the directory you browsed to"
+                             % ", ".join(shellinit.SNIPPETS))
     args = parser.parse_args(argv)
+
+    # Printing and exiting: no terminal is taken over, so this works in a
+    # pipe, which is how it is meant to be used ("eval $(...)").
+    if args.shell_init:
+        sys.stdout.write(shellinit.snippet(args.shell_init))
+        return 0
 
     # The frames are drawn with box-drawing characters, which curses can only
     # put on the screen once the locale has been taken from the environment.
@@ -1950,8 +1984,35 @@ def main(argv: list[str] | None = None) -> int:
     except locale.Error:
         pass
 
+    final_dir = None
     try:
-        curses.wrapper(_main, args)
+        final_dir = curses.wrapper(_main, args)
     except KeyboardInterrupt:
+        # Interrupted rather than quit: no directory was chosen, so the shell
+        # stays where it is.
         pass
+    if args.printwd:
+        _write_printwd(args.printwd, final_dir)
     return 0
+
+
+def _write_printwd(path: str, directory: str | None) -> None:
+    """Write the directory the shell should follow us to.
+
+    Nothing is written for ``None`` -- the caller's ``[ -s "$wd" ]`` then
+    finds an empty file and leaves the shell alone.  No trailing newline
+    either: the shell reads this with ``$(cat ...)``, which would strip one
+    anyway, and leaving it off keeps a directory whose name genuinely ends in
+    a newline unambiguous.
+
+    A write that fails is reported and otherwise ignored. The browsing is
+    done and the terminal is back; refusing to exit over it would be worse
+    than a shell that did not move.
+    """
+    if not directory:
+        return
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(directory)
+    except OSError as exc:
+        print(f"meridian: could not write {path}: {exc}", file=sys.stderr)

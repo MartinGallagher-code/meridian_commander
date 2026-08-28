@@ -162,6 +162,9 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   profiling, cleaning and building CSV/TSV datasets.
 - **In-app configuration** (`C`) — edit `config.ini` and plug-in files in the
   built-in editor without leaving the app.
+- **A keystroke away from your shell** — `eval "$(meridian --shell-init bash)"`
+  binds `Ctrl-O`: browse, quit, and your shell is left in the directory you
+  navigated to. bash, zsh and fish.
 - **No required dependencies** for local + FTP use — it runs on the Python
   standard library. SFTP uses the optional [`paramiko`](https://www.paramiko.org/)
   package.

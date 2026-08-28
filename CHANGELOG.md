@@ -11,6 +11,15 @@ day the version was cut.
 
 ## [Unreleased]
 
+### Added
+
+- **`Ctrl-O` from your shell, and the shell follows you back.** `--printwd`
+  writes the active pane's directory on exit, and `--shell-init bash|zsh|fish`
+  prints the function and key binding that reads it — so browsing ends with
+  your prompt in the directory you navigated to. Nothing is written when the
+  pane was SFTP, FTP or an archive: no shell can `cd` to those, so it leaves
+  you where you were rather than guessing.
+
 ## [1.4.0] — 2026-08-27
 
 ### Added

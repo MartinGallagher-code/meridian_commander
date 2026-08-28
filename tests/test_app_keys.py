@@ -879,6 +879,9 @@ def test_main_wires_up_curses_and_runs_the_app(monkeypatch, tmp_path):
         def run(self):
             started["ran"] = True
 
+        def printwd_path(self):
+            return "/somewhere"
+
     monkeypatch.setattr(curses, "wrapper", fake_wrapper)
     monkeypatch.setattr(app_mod, "App", _FakeApp)
     for name in ("use_default_colors", "raw"):
@@ -909,6 +912,9 @@ def test_main_copes_with_a_terminal_that_refuses_colour_and_mouse(monkeypatch):
 
         def run(self):
             pass
+
+        def printwd_path(self):
+            return None
 
     monkeypatch.setattr(curses, "wrapper", fake_wrapper)
     monkeypatch.setattr(app_mod, "App", _FakeApp)
@@ -953,6 +959,9 @@ def test_main_on_a_monochrome_terminal(monkeypatch):
 
         def run(self):
             pass
+
+        def printwd_path(self):
+            return None
 
     monkeypatch.setattr(curses, "wrapper", fake_wrapper)
     monkeypatch.setattr(app_mod, "App", _FakeApp)
