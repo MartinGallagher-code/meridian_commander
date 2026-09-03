@@ -361,6 +361,90 @@ def test_an_editor_that_cannot_be_saved_is_still_reported(app, monkeypatch,
     assert "could not be saved" in app.message
 
 
+# -- Options > Viewer ----------------------------------------------------------
+
+def test_the_viewer_menu_offers_the_built_in_one_and_the_usual_pagers(
+        app, monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Cancel"])
+    app._viewer_menu()
+    title, options = scripted.menus[0]
+    assert title == "Viewer"
+    assert options[0].startswith("Built-in viewer")
+    assert "less" in options
+    assert "Other..." in options
+    assert "(current)" in options[0]
+
+
+def test_choosing_a_viewer_remembers_it(app, monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr(app_mod.shutil, "which", lambda name: "/usr/bin/less")
+    _ScriptedDialogs(monkeypatch, menu=["less -R"])
+    app._viewer_menu()
+    assert config_mod.external_viewer() == "less -R"
+    assert app.message == "Viewer: less -R"
+
+
+def test_choosing_the_built_in_viewer_puts_it_back(app, monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    assert config_mod.save_viewer("less") is True
+    _ScriptedDialogs(monkeypatch, menu=["Built-in viewer"])
+    app._viewer_menu()
+    assert config_mod.external_viewer() == ""
+    assert app.message == "Viewer: built-in viewer"
+
+
+def test_a_pager_not_on_the_path_is_saved_but_flagged(app, monkeypatch,
+                                                      tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr(app_mod.shutil, "which", lambda name: None)
+    _ScriptedDialogs(monkeypatch, menu=["more"])
+    app._viewer_menu()
+    assert config_mod.external_viewer() == "more"
+    assert "more is not on your PATH" in app.message
+
+
+def test_other_takes_any_pager_command_line(app, monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr(app_mod.shutil, "which", lambda name: "/usr/bin/bat")
+    _ScriptedDialogs(monkeypatch, menu=["Other..."],
+                     prompt=["  bat --paging=always  "])
+    app._viewer_menu()
+    assert config_mod.external_viewer() == "bat --paging=always"
+
+
+def test_a_pager_command_that_cannot_work_is_refused(app, monkeypatch,
+                                                     tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Other..."],
+                                prompt=["less 'unclosed"])
+    app._viewer_menu()
+    assert "not a usable command" in scripted.messages[0][1]
+    assert config_mod.external_viewer() == ""
+
+
+def test_the_viewer_menu_can_be_cancelled(app, monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    _ScriptedDialogs(monkeypatch, menu=[None])
+    app._viewer_menu()
+    _ScriptedDialogs(monkeypatch, menu=["Cancel"])
+    app._viewer_menu()
+    assert config_mod.external_viewer() == ""
+
+
+def test_the_two_menus_do_not_write_over_each_other(app, monkeypatch,
+                                                    tmp_path):
+    """One routine behind both, so this is worth pinning: they are two keys."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr(app_mod.shutil, "which", lambda name: "/usr/bin/" + name)
+    _ScriptedDialogs(monkeypatch, menu=["vim"])
+    app._editor_menu()
+    _ScriptedDialogs(monkeypatch, menu=["less"])
+    app._viewer_menu()
+    assert config_mod.external_editor() == "vim"
+    assert config_mod.external_viewer() == "less"
+
+
 # -- Options > Colours ---------------------------------------------------------
 
 def test_the_colour_menu_switches_and_remembers_the_scheme(app, monkeypatch,

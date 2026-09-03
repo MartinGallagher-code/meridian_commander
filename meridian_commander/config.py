@@ -30,6 +30,14 @@ scheme = turbo
 ; is fetched to a private temporary copy, edited, and written back if it
 ; changed.  Also switchable while running, from Options > Editor.
 editor =
+; External viewer (pager) for F3.  Blank uses the built-in viewer.
+; A command line in shell syntax -- "less", "less -R", "more" -- or "$PAGER"
+; to take whatever the environment names.  It is used for plain text only:
+; a spreadsheet, document, deck, PDF, image or markdown file keeps the
+; browser built for it, since a pager would show you the bytes.  A file on a
+; remote pane is fetched to a private temporary copy and read there.
+; Also switchable while running, from Options > Viewer.
+viewer =
 
 [plugins]
 ; Extra directories to search for plug-ins, colon-separated.
@@ -214,6 +222,25 @@ def save_editor(command: str) -> bool:
     if external_editor() == command:
         return True
     return _save_ui("editor", command)
+
+
+def external_viewer() -> str:
+    """The command in ``[ui] viewer``, or ``""`` for the built-in viewer.
+
+    Raw, like :func:`external_editor` and for the same reason: ``$PAGER`` is
+    expanded when the command is about to be run, so a shell that sets it
+    differently is honoured without the file being touched.
+    """
+    parser = load()
+    return (parser.get("ui", "viewer", fallback="") or "").strip()
+
+
+def save_viewer(command: str) -> bool:
+    """Remember a viewer chosen from the Options menu."""
+    command = command.strip()
+    if external_viewer() == command:
+        return True
+    return _save_ui("viewer", command)
 
 
 def extra_plugin_dirs() -> list[str]:

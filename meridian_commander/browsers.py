@@ -24,19 +24,34 @@ from .viewer import Viewer
 from .xlsx import is_spreadsheet
 
 
+#: What claims a name, and what opens it, in the order the claims are tried.
+#: A table rather than a chain of ``if``s so that :func:`has_own_browser` --
+#: which decides whether an outside pager may have the file instead -- cannot
+#: drift out of step with what :func:`viewer_for` would actually open.
+BROWSERS = (
+    (is_spreadsheet, SheetView),
+    (is_document, DocxView),
+    (is_presentation, SlideView),
+    (is_markdown, MarkdownView),
+    (is_image, ImageView),
+    (is_pdf, PdfView),
+)
+
+
 def viewer_for(fs: FileSystem, path: str):
     """The browser for ``path``: a grid, document, deck, page, image or text."""
     name = fs.basename(path)
-    if is_spreadsheet(name):
-        return SheetView(fs, path)
-    if is_document(name):
-        return DocxView(fs, path)
-    if is_presentation(name):
-        return SlideView(fs, path)
-    if is_markdown(name):
-        return MarkdownView(fs, path)
-    if is_image(name):
-        return ImageView(fs, path)
-    if is_pdf(name):
-        return PdfView(fs, path)
+    for claims, browser in BROWSERS:
+        if claims(name):
+            return browser(fs, path)
     return Viewer(fs, path)
+
+
+def has_own_browser(name: str) -> bool:
+    """Whether ``name`` has a browser of its own rather than being text.
+
+    Asked before handing a file to a configured pager: ``less`` on a ``.xlsx``
+    is a screen of zip bytes, and choosing a pager is an answer about text
+    files rather than a request to give up the other browsers.
+    """
+    return any(claims(name) for claims, _ in BROWSERS)

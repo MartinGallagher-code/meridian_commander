@@ -60,10 +60,10 @@ from .operations import (
     move_path,
 )
 from .archive import is_archive, open_archive
-from .browsers import viewer_for
+from .browsers import has_own_browser, viewer_for
 from .compare import Comparison
 from .panel import Panel
-from .peek import PeekViewer
+from .peek import PeekPane
 from .sync import build_sync_plan, execute_sync_plan, survey_directory
 from .util import human_size, human_time, ljust, rjust
 
@@ -135,8 +135,8 @@ MENUS: list[dict] = [
             {"label": "S~y~nchronize panes", "name": "sync", "key": "F9"},
             {"label": "~C~ompare files side by side", "name": "compare",
              "key": "D"},
-            {"label": "He~a~d + tail of the other pane's file",
-             "name": "peek", "key": "h"},
+            {"label": "He~a~d + tail in this pane", "name": "peek",
+             "key": "h"},
             {"sep": True},
             {"label": "~T~erminal in this pane", "name": "terminal", "key": "t"},
             {"label": "Full-screen she~l~l", "name": "shell", "key": "!"},
@@ -151,6 +151,7 @@ MENUS: list[dict] = [
             {"sep": True},
             {"label": "~C~olours...", "name": "colours"},
             {"label": "~E~ditor...", "name": "editor"},
+            {"label": "~V~iewer...", "name": "viewer"},
             {"label": "Confi~g~uration...", "name": "config", "key": "C"},
         ],
     },
@@ -174,6 +175,17 @@ EDITOR_CHOICES: list[tuple[str, str]] = [
     ("vim", "vim"),
     ("nano", "nano"),
     ("$EDITOR", "$EDITOR (whatever the environment names)"),
+]
+
+#: What Options > Viewer offers, as (``[ui] viewer`` value, label).  The same
+#: shape as the editor's list, blank default included, because it answers the
+#: same question about the other half of the pair.
+VIEWER_CHOICES: list[tuple[str, str]] = [
+    ("", "Built-in viewer"),
+    ("less", "less"),
+    ("less -R", "less -R (keep colour escapes)"),
+    ("more", "more"),
+    ("$PAGER", "$PAGER (whatever the environment names)"),
 ]
 
 
@@ -524,6 +536,7 @@ class App:
             "hidden": self._toggle_hidden,
             "colours": self._colour_menu,
             "editor": self._editor_menu,
+            "viewer": self._viewer_menu,
             "config": self._config_menu,
             "help": self._help,
             "about": self._about,
@@ -728,38 +741,56 @@ class App:
         """Choose what F4 opens: the built-in editor, or one of your own."""
         from . import config as config_mod
 
-        current = config_mod.external_editor()
+        self._program_menu("Editor", EDITOR_CHOICES,
+                           config_mod.external_editor(),
+                           config_mod.save_editor, "built-in editor")
+
+    def _viewer_menu(self) -> None:
+        """Choose what F3 opens for a text file: the viewer, or your pager."""
+        from . import config as config_mod
+
+        self._program_menu("Viewer", VIEWER_CHOICES,
+                           config_mod.external_viewer(),
+                           config_mod.save_viewer, "built-in viewer")
+
+    def _program_menu(self, title: str, choices: list[tuple[str, str]],
+                      current: str, save, built_in: str) -> None:
+        """Offer an outside program, check it can work, and remember it.
+
+        One routine behind both menus: they ask the same question about the
+        two halves of the same pair, and a second copy would be a second
+        place for the "is it on your PATH" courtesy to rot.
+        """
         labels = [
             f"{label}{'   (current)' if command == current else ''}"
-            for command, label in EDITOR_CHOICES
+            for command, label in choices
         ]
-        other = len(EDITOR_CHOICES)
-        choice = dialogs.menu(self.stdscr, "Editor",
+        other = len(choices)
+        choice = dialogs.menu(self.stdscr, title,
                               labels + ["Other...", "Cancel"])
         if choice is None or choice > other:
             return
         if choice == other:
-            typed = dialogs.prompt(self.stdscr, "Editor", "Editor command:",
+            typed = dialogs.prompt(self.stdscr, title, f"{title} command:",
                                    current)
             if typed is None:
                 return
             command = typed.strip()
         else:
-            command = EDITOR_CHOICES[choice][0]
+            command = choices[choice][0]
 
-        # Say now if the command cannot work, rather than at the next F4.
+        # Say now if the command cannot work, rather than at the next keypress.
         note = ""
         if command:
             try:
                 argv = extedit.editor_argv(command)
             except ValueError as exc:
-                dialogs.message(self.stdscr, "Editor", str(exc), error=True)
+                dialogs.message(self.stdscr, title, str(exc), error=True)
                 return
             if argv is not None and shutil.which(argv[0]) is None:
                 note = f"  ({argv[0]} is not on your PATH)"
-        saved = config_mod.save_editor(command)
-        chosen = command or "built-in editor"
-        self._set_message(f"Editor: {chosen}{note}"
+        saved = save(command)
+        self._set_message(f"{title}: {command or built_in}{note}"
                           + ("" if saved else "  (could not be saved)"))
 
     def _about(self) -> None:
@@ -1124,6 +1155,39 @@ class App:
                             error=True)
             return None
 
+    def _external_viewer(self) -> list[str] | None:
+        """The pager named by ``[ui] viewer``, or ``None`` for the built-in."""
+        from . import config as config_mod
+
+        try:
+            return extedit.editor_argv(config_mod.external_viewer())
+        except ValueError as exc:
+            dialogs.message(self.stdscr, "Viewer",
+                            f"[ui] viewer: {exc}\n\nUsing the built-in viewer.",
+                            error=True)
+            return None
+
+    def _view_externally(self, fs: FileSystem, path: str) -> bool:
+        """Show ``path`` in the configured pager; False if there is none.
+
+        A file with a browser of its own keeps it, whatever the setting says:
+        a pager given a spreadsheet, a deck, a PDF or an image shows the bytes
+        of the container, which is nobody's idea of viewing it.  Choosing a
+        pager answers the question about *text*.
+        """
+        if has_own_browser(fs.basename(path)):
+            return False
+        argv = self._external_viewer()
+        if argv is None:
+            return False
+
+        def run(cmd: list[str], cwd: str | None) -> int | None:
+            return self._suspend_and_run(
+                cmd, cwd, "", fail_label=f"Could not start {argv[0]}")
+
+        self._set_message(extedit.view(fs, path, argv, run))
+        return True
+
     def _edit_externally(self, fs: FileSystem, path: str) -> bool:
         """Edit ``path`` with the configured editor; False if there is none."""
         argv = self._external_editor()
@@ -1209,7 +1273,7 @@ class App:
         labels = ["View", "Edit", "Run...", "Copy to other pane",
                   "Move to other pane", "Rename", "Delete", "Tag / untag",
                   "New directory", "New file", "Compare with other pane",
-                  "Head + tail (other pane)", "Home directory",
+                  "Head + tail in this pane", "Home directory",
                   "Same location in other pane", "Presets (go to / save)",
                   "Find files here", "Terminal in this pane",
                   "Full-screen shell", "Cancel"]
@@ -1573,6 +1637,8 @@ class App:
         if entry and entry.is_dir:
             panel.enter()
             return
+        if self._view_externally(panel.fs, target):
+            return
         try:
             viewer_for(panel.fs, target).run(self.stdscr)
         except Exception as exc:
@@ -1619,23 +1685,25 @@ class App:
         curses.curs_set(0)
 
     def _peek(self) -> None:
-        """Head and tail at once of the file selected in the *other* pane.
+        """Turn this pane into head+tail of the file the *other* pane is on.
 
-        The other pane, not this one, so a log can be watched from the pane
-        you are working in without leaving it -- which is the same bargain
-        the plug-ins make when they resolve their arguments over there.
+        A pane, not a full screen: the listing you are choosing from keeps its
+        cursor, and moving that cursor moves what this pane shows, so looking
+        into ten files costs ten arrow keys rather than ten windows opened and
+        closed.  Pressing it again gives the pane back to its listing.
         """
-        panel = self.other
-        path, why = self._sole_file(panel)
-        if path is None:
-            self._set_message(f"Head + tail: other pane -- {why}")
+        from .plugin_api import PluginContext
+
+        panel = self.active
+        if isinstance(panel.plugin, PeekPane):
+            panel.plugin = None
+            panel.refresh()
+            self._set_message("Head + tail closed")
             return
-        try:
-            PeekViewer(panel.fs, path).run(self.stdscr)
-        except Exception as exc:
-            dialogs.message(self.stdscr, "Head + tail error", str(exc),
-                            error=True)
-        curses.curs_set(0)
+        ctx = PluginContext(app=self, own_panel=panel, other_panel=self.other)
+        panel.plugin = PeekPane(ctx)
+        self._set_message("Head + tail of the other pane's file "
+                          "-- +/- lines, Esc closes")
 
     def _edit(self) -> None:
         panel = self.active
@@ -1965,8 +2033,9 @@ class App:
             "                 restamped, never emptied)\n"
             "  D              compare both panes' files side by side:\n"
             "                 n/N next/previous difference, one scrollbar\n"
-            "  h              head + tail at once of the other pane's file\n"
-            "                 (+/- show more or fewer lines each end)\n"
+            "  h              this pane becomes head + tail of the file the\n"
+            "                 other pane is on, and follows its cursor;\n"
+            "                 +/- more/fewer lines, Esc gives the pane back\n"
             "  F3 on .xlsx    spreadsheet grid: Tab sheet, / find, w width\n"
             "  F3 on .docx    document view: headings, lists, tables, w wrap\n"
             "  F3 on .pptx    slide browser: Tab slide, t notes, / find\n"
@@ -1977,6 +2046,9 @@ class App:
             "  Options>Colours  turbo (blue), midnight (black), mono\n"
             "  Options>Editor   F4 opens vi/vim/$EDITOR instead of the\n"
             "                   built-in editor\n"
+            "  Options>Viewer   F3 opens less/$PAGER instead of the built-in\n"
+            "                   viewer, for plain text (a spreadsheet, deck,\n"
+            "                   document, PDF or image keeps its own)\n"
             "\n"
             "  Function keys -- each also has digit and letter aliases,\n"
             "  for terminals that swallow the F-keys:\n"

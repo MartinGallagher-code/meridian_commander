@@ -129,6 +129,10 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   through the workbook's own number formats, `Tab` between sheets and the same
   `/` search. It reads the format with the **standard library alone**, so
   spreadsheets open with nothing installed — on remote panes too.
+- **Your own pager** (**Options ▸ Viewer**) — point `F3` at `less`, `$PAGER` or
+  any command you name, for plain text; a spreadsheet, document, deck, PDF or
+  image keeps the browser built for it rather than being shown to a pager as
+  bytes. Remote files are fetched to a private copy and read there.
 - **File editor** (`F4`) — a real in-place editor (insert/delete, Enter/Backspace
   line handling, save with `Ctrl-S`), also with toggleable line numbers. Prefer
   your own editor? **Options > Editor** points `F4` at `vi`, `vim`, `$EDITOR` or
@@ -140,9 +144,12 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   other. `n`/`N` jump between blocks of differences. Built in rather than a
   call out to `vimdiff`, so a local file compares against an SFTP, SSH, FTP or
   in-archive one with nothing fetched to disk first.
-- **Head and tail at once** (`h`) — the first and last lines of the file
-  selected in the **other** pane, with a rule between them counting what was
-  skipped. `+`/`-` show more or fewer. The file is streamed once and only the
+- **Head and tail in a pane** (`h`) — the pane becomes the first and last lines
+  of whatever the **other** pane's cursor is on, with a rule between them
+  counting what was skipped, and it **follows that cursor** as you move it: ten
+  files is ten arrow keys, with the listing keeping its place. Sized to the
+  pane so both ends show at once; `+`/`-` pin a larger or smaller count, `r`
+  re-reads, `Esc` gives the pane back. The file is streamed once and only the
   two ends are kept, so a multi-gigabyte log costs what a short one does.
 - **New file** (`n`) and **rename** (`r`) — `touch` and a rename without
   leaving for a shell; an existing file is restamped, never emptied.
