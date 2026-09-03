@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .filesystems import DirEntry, FileSystem
+from .usage import TreeSizer
 
 
 @dataclass
@@ -27,6 +28,14 @@ class Panel:
     show_hidden: bool = True    # whether dotfiles are listed
     error: str | None = None
     plugin: object | None = None  # active pane plugin, or None for the listing
+    #: Whether subdirectories show what is under them rather than "<DIR>".
+    show_sizes: bool = False
+    #: Totals by full path, kept across refreshes and directory changes so
+    #: walking back up a tree you have already measured costs nothing.  The
+    #: figures are a snapshot, which is why Ctrl-R (reload) drops them.
+    sizes: dict[str, int] = field(default_factory=dict)
+    #: The walk in progress, or None when nothing is being counted.
+    sizer: object | None = None
 
     # ".." pseudo-entry so the user can always step up a directory.
     PARENT = ".."
@@ -60,6 +69,81 @@ class Panel:
         names = {e.name for e in self.entries}
         self.selected &= names
         self._restore_cursor(target, fallback)
+        self.start_sizing()
+
+    # -- directory sizes --------------------------------------------------
+    def toggle_sizes(self) -> bool:
+        """Turn the subdirectory sizes on or off; returns the new state."""
+        self.show_sizes = not self.show_sizes
+        if self.show_sizes:
+            self.start_sizing()
+        else:
+            self.sizer = None
+        return self.show_sizes
+
+    def forget_sizes(self) -> None:
+        """Drop what has been measured, so a reload measures again."""
+        self.sizes.clear()
+        self.sizer = None
+        self.start_sizing()
+
+    def start_sizing(self) -> None:
+        """Begin measuring the subdirectories that have no total yet."""
+        self.sizer = None
+        if not self.show_sizes:
+            return
+        wanted = [self.fs.join(self.path, e.name) for e in self.entries
+                  if e.is_dir and e.name != self.PARENT and not e.is_symlink]
+        pending = [path for path in wanted if path not in self.sizes]
+        if pending:
+            self.sizer = TreeSizer(self.fs, pending)
+
+    def step_sizing(self) -> bool:
+        """Count a little more.  True while there is more to count.
+
+        The finished totals are moved into :attr:`sizes` as each one lands, so
+        a directory measured while you were looking at it stays measured when
+        you come back to it.
+        """
+        sizer = self.sizer
+        if sizer is None:
+            return False
+        more = sizer.step()
+        for path in sizer.done:
+            self.sizes[path] = sizer.totals[path]
+        if not more:
+            self.sizer = None
+        return more
+
+    def size_of(self, entry: DirEntry) -> int | None:
+        """What to show in the Size column, or ``None`` for "not known yet".
+
+        A file is its own size, always.  A directory is the total underneath
+        it once the sizes are on: the finished figure, the running one while
+        it is being counted, and ``None`` before counting has reached it.
+        """
+        if not entry.is_dir:
+            return entry.size or 0
+        if entry.name == self.PARENT or not self.show_sizes:
+            return None
+        path = self.fs.join(self.path, entry.name)
+        if path in self.sizes:
+            return self.sizes[path]
+        sizer = self.sizer
+        if sizer is not None and path in sizer.totals:
+            return sizer.totals[path]
+        return None
+
+    def sizing(self, entry: DirEntry) -> bool:
+        """Whether ``entry``'s total is still being counted."""
+        if not entry.is_dir or self.sizer is None:
+            return False
+        path = self.fs.join(self.path, entry.name)
+        return path in self.sizer.totals and path not in self.sizes
+
+    def biggest(self) -> int:
+        """The largest entry in the listing, as the bars' full scale."""
+        return max((self.size_of(e) or 0 for e in self.entries), default=0)
 
     def _sorted(self, entries: list[DirEntry]) -> list[DirEntry]:
         parent = [] if self._at_root() else [DirEntry(name=self.PARENT, is_dir=True)]

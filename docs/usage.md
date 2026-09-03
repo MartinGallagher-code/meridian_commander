@@ -556,6 +556,31 @@ Home/End then scroll the overflow), `r` re-reads a file that has grown, and
 once and only the two ends are held, so peeking at a multi-gigabyte log costs
 what peeking at a short one does, on a remote pane as much as a local one.
 
+## Finding what is taking up the space
+
+Press **`u`** and the pane stops saying `<DIR>`: every subdirectory shows what
+is under it, and the `Modify time` column becomes a **`Share` bar** scaled to
+the biggest thing in *this* directory — files included, so a single huge
+archive stands out as clearly as an overgrown folder.
+
+There is no total and no separate report, because the answer to "where has my
+disk gone?" is a path, not a number. Follow the longest bar down with `Enter`,
+and the pane measures the directory you land in; `Backspace` comes back up.
+When you find it, you are standing in it, with the usual `F8` and `F5` to hand.
+
+The walk runs **between keystrokes**, a few directory listings at a time, so
+the pane keeps answering the keyboard while it counts — an important property
+on a remote pane, where every listing is a round trip. A directory still being
+counted shows its running total in the dimmer colour; when it settles, that is
+the final figure. Totals are remembered as you move about, so walking back up a
+tree you have already measured costs nothing, and **`Ctrl-R`** (reload) is what
+throws them away and measures again.
+
+It is per-pane, like the hidden-file toggle: measure one side while the other
+stays an ordinary listing. Symlinked directories are counted as the link
+rather than followed — following would count the target twice, and a loop for
+ever — so they keep saying `<DIR>`.
+
 ## Viewing with your own pager
 
 `F3` opens the built-in viewer, and for a text file **Options ▸ Viewer** can
@@ -595,6 +620,7 @@ send — so the copy is removed however the pager exits.
 | `~` | home directory (this pane) | `=` | other pane: same location |
 | `b` | presets: saved locations | | |
 | `.` | show/hide hidden files | `t` | terminal inside this pane |
+| `u` | directory sizes in this pane | | |
 | `p` / F11 | plug-in mode (this pane) | `!` | full-screen shell |
 | `f` | find files (browsable results) | | |
 | `C` | configuration menu | `Ctrl-]` | terminal: switch to other pane |

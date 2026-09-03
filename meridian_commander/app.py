@@ -63,6 +63,7 @@ from .archive import is_archive, open_archive
 from .browsers import has_own_browser, viewer_for
 from .compare import Comparison
 from .panel import Panel
+from . import usage
 from .peek import PeekPane
 from .sync import build_sync_plan, execute_sync_plan, survey_directory
 from .util import human_size, human_time, ljust, rjust
@@ -148,6 +149,7 @@ MENUS: list[dict] = [
         "items": [
             {"label": "~S~ort order...", "name": "sort", "key": "Ctrl+T"},
             {"label": "Show ~h~idden files", "name": "hidden", "key": "."},
+            {"label": "Director~y~ sizes", "name": "sizes", "key": "u"},
             {"sep": True},
             {"label": "~C~olours...", "name": "colours"},
             {"label": "~E~ditor...", "name": "editor"},
@@ -340,8 +342,13 @@ class App:
                     footer_role="panelerror" if panel.error else "panelinfo")
 
         name_w = max(4, inner_w - 20)
-        title = f" {'Name'.ljust(name_w)}{'Size':>6} {'Modify time':>12}"
+        # With sizes on, the Modify column gives its room to a bar: hunting
+        # for space is the one job where a file's age is the least useful
+        # thing on the row and its share of the directory is the most.
+        last_col = "Share" if panel.show_sizes else "Modify time"
+        title = f" {'Name'.ljust(name_w)}{'Size':>6} {last_col:>12}"
         theme.paint(stdscr, y + 1, x + 1, title, "panelhead", inner_w)
+        biggest = panel.biggest() if panel.show_sizes else 0
 
         for row in range(body_h):
             idx = panel.top + row
@@ -366,10 +373,18 @@ class App:
             if tagged:
                 marker = theme.glyph("tag")
 
-            size_s = " <DIR>" if entry.is_dir else human_size(entry.size)
-            time_s = human_time(entry.mtime)
+            size = panel.size_of(entry)
+            if entry.is_dir and size is None:
+                size_s = " <DIR>"
+            else:
+                size_s = human_size(size)
+            if panel.show_sizes:
+                tail = usage.bar(size or 0, biggest, 12,
+                                 theme.glyph("block"), theme.glyph("shade"))
+            else:
+                tail = f"{human_time(entry.mtime)[:12]:>12}"
             line = (f"{marker}{ljust(display, name_w)}{rjust(size_s, 6)} "
-                    f"{time_s[:12]:>12}")
+                    f"{tail}")
 
             if is_cursor:
                 role = ("panelcursortag" if tagged else
@@ -382,6 +397,8 @@ class App:
                 role = "paneldir"
             else:
                 role = "panel"
+            if panel.show_sizes and not is_cursor and panel.sizing(entry):
+                role = "panelinfo"
             theme.paint(stdscr, ry, x + 1, line, role, inner_w)
 
         # The scrollbar rides the right-hand border, which is where a Turbo
@@ -435,6 +452,11 @@ class App:
         """
         ticking = False
         for panel in (self.left, self.right):
+            # A pane counting what is under its subdirectories is work in
+            # progress too, and wants the same polling loop: that is what
+            # keeps the totals growing while nobody presses anything.
+            if panel.step_sizing():
+                ticking = True
             plugin = panel.plugin
             if plugin is not None and getattr(plugin, "wants_timer", False):
                 ticking = True
@@ -534,6 +556,7 @@ class App:
             "plugins": self._plugin_mode,
             "sort": self._sort_menu,
             "hidden": self._toggle_hidden,
+            "sizes": self._toggle_sizes,
             "colours": self._colour_menu,
             "editor": self._editor_menu,
             "viewer": self._viewer_menu,
@@ -646,6 +669,8 @@ class App:
             self._sort_menu()
         elif key == ord("."):  # toggle hidden files in the active pane
             self._toggle_hidden()
+        elif key == ord("u"):  # subdirectory sizes in the active pane
+            self._toggle_sizes()
         elif key == ord("t"):  # terminal inside this pane
             self._open_terminal_pane()
         elif key == ord("!"):  # full-screen shell (for vim/htop and friends)
@@ -712,8 +737,10 @@ class App:
         return panel.path
 
     def _reload(self) -> None:
-        self.left.refresh()
-        self.right.refresh()
+        for panel in (self.left, self.right):
+            panel.refresh()
+            if panel.show_sizes:
+                panel.forget_sizes()   # a reload is "measure it again", too
         self._set_message("Reloaded")
 
     def _toggle_hidden(self) -> None:
@@ -721,6 +748,20 @@ class App:
         panel.toggle_hidden()
         self._set_message("Hidden files "
                           + ("shown" if panel.show_hidden else "hidden"))
+
+    def _toggle_sizes(self) -> None:
+        """Show what is under each subdirectory, in place of "<DIR>".
+
+        A pane rather than a report: the sizes appear in the listing you are
+        already navigating, so the way to find what is filling a disk is to
+        follow the big numbers down the tree, which is the same Enter key it
+        always was.
+        """
+        panel = self.active
+        if panel.toggle_sizes():
+            self._set_message("Directory sizes on -- follow the big ones down")
+        else:
+            self._set_message("Directory sizes off")
 
     def _colour_menu(self) -> None:
         """Switch colour scheme, the way Options > Colours always did."""
@@ -2024,6 +2065,9 @@ class App:
             "  =              other pane: same directory and connection\n"
             "  b              presets: go to / save / delete a location\n"
             "  .              show/hide hidden files (this pane)\n"
+            "  u              directory sizes: each subdirectory shows what\n"
+            "                 is under it, with a bar against the biggest\n"
+            "                 here -- follow them down to find the space\n"
             "  t              terminal in this pane (Ctrl-] switch, F10 close)\n"
             "  !              full-screen shell (for vim/htop etc.)\n"
             "  p / F11        plug-in mode: run a plug-in in this pane\n"
