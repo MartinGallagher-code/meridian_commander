@@ -1040,6 +1040,50 @@ def test_the_external_editor_defaults_to_blank_and_round_trips(tmp_path,
     assert config_mod.external_editor() == ""
 
 
+def test_the_external_viewer_defaults_to_blank_and_round_trips(tmp_path,
+                                                               monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    from meridian_commander import config as config_mod
+
+    assert config_mod.external_viewer() == ""
+    config_mod.ensure_config()
+    assert config_mod.external_viewer() == ""      # the shipped default
+
+    assert config_mod.save_viewer("  less -R  ") is True
+    assert config_mod.external_viewer() == "less -R"
+    # Saving what is already there does not rewrite the file.
+    before = (tmp_path / "config" / "meridian-commander"
+              / "config.ini").read_text()
+    assert config_mod.save_viewer("less -R") is True
+    assert (tmp_path / "config" / "meridian-commander"
+            / "config.ini").read_text() == before
+
+    assert config_mod.save_viewer("") is True
+    assert config_mod.external_viewer() == ""
+
+
+def test_the_editor_and_the_viewer_are_remembered_separately(tmp_path,
+                                                             monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    from meridian_commander import config as config_mod
+
+    assert config_mod.save_editor("vim") is True
+    assert config_mod.save_viewer("less") is True
+    assert config_mod.external_editor() == "vim"
+    assert config_mod.external_viewer() == "less"
+
+
+def test_a_viewer_that_cannot_be_written_is_reported(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    from meridian_commander import config as config_mod
+
+    def refuse(*args, **kwargs):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(config_mod.os, "makedirs", refuse)
+    assert config_mod.save_viewer("less") is False
+
+
 def test_an_editor_that_cannot_be_written_is_reported(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     from meridian_commander import config as config_mod

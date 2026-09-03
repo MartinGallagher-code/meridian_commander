@@ -129,6 +129,10 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   through the workbook's own number formats, `Tab` between sheets and the same
   `/` search. It reads the format with the **standard library alone**, so
   spreadsheets open with nothing installed — on remote panes too.
+- **Your own pager** (**Options ▸ Viewer**) — point `F3` at `less`, `$PAGER` or
+  any command you name, for plain text; a spreadsheet, document, deck, PDF or
+  image keeps the browser built for it rather than being shown to a pager as
+  bytes. Remote files are fetched to a private copy and read there.
 - **File editor** (`F4`) — a real in-place editor (insert/delete, Enter/Backspace
   line handling, save with `Ctrl-S`), also with toggleable line numbers. Prefer
   your own editor? **Options > Editor** points `F4` at `vi`, `vim`, `$EDITOR` or

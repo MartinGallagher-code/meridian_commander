@@ -649,6 +649,75 @@ def test_a_viewer_that_fails_is_reported(app, tmp_path, monkeypatch):
     assert "cannot read" in scripted.last_message
 
 
+# -- view with an outside pager ------------------------------------------------
+
+def _paging(monkeypatch, app, command="less"):
+    """Point [ui] viewer at ``command`` and capture what would be run."""
+    from meridian_commander import config as config_mod
+
+    monkeypatch.setattr(config_mod, "external_viewer", lambda: command)
+    ran = []
+    monkeypatch.setattr(app, "_suspend_and_run",
+                        lambda cmd, cwd, banner, **kw: ran.append(cmd) or 0)
+    monkeypatch.setattr(curses, "curs_set", lambda n: None)
+    return ran
+
+
+def test_a_text_file_goes_to_the_configured_pager(app, tmp_path, monkeypatch):
+    _files(app, tmp_path, **{"notes.txt": "hello"})
+    _point_at(app.left, "notes.txt")
+    opened = []
+    monkeypatch.setattr(app_mod, "viewer_for",
+                        lambda fs, path: opened.append(path))
+    ran = _paging(monkeypatch, app)
+    app._view()
+    assert ran == [["less", str(tmp_path / "left" / "notes.txt")]]
+    assert opened == []                     # the built-in viewer stayed out
+    assert "Viewed notes.txt" in app.message
+
+
+def test_a_file_with_a_browser_of_its_own_keeps_it(app, tmp_path, monkeypatch):
+    """less on a .xlsx is a screen of zip bytes; the grid wins."""
+    _files(app, tmp_path, **{"book.xlsx": "not really a workbook"})
+    _point_at(app.left, "book.xlsx")
+    opened = []
+
+    class _Viewer:
+        def __init__(self, fs, path):
+            opened.append(path)
+
+        def run(self, stdscr):
+            return None
+
+    monkeypatch.setattr(app_mod, "viewer_for", _Viewer)
+    ran = _paging(monkeypatch, app)
+    app._view()
+    assert opened == [str(tmp_path / "left" / "book.xlsx")]
+    assert ran == []
+
+
+def test_an_unusable_viewer_setting_falls_back_and_says_so(app, tmp_path,
+                                                           monkeypatch):
+    _files(app, tmp_path, **{"notes.txt": "hello"})
+    _point_at(app.left, "notes.txt")
+    opened = []
+
+    class _Viewer:
+        def __init__(self, fs, path):
+            opened.append(path)
+
+        def run(self, stdscr):
+            return None
+
+    monkeypatch.setattr(app_mod, "viewer_for", _Viewer)
+    ran = _paging(monkeypatch, app, command="less 'unclosed")
+    scripted = _ScriptedDialogs(monkeypatch)
+    app._view()
+    assert "[ui] viewer" in scripted.messages[-1][1]
+    assert ran == []
+    assert opened == [str(tmp_path / "left" / "notes.txt")]
+
+
 def test_edit_opens_the_file_under_the_cursor(app, tmp_path, monkeypatch):
     _files(app, tmp_path, notes="hello")
     _point_at(app.left, "notes")

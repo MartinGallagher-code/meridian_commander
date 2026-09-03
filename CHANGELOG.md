@@ -13,6 +13,15 @@ day the version was cut.
 
 ### Added
 
+- **`Options > Viewer` points `F3` at your own pager** — `less`, `less -R`,
+  `more`, `$PAGER`, or any command line you name — remembered in
+  `[ui] viewer`, with *Built-in viewer* on the same menu to put it back. It
+  applies to plain text only: a spreadsheet, document, deck, PDF, image or
+  markdown file keeps the browser built for it, because a pager handed a
+  `.xlsx` shows the bytes of a zip file. On a remote pane the file is fetched
+  to a private temporary copy and read there, and nothing is written back --
+  a pager has nothing to send, so the copy does not outlive it.
+
 - **`n` makes an empty file** where you are standing, and `r` renames the one
   under the cursor — `touch` and `mv` without leaving for a shell. A name that
   already exists is **restamped, never emptied**, so a mistyped name cannot

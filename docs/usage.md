@@ -549,6 +549,24 @@ viewer does (`/` search, `w` wrap, `l` numbers) works here too. The file is
 streamed once and only the two ends are held, so peeking at a multi-gigabyte
 log costs what peeking at a short one does.
 
+## Viewing with your own pager
+
+`F3` opens the built-in viewer, and for a text file **Options ▸ Viewer** can
+point it at `less`, `less -R`, `more`, `$PAGER` — or `Other...` for any command
+line you like, `bat --paging=always` included. *Built-in viewer* on the same
+menu puts it back. The choice is remembered in `[ui] viewer`, and `$PAGER` is
+expanded when the pager is launched rather than when the setting is read.
+
+It applies to **plain text only**. A spreadsheet, document, deck, PDF, image or
+markdown file keeps the browser built for it, whatever the setting says: a
+pager handed a `.xlsx` shows you the bytes of a zip file, and choosing a pager
+is an answer about text rather than a request to give up the other viewers.
+
+The rest matches `F4`: the terminal is handed over while the pager runs, and on
+a remote pane the file is fetched to a private temporary copy (mode `0700`,
+8 MB ceiling) and read there. Nothing is written back — a pager has nothing to
+send — so the copy is removed however the pager exits.
+
 ## Key bindings
 
 | Key | Action | Key | Action |
@@ -573,6 +591,7 @@ log costs what peeking at a short one does.
 | `p` / F11 | plug-in mode (this pane) | `!` | full-screen shell |
 | `f` | find files (browsable results) | | |
 | `C` | configuration menu | `Ctrl-]` | terminal: switch to other pane |
+| `Options ▸ Editor` | F4 opens your editor | `Options ▸ Viewer` | F3 opens your pager |
 
 **F-key aliases** (for terminals that swallow function keys): press the digit
 `1`–`0` for `F1`–`F10`, or the mnemonic letter — `?`/`1` help, `o` open/connect,

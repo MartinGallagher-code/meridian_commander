@@ -118,6 +118,34 @@ def test_a_bare_filename_has_no_directory_to_run_in():
     assert seen[1] == "/"
 
 
+# -- viewing with an outside pager ---------------------------------------------
+
+def test_a_local_file_is_paged_where_it_lies(tmp_path):
+    """No copy: the pager opens the real file, in its own directory."""
+    calls = []
+
+    def run(cmd, cwd):
+        calls.append((cmd, cwd))
+        return 0
+
+    path = str(tmp_path / "notes.txt")
+    assert extedit.view(_Local(), path, ["less"], run) == "Viewed notes.txt"
+    assert calls == [(["less", path], str(tmp_path))]
+
+
+def test_a_pager_that_will_not_start_is_reported():
+    result = extedit.view(_Local(), "/tmp/x.txt", ["nosuchpager"],
+                          lambda cmd, cwd: None)
+    assert result == "Could not start nosuchpager"
+
+
+def test_a_pager_exiting_non_zero_says_so_without_alarm(tmp_path):
+    """Nothing was being written, so there is nothing to warn about losing."""
+    result = extedit.view(_Local(), "/tmp/x.txt", ["less"],
+                          lambda cmd, cwd: 2)
+    assert result == "less exited 2"
+
+
 # -- the remote case -----------------------------------------------------------
 
 class _Remote:
@@ -289,6 +317,65 @@ def test_a_reader_that_will_not_close_is_not_an_error():
     fs = _Sticky()
     assert extedit.edit(fs, "/srv/notes.txt", ["vim"], _editing(b"new\n")) \
         == "Saved notes.txt (4 bytes)"
+
+
+# -- viewing a remote file -----------------------------------------------------
+
+def test_a_remote_file_is_fetched_to_a_private_copy_and_paged():
+    seen = []
+
+    def run(cmd, cwd):
+        seen.append((cmd[-1], cwd, os.stat(cwd).st_mode & 0o777,
+                     open(cmd[-1], "rb").read()))
+        return 0
+
+    assert extedit.view(_Remote(b"log line\n"), "/srv/app.log", ["less"],
+                        run) == "Viewed app.log"
+    copy, workdir, mode, contents = seen[0]
+    assert os.path.basename(copy) == "app.log"     # the name, for the pager
+    assert os.path.dirname(copy) == workdir
+    assert mode == 0o700
+    assert contents == b"log line\n"
+    # Nothing to save, so the copy does not outlive the pager.
+    assert not os.path.exists(workdir)
+
+
+def test_a_copy_a_pager_scribbled_on_is_never_sent_back():
+    """A pager has nothing to send back, even if the file on disk changed."""
+    fs = _Remote(b"before\n")
+
+    def run(cmd, cwd):
+        with open(cmd[-1], "wb") as handle:
+            handle.write(b"after\n")
+        return 0
+
+    assert extedit.view(fs, "/srv/notes.txt", ["less"], run) == "Viewed notes.txt"
+    assert fs.written is None
+
+
+def test_a_remote_file_too_big_to_fetch_is_refused_for_viewing(monkeypatch):
+    monkeypatch.setattr(extedit, "MAX_FETCH_BYTES", 4)
+    result = extedit.view(_Remote(b"far too long"), "/srv/big.log", ["less"],
+                          lambda cmd, cwd: 0)
+    assert "too big" in result
+
+
+def test_a_remote_file_that_cannot_be_read_is_reported_for_viewing():
+    class _Broken(_Remote):
+        def open_read(self, path):
+            raise OSError("connection reset")
+
+    result = extedit.view(_Broken(), "/srv/notes.txt", ["less"],
+                          lambda cmd, cwd: 0)
+    assert result == "Cannot read notes.txt: connection reset"
+
+
+def test_a_pager_that_will_not_start_still_clears_the_copy_up():
+    seen = []
+    result = extedit.view(_Remote(), "/srv/notes.txt", ["nosuchpager"],
+                          lambda cmd, cwd: seen.append(cwd) or None)
+    assert result == "Could not start nosuchpager"
+    assert not os.path.exists(seen[0])
 
 
 # -- the working copy's name ---------------------------------------------------

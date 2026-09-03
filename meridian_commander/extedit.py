@@ -1,4 +1,6 @@
-"""Editing with an outside editor -- vi, vim, or whatever ``[ui] editor`` names.
+"""Handing a file to an outside program -- an editor for F4, a pager for F3.
+
+Editing with an outside editor -- vi, vim, or whatever ``[ui] editor`` names.
 
 The built-in editor is deliberately small, and for a config file or a quick
 correction that is the right size.  People who live in vi do not want it, so
@@ -17,6 +19,10 @@ quitting vim with ``:q`` costs no upload.
 read-only archive would otherwise throw the work away, so when the write-back
 fails the temporary copy is deliberately **not** deleted and the message says
 where it is.
+
+Viewing with an outside pager -- ``less``, or whatever ``[ui] viewer`` names --
+is the same errand with the second half removed: fetch the same way, run the
+same way, and send nothing back, because a pager has nothing to send.
 """
 
 from __future__ import annotations
@@ -78,6 +84,48 @@ def edit(fs, path: str, argv: list[str], run) -> str:
     if local is not None:
         return _edit_in_place(local(path), name, argv, run)
     return _edit_via_copy(fs, path, name, argv, run)
+
+
+def view(fs, path: str, argv: list[str], run) -> str:
+    """Show ``path`` with ``argv``; returns a line for the status bar.
+
+    The same two cases :func:`edit` has, without the write-back.  A local file
+    is opened where it lives; a remote one is fetched to a private copy which
+    is removed afterwards however the pager exits -- there is no work in it to
+    lose, so the copy that :func:`edit` deliberately keeps has no reason to
+    survive here.
+    """
+    name = fs.basename(path) or path
+    local = getattr(fs, "local_path", None)
+    if local is not None:
+        real = local(path)
+        status = run(argv + [real], os.path.dirname(real) or None)
+        return _viewed(name, argv, status)
+
+    try:
+        data = _fetch(fs, path)
+    except ValueError as exc:
+        return str(exc)
+    except Exception as exc:
+        return f"Cannot read {name}: {exc}"
+
+    workdir = tempfile.mkdtemp(prefix="meridian-view-")
+    copy = os.path.join(workdir, _copy_name(name))
+    try:
+        with open(copy, "wb") as handle:
+            handle.write(data)
+        return _viewed(name, argv, run(argv + [copy], workdir))
+    finally:
+        _discard(workdir, copy)
+
+
+def _viewed(name: str, argv: list[str], status: int | None) -> str:
+    """What to say about a pager that has finished."""
+    if status is None:
+        return f"Could not start {argv[0]}"
+    if status != 0:
+        return f"{argv[0]} exited {status}"
+    return f"Viewed {name}"
 
 
 def _edit_in_place(real: str, name: str, argv: list[str], run) -> str:
