@@ -80,7 +80,13 @@ def test_a_symlinked_directory_is_counted_but_not_walked(fs, tmp_path):
     write(f"{root}/real/file", "x" * 100)
     os.symlink(f"{root}/real", f"{root}/link")
     total = TreeSizer(fs, [root]).run()[root]
-    assert total < 200                        # the 100 bytes counted once
+    # The target's 100 bytes exactly once, plus whatever the link itself
+    # weighs -- which is the length of the path it holds, and so depends on
+    # where the temporary directory happens to be.  Taking that from the same
+    # listing the walk read is what keeps the assertion exact rather than a
+    # threshold that passes on a short path and fails on a long one.
+    link = next(e for e in fs.listdir(root) if e.name == "link")
+    assert total == 100 + (link.size or 0)
 
 
 def test_a_directory_that_cannot_be_read_does_not_stop_the_walk(fs, tmp_path,
