@@ -266,6 +266,8 @@ def test_a_member_that_cannot_be_read(bundle, monkeypatch):
 @pytest.mark.parametrize("call", [
     lambda fs: fs.open_write("/x"),
     lambda fs: fs.mkdir("/x"),
+    lambda fs: fs.touch("/x"),
+    lambda fs: fs.touch("/readme.txt"),      # even one already in the archive
     lambda fs: fs.remove("/readme.txt"),
     lambda fs: fs.rmdir("/empty"),
     lambda fs: fs.rename("/readme.txt", "/other.txt"),

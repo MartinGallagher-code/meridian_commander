@@ -134,6 +134,18 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   your own editor? **Options > Editor** points `F4` at `vi`, `vim`, `$EDITOR` or
   any command you name — including on a remote pane, which is fetched to a
   private copy and written back if you changed it.
+- **Side-by-side compare** (`D`) — the file each pane is offering, in two
+  columns aligned line for line and scrolled **as one**: changed lines marked
+  `!`, lines only on one side `+`/`-`, and a shaded gap facing them on the
+  other. `n`/`N` jump between blocks of differences. Built in rather than a
+  call out to `vimdiff`, so a local file compares against an SFTP, SSH, FTP or
+  in-archive one with nothing fetched to disk first.
+- **Head and tail at once** (`h`) — the first and last lines of the file
+  selected in the **other** pane, with a rule between them counting what was
+  skipped. `+`/`-` show more or fewer. The file is streamed once and only the
+  two ends are kept, so a multi-gigabyte log costs what a short one does.
+- **New file** (`n`) and **rename** (`r`) — `touch` and a rename without
+  leaving for a shell; an existing file is restamped, never emptied.
 - **Tag multiple files** (`Insert`/`Space`, `+` all, `-` none) for batch
   copy/move/delete.
 - **Find files** (`f`) — search the pane's tree by substring or glob (remote
@@ -152,7 +164,7 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   `!`, which suspends the UI into a real terminal instead.
 - **Mouse support** — click to select, double-click to open, wheel to scroll,
   and **right-click for a context menu** of actions (view, edit, copy, move,
-  rename, delete, tag, mkdir, terminal).
+  rename, delete, tag, mkdir, new file, compare, head+tail, terminal).
 - **Works even when F-keys are hijacked** — every function key has a digit alias
   (`1`–`0` → `F1`–`F10`) and the common actions have mnemonic letters.
 - **Pane plug-ins** (`p`) — put a pane into plug-in mode: pick from discovered

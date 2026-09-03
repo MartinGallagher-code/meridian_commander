@@ -136,6 +136,15 @@ ROLES: dict[str, tuple[str, str, int, int]] = {
     "editcode": ("black", "lightgray", 0, curses.A_REVERSE),
     "editlink": ("lightgreen", "blue", 0, curses.A_UNDERLINE),
     "editheading": ("lightgreen", "blue", curses.A_BOLD, curses.A_BOLD),
+
+    # -- the side-by-side comparison --------------------------------------
+    # The marker column ('+', '-', '!') says which is which without colour,
+    # so the monochrome column only has to make a changed row stand out from
+    # an unchanged one -- and a gap look like a gap.
+    "diffadd": ("lightgreen", "blue", curses.A_BOLD, curses.A_BOLD),
+    "diffdel": ("lightred", "blue", curses.A_BOLD, curses.A_BOLD),
+    "diffchange": ("white", "blue", curses.A_BOLD, curses.A_BOLD),
+    "difffill": ("darkgray", "black", 0, curses.A_DIM),
 }
 
 #: The scheme used when none is asked for, or when one is asked for by a name
@@ -183,6 +192,10 @@ SCHEMES: dict[str, dict[str, tuple[str, str, int, int]]] = {
                    getattr(curses, "A_ITALIC", curses.A_UNDERLINE)),
         "editlink": ("lightgreen", "black", 0, curses.A_UNDERLINE),
         "editheading": ("lightgreen", "black", curses.A_BOLD, curses.A_BOLD),
+        "diffadd": ("lightgreen", "black", curses.A_BOLD, curses.A_BOLD),
+        "diffdel": ("lightred", "black", curses.A_BOLD, curses.A_BOLD),
+        "diffchange": ("white", "black", curses.A_BOLD, curses.A_BOLD),
+        "difffill": ("darkgray", "darkgray", 0, curses.A_DIM),
     },
 
     # A monochrome adapter, for the purists -- and for anyone reading over a

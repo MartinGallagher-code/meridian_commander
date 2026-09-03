@@ -245,6 +245,21 @@ def test_the_mkdir_key(app, tmp_path, monkeypatch, key):
     assert (tmp_path / "left" / f"made-{key}").is_dir()
 
 
+def test_the_rename_key(app, tmp_path, monkeypatch):
+    _point_at(app.left, "file.txt")
+    _ScriptedDialogs(monkeypatch, prompt=["renamed.txt"])
+    app.handle_key(ord("r"))
+    assert (tmp_path / "left" / "renamed.txt").is_file()
+    assert not (tmp_path / "left" / "file.txt").exists()
+
+
+def test_the_new_file_key(app, tmp_path, monkeypatch):
+    _ScriptedDialogs(monkeypatch, prompt=["fresh.txt"])
+    app.handle_key(ord("n"))
+    assert (tmp_path / "left" / "fresh.txt").is_file()
+    assert (tmp_path / "left" / "fresh.txt").stat().st_size == 0
+
+
 @pytest.mark.parametrize("key", [curses.KEY_F8, ord("8"), ord("d")])
 def test_the_delete_key(app, tmp_path, monkeypatch, key):
     name = f"doomed-{key}"
@@ -1094,6 +1109,28 @@ def test_the_context_menu_makes_a_directory(app, tmp_path, monkeypatch):
     _ScriptedDialogs(monkeypatch, menu=["New directory"], prompt=["ctxdir"])
     app._context_menu()
     assert (tmp_path / "left" / "ctxdir").is_dir()
+
+
+def test_the_context_menu_makes_a_file(app, tmp_path, monkeypatch):
+    _ScriptedDialogs(monkeypatch, menu=["New file"], prompt=["ctx.txt"])
+    app._context_menu()
+    assert (tmp_path / "left" / "ctx.txt").is_file()
+
+
+def test_the_context_menu_compares_and_peeks(app, monkeypatch):
+    opened = []
+    monkeypatch.setattr(app_mod, "Comparison",
+                        lambda *a: _Recorder(opened, ("compare", a[1], a[3])))
+    monkeypatch.setattr(app_mod, "PeekViewer",
+                        lambda *a: _Recorder(opened, ("peek", a[1])))
+    _point_at(app.left, "file.txt")
+    _point_at(app.right, "file.txt")
+
+    _ScriptedDialogs(monkeypatch, menu=["Compare with other pane"])
+    app._context_menu()
+    _ScriptedDialogs(monkeypatch, menu=["Head + tail (other pane)"])
+    app._context_menu()
+    assert [entry[0] for entry in opened] == ["compare", "peek"]
 
 
 def test_the_context_menu_finds_files(app, tmp_path, monkeypatch):

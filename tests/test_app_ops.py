@@ -242,6 +242,56 @@ def test_a_failing_mkdir_is_reported(app, tmp_path, monkeypatch):
     assert "Mkdir error" == scripted.messages[-1][0]
 
 
+# -- touch ---------------------------------------------------------------------
+
+def test_touch_creates_an_empty_file(app, tmp_path, monkeypatch):
+    _ScriptedDialogs(monkeypatch, prompt=["notes.txt"])
+    app._touch()
+    assert read(str(tmp_path / "left" / "notes.txt")) == ""
+    assert "Created notes.txt" in app.message
+    assert app.left.current_name() == "notes.txt"
+
+
+def test_touch_restamps_an_existing_file_without_emptying_it(app, tmp_path,
+                                                             monkeypatch):
+    path = tmp_path / "left" / "file.txt"
+    os.utime(path, (123456.0, 123456.0))
+    _ScriptedDialogs(monkeypatch, prompt=["file.txt"])
+    app._touch()
+    assert read(str(path)) == "left"
+    assert path.stat().st_mtime > 123456.0
+    assert "Touched file.txt" in app.message
+
+
+def test_touch_can_be_cancelled(app, tmp_path, monkeypatch):
+    before = sorted(p.name for p in (tmp_path / "left").iterdir())
+    for answer in (None, ""):
+        _ScriptedDialogs(monkeypatch, prompt=[answer])
+        app._touch()
+    assert sorted(p.name for p in (tmp_path / "left").iterdir()) == before
+
+
+def test_touch_does_not_invent_the_directories_on_the_way(app, tmp_path,
+                                                          monkeypatch):
+    scripted = _ScriptedDialogs(monkeypatch, prompt=["a/b/c.txt"])
+    app._touch()
+    assert not (tmp_path / "left" / "a").exists()
+    assert scripted.messages[-1][0] == "New file error"
+    assert scripted.messages[-1][2] is True
+
+
+def test_touch_on_a_directory_restamps_it_the_way_the_shell_does(app, tmp_path,
+                                                                 monkeypatch):
+    (tmp_path / "left" / "adir").mkdir()
+    os.utime(tmp_path / "left" / "adir", (123456.0, 123456.0))
+    app.left.refresh()
+    _ScriptedDialogs(monkeypatch, prompt=["adir"])
+    app._touch()
+    assert (tmp_path / "left" / "adir").is_dir()
+    assert (tmp_path / "left" / "adir").stat().st_mtime > 123456.0
+    assert "Touched adir" in app.message
+
+
 # -- delete --------------------------------------------------------------------
 
 def test_delete_a_file_after_confirmation(app, tmp_path, monkeypatch):

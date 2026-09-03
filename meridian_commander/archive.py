@@ -260,6 +260,12 @@ class ArchiveFileSystem(FileSystem):
     def open_write(self, path: str):
         self._read_only("write to it")
 
+    def touch(self, path: str) -> None:
+        # Said outright rather than left to the inherited implementation: on
+        # an entry that already exists that one would quietly do nothing at
+        # all, since utime here is the no-op every read-only backend inherits.
+        self._read_only("create files in it")
+
     def mkdir(self, path: str) -> None:
         self._read_only("create directories in it")
 

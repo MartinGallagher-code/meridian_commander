@@ -154,6 +154,55 @@ def test_utime_is_a_no_op_by_default():
     assert _Memory().utime("/a", 123.0) is None
 
 
+class _WritableMemory(_Memory):
+    """``_Memory`` with the two calls the default ``touch`` is built from."""
+
+    def __init__(self):
+        super().__init__()
+        self.stamped: list[tuple[str, float]] = []
+
+    def open_write(self, path):
+        files = self.files
+        files[path] = b""
+
+        class _Writer:
+            def write(self, data):
+                files[path] += bytes(data)
+                return len(data)
+
+            def close(self):
+                pass
+
+        return _Writer()
+
+    def utime(self, path, mtime):
+        self.stamped.append((path, mtime))
+
+
+def test_touch_creates_a_missing_file_by_default():
+    fs = _WritableMemory()
+    fs.touch("/new.txt")
+    assert fs.files["/new.txt"] == b""
+    # Nothing to restamp: the file did not exist a moment ago.
+    assert fs.stamped == []
+
+
+def test_touch_restamps_an_existing_file_rather_than_rewriting_it():
+    fs = _WritableMemory()
+    fs.files["/kept.txt"] = b"payload"
+    fs.touch("/kept.txt")
+    assert fs.files["/kept.txt"] == b"payload"
+    assert [path for path, _ in fs.stamped] == ["/kept.txt"]
+
+
+def test_touch_on_a_backend_that_cannot_set_times_still_does_not_write():
+    """The inherited no-op ``utime`` leaves the file exactly as it was."""
+    fs = _Memory()
+    fs.files["/kept.txt"] = b"payload"
+    fs.touch("/kept.txt")               # open_write here would raise
+    assert fs.files["/kept.txt"] == b"payload"
+
+
 def test_close_is_a_no_op_by_default():
     assert _Memory().close() is None
 
@@ -241,6 +290,25 @@ def test_local_utime(fs, tmp_path):
     write(path, "x")
     fs.utime(path, 123456.0)
     assert fs.stat(path).mtime == pytest.approx(123456.0)
+
+
+def test_local_touch_creates_an_empty_file(fs, tmp_path):
+    path = str(tmp_path / "new.txt")
+    fs.touch(path)
+    assert read(path) == ""
+
+
+def test_local_touch_keeps_the_contents_and_moves_the_time(fs, tmp_path):
+    path = str(tmp_path / "kept.txt")
+    write(path, "payload", mtime=123456.0)
+    fs.touch(path)
+    assert read(path) == "payload"
+    assert fs.stat(path).mtime > 123456.0
+
+
+def test_local_touch_of_a_missing_directory_is_an_error(fs, tmp_path):
+    with pytest.raises(OSError):
+        fs.touch(str(tmp_path / "nowhere" / "a.txt"))
 
 
 def test_local_mkdir_and_makedirs(fs, tmp_path):
