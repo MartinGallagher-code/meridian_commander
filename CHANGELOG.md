@@ -13,6 +13,30 @@ day the version was cut.
 
 ### Added
 
+- **`n` makes an empty file** where you are standing, and `r` renames the one
+  under the cursor — `touch` and `mv` without leaving for a shell. A name that
+  already exists is **restamped, never emptied**, so a mistyped name cannot
+  cost you a file's contents; unlike `F7` it does not invent the directories
+  on the way, which is what `touch a/b` does at a shell too. Both are on
+  `File`, in the right-click menu, and work on every backend: a remote pane
+  restamps over SFTP or with the server's own `touch`, and a read-only archive
+  says so rather than half-doing it.
+- **`D` compares both panes' files side by side.** The two files are aligned
+  line for line first, so a screen row holds a line from each side or a line
+  facing a shaded gap, and the pair scrolls **as one** — nothing to fall out
+  of step, which is where two independently scrolled views go wrong as soon as
+  the files differ in length. Changed lines are marked `!`, one-sided lines
+  `+`/`-`, and `n`/`N` jump between *blocks* of differences rather than rows.
+  Built in rather than a call out to `vimdiff`: both sides are read through
+  their own pane's connection, so a local file compares against an SFTP, SSH,
+  FTP or in-archive one with nothing fetched to disk first.
+- **`h` shows the head and the tail of the other pane's file at once**, with a
+  rule between them saying how many lines were skipped — the two ends of a log
+  without `head`, `tail` and a shell to run them in. `+`/`-` show ten more or
+  fewer at each end, and the viewer's search, wrapping and line numbers all
+  work as usual. The file is streamed once, keeping only the first lines and a
+  rolling window of the last, so peeking at a multi-gigabyte log costs what
+  peeking at a short one does.
 - **`Ctrl-O` from your shell, and the shell follows you back.** `--printwd`
   writes the active pane's directory on exit, and `--shell-init bash|zsh|fish`
   prints the function and key binding that reads it — so browsing ends with

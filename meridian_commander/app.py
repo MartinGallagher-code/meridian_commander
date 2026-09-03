@@ -61,7 +61,9 @@ from .operations import (
 )
 from .archive import is_archive, open_archive
 from .browsers import viewer_for
+from .compare import Comparison
 from .panel import Panel
+from .peek import PeekViewer
 from .sync import build_sync_plan, execute_sync_plan, survey_directory
 from .util import human_size, human_time, ljust, rjust
 
@@ -107,9 +109,10 @@ MENUS: list[dict] = [
             {"label": "Ru~n~...", "name": "run", "key": "Enter"},
             {"label": "~C~opy", "name": "copy", "key": "F5"},
             {"label": "~M~ove", "name": "move", "key": "F6"},
-            {"label": "~R~ename", "name": "rename"},
+            {"label": "~R~ename", "name": "rename", "key": "r"},
             {"sep": True},
             {"label": "Make ~d~irectory", "name": "mkdir", "key": "F7"},
+            {"label": "Ne~w~ file", "name": "touch", "key": "n"},
             {"label": "De~l~ete", "name": "delete", "key": "F8"},
             {"label": "~T~ag / untag", "name": "tag", "key": "Ins"},
             {"sep": True},
@@ -130,6 +133,10 @@ MENUS: list[dict] = [
             {"label": "Sa~m~e location in other pane", "name": "mirror",
              "key": "="},
             {"label": "S~y~nchronize panes", "name": "sync", "key": "F9"},
+            {"label": "~C~ompare files side by side", "name": "compare",
+             "key": "D"},
+            {"label": "He~a~d + tail of the other pane's file",
+             "name": "peek", "key": "h"},
             {"sep": True},
             {"label": "~T~erminal in this pane", "name": "terminal", "key": "t"},
             {"label": "Full-screen she~l~l", "name": "shell", "key": "!"},
@@ -496,6 +503,7 @@ class App:
             "move": self._move,
             "rename": self._rename,
             "mkdir": self._mkdir,
+            "touch": self._touch,
             "delete": self._delete,
             "tag": self.active.toggle_select,
             "find": self._find_files,
@@ -507,6 +515,8 @@ class App:
             "reload": self._reload,
             "mirror": self._mirror_to_other_pane,
             "sync": self._sync,
+            "compare": self._compare,
+            "peek": self._peek,
             "terminal": self._open_terminal_pane,
             "shell": self._open_terminal,
             "plugins": self._plugin_mode,
@@ -633,6 +643,14 @@ class App:
             self._config_menu()
         elif key == ord("f"):  # find files under the current directory
             self._find_files()
+        elif key == ord("n"):  # new empty file in the active pane
+            self._touch()
+        elif key == ord("r"):  # rename the entry under the cursor
+            self._rename()
+        elif key == ord("D"):  # compare both panes' files side by side
+            self._compare()
+        elif key == ord("h"):  # head + tail of the other pane's file
+            self._peek()
         elif key == curses.KEY_MOUSE:
             self._handle_mouse()
         # F-keys, with digit (1..0 -> F1..F10) and mnemonic-letter alternates
@@ -1190,13 +1208,14 @@ class App:
 
         labels = ["View", "Edit", "Run...", "Copy to other pane",
                   "Move to other pane", "Rename", "Delete", "Tag / untag",
-                  "New directory", "Home directory",
+                  "New directory", "New file", "Compare with other pane",
+                  "Head + tail (other pane)", "Home directory",
                   "Same location in other pane", "Presets (go to / save)",
                   "Find files here", "Terminal in this pane",
                   "Full-screen shell", "Cancel"]
         actions = ["view", "edit", "run", "copy", "move", "rename", "delete",
-                   "tag", "mkdir", "home", "mirror", "presets", "find",
-                   "terminal", "shell", None]
+                   "tag", "mkdir", "touch", "compare", "peek", "home",
+                   "mirror", "presets", "find", "terminal", "shell", None]
         choice = dialogs.menu(self.stdscr, header[:40], labels)
         if choice is None:
             return
@@ -1219,6 +1238,12 @@ class App:
             panel.toggle_select()
         elif action == "mkdir":
             self._mkdir()
+        elif action == "touch":
+            self._touch()
+        elif action == "compare":
+            self._compare()
+        elif action == "peek":
+            self._peek()
         elif action == "home":
             self._go_home()
         elif action == "mirror":
@@ -1554,6 +1579,64 @@ class App:
             dialogs.message(self.stdscr, "View error", str(exc), error=True)
         curses.curs_set(0)
 
+    def _sole_file(self, panel) -> tuple[str | None, str]:
+        """The one file a pane is offering, or ``None`` and why not.
+
+        Tagged entries win over the cursor -- that is what
+        :meth:`Panel.selected_entries` already means -- but *two* tags are an
+        ambiguity rather than a choice, and are refused instead of silently
+        taking the first one.
+        """
+        entries = panel.selected_entries()
+        if not entries:
+            return None, "nothing is selected"
+        if len(entries) > 1:
+            return None, f"{len(entries)} files are tagged; tag one"
+        entry = entries[0]
+        if entry.is_dir:
+            return None, f"{entry.name} is a directory"
+        return panel.fs.join(panel.path, entry.name), ""
+
+    def _compare(self) -> None:
+        """Each pane's file, side by side, the two scrolled as one.
+
+        The screen's left half is the left pane's file whichever pane is
+        active: a comparison that swapped sides depending on where the cursor
+        happened to be would be a puzzle rather than a picture.
+        """
+        picked = []
+        for panel, side in ((self.left, "left"), (self.right, "right")):
+            path, why = self._sole_file(panel)
+            if path is None:
+                self._set_message(f"Compare: {side} pane -- {why}")
+                return
+            picked.append((panel.fs, path))
+        try:
+            Comparison(picked[0][0], picked[0][1],
+                       picked[1][0], picked[1][1]).run(self.stdscr)
+        except Exception as exc:
+            dialogs.message(self.stdscr, "Compare error", str(exc), error=True)
+        curses.curs_set(0)
+
+    def _peek(self) -> None:
+        """Head and tail at once of the file selected in the *other* pane.
+
+        The other pane, not this one, so a log can be watched from the pane
+        you are working in without leaving it -- which is the same bargain
+        the plug-ins make when they resolve their arguments over there.
+        """
+        panel = self.other
+        path, why = self._sole_file(panel)
+        if path is None:
+            self._set_message(f"Head + tail: other pane -- {why}")
+            return
+        try:
+            PeekViewer(panel.fs, path).run(self.stdscr)
+        except Exception as exc:
+            dialogs.message(self.stdscr, "Head + tail error", str(exc),
+                            error=True)
+        curses.curs_set(0)
+
     def _edit(self) -> None:
         panel = self.active
         entry = panel.current()
@@ -1674,6 +1757,27 @@ class App:
             self._set_message(f"Created {name}")
         except Exception as exc:
             dialogs.message(self.stdscr, "Mkdir error", str(exc), error=True)
+
+    def _touch(self) -> None:
+        """Create an empty file in this pane, or restamp one that is there.
+
+        The name is taken relative to the pane's directory, exactly as
+        :meth:`_mkdir` takes its own -- but no parent is created for it: a
+        name with a directory in it that does not exist is an error here, the
+        way ``touch a/b`` is at a shell, rather than a silent ``mkdir -p``.
+        """
+        panel = self.active
+        name = dialogs.prompt(self.stdscr, "New file", "File name:")
+        if not name:
+            return
+        target = panel.fs.join(panel.path, name)
+        existed = panel.fs.exists(target)
+        try:
+            panel.fs.touch(target)
+            panel.refresh(keep_name=name.split(panel.fs.sep)[0].split("/")[0])
+            self._set_message(("Touched " if existed else "Created ") + name)
+        except Exception as exc:
+            dialogs.message(self.stdscr, "New file error", str(exc), error=True)
 
     def _delete(self) -> None:
         panel = self.active
@@ -1856,6 +1960,13 @@ class App:
             "  !              full-screen shell (for vim/htop etc.)\n"
             "  p / F11        plug-in mode: run a plug-in in this pane\n"
             "  f              find files: browsable results (view/edit/goto)\n"
+            "  r              rename the file under the cursor\n"
+            "  n              new empty file here (an existing one is\n"
+            "                 restamped, never emptied)\n"
+            "  D              compare both panes' files side by side:\n"
+            "                 n/N next/previous difference, one scrollbar\n"
+            "  h              head + tail at once of the other pane's file\n"
+            "                 (+/- show more or fewer lines each end)\n"
             "  F3 on .xlsx    spreadsheet grid: Tab sheet, / find, w width\n"
             "  F3 on .docx    document view: headings, lists, tables, w wrap\n"
             "  F3 on .pptx    slide browser: Tab slide, t notes, / find\n"

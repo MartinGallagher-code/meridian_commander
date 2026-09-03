@@ -512,6 +512,43 @@ with `:q` costs no upload. Two limits follow from that:
   archive — the temporary copy is deliberately **kept**, and the message tells
   you where it is. Nothing you typed is thrown away.
 
+## Making, renaming and comparing files
+
+**`n` — new file.** Asks for a name and creates it, empty, in the active
+pane's directory: the `touch` you would otherwise drop to a shell for. A name
+that is already there is **restamped, never emptied** — `touch` has always
+meant "make sure this exists and mark it as of now", and losing a file's
+contents to a mistyped name would be an unpleasant way to learn otherwise.
+Unlike `F7`, it does not invent the directories on the way: `n` with `a/b.txt`
+where `a` does not exist is an error, as it is at a shell.
+
+**`r` — rename.** The file under the cursor, with its current name filled in
+so a small correction is a small edit. (To rename many at once, `p` offers the
+*Multi-rename* plug-in.)
+
+**`D` — compare files side by side.** Takes the file each pane is offering —
+the tagged one, or the one under the cursor — and shows them in two columns
+that scroll **as one**: the two files are aligned line for line first, so a
+row holds a line from each side, or a line facing a shaded **gap** where the
+other file has nothing. Changed lines are marked `!`, lines only on the left
+`-`, lines only on the right `+`. `n`/`N` jump to the next and previous
+*block* of differences (a rewritten paragraph is one difference, not six),
+arrows scroll, `l` turns the line numbers off, `q` closes. The footer counts
+the differences, or says `identical`.
+
+It is built in rather than a call out to `vimdiff`, which buys one thing that
+matters here: both files are read through their pane's connection, so a local
+file compares against an SFTP, SSH, FTP or inside-an-archive one with nothing
+fetched to disk first. Each side is read up to 8 MB.
+
+**`h` — head and tail at once**, of the file selected in the **other** pane.
+The first and last 20 lines with a rule between them saying how many were
+skipped — the two ends of a log without `head` and `tail` and a shell to run
+them in. `+`/`-` show ten more or fewer lines at each end; everything the
+viewer does (`/` search, `w` wrap, `l` numbers) works here too. The file is
+streamed once and only the two ends are held, so peeking at a multi-gigabyte
+log costs what peeking at a short one does.
+
 ## Key bindings
 
 | Key | Action | Key | Action |
@@ -523,6 +560,8 @@ with `:q` costs no upload. Two limits follow from that:
 | `Enter` / `→` | enter dir / view file | `F5` | copy to other pane |
 | `Backspace` / `←` | parent directory | `F6` | move to other pane |
 | `Insert` / `Space` | tag file | `F7` | make directory |
+| `n` | new (empty) file here | `r` | rename the file under the cursor |
+| `D` | compare both panes' files | `h` | head + tail (other pane's file) |
 | `+` / `-` | tag all / untag all | `F8` | delete |
 | `Ctrl-U` | swap panes | `F9` | synchronize panes |
 | `Ctrl-R` | reload panes | `F10` | quit |

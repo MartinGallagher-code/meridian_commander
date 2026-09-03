@@ -157,6 +157,26 @@ class FileSystem(abc.ABC):
         if not self.exists(path):
             self.mkdir(path)
 
+    def touch(self, path: str) -> None:
+        """Create ``path`` as an empty file, or restamp it if it is there.
+
+        Both halves of the shell's ``touch``: a name that does not exist yet
+        becomes an empty file, and one that does keeps its contents and is
+        given the current time.  Restamping goes through :meth:`utime`, which
+        is best-effort -- a backend that cannot set times leaves the file
+        untouched rather than failing, the same bargain a copy makes.
+
+        Creating the file is deliberately *not* done by writing over an
+        existing one: ``touch`` on a file with contents must never empty it.
+        """
+        import time as _time
+
+        if self.exists(path):
+            self.utime(path, _time.time())
+            return
+        writer = self.open_write(path)
+        writer.close()
+
     @abc.abstractmethod
     def remove(self, path: str) -> None:
         """Remove a single file."""
@@ -1429,6 +1449,9 @@ class SSHFileSystem(FileSystem):
                 self._run(f"touch -t {stamp} {self._q(path)}")
             except Exception:
                 pass
+
+    def touch(self, path: str) -> None:
+        self._run(f"touch {self._q(path)}")
 
     def mkdir(self, path: str) -> None:
         self._run(f"mkdir {self._q(path)}")

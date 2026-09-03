@@ -283,7 +283,9 @@ def test_ssh_mutations_issue_the_expected_commands(ssh_fs):
     fs.rmdir("/a")
     fs.delete_tree("/tree")
     fs.rename("/a", "/b")
+    fs.touch("/f")
     joined = "\n".join(client.commands)
+    assert "touch /f" in joined
     assert "mkdir /a" in joined
     assert "mkdir -p /a/b/c" in joined
     assert "rm -f /f" in joined
