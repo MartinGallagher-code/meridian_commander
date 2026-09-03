@@ -39,13 +39,17 @@ day the version was cut.
   Built in rather than a call out to `vimdiff`: both sides are read through
   their own pane's connection, so a local file compares against an SFTP, SSH,
   FTP or in-archive one with nothing fetched to disk first.
-- **`h` shows the head and the tail of the other pane's file at once**, with a
+- **`h` turns a pane into the head and tail of the other pane's file**, with a
   rule between them saying how many lines were skipped — the two ends of a log
-  without `head`, `tail` and a shell to run them in. `+`/`-` show ten more or
-  fewer at each end, and the viewer's search, wrapping and line numbers all
-  work as usual. The file is streamed once, keeping only the first lines and a
-  rolling window of the last, so peeking at a multi-gigabyte log costs what
-  peeking at a short one does.
+  without `head`, `tail` and a shell to run them in. It stays *in the pane*
+  and **follows the other pane's cursor**, so looking into ten files costs ten
+  arrow keys rather than ten windows opened and closed, and the listing you
+  are choosing from keeps its place. The count sizes itself to the pane so
+  both ends are on screen at once; `+`/`-` pin it larger or smaller and scroll
+  the overflow, `r` re-reads a file that has grown, and `Esc` gives the pane
+  back to its listing. The file is streamed once, keeping only the first lines
+  and a rolling window of the last, so peeking at a multi-gigabyte log costs
+  what peeking at a short one does.
 - **`Ctrl-O` from your shell, and the shell follows you back.** `--printwd`
   writes the active pane's directory on exit, and `--shell-init bash|zsh|fish`
   prints the function and key binding that reads it — so browsing ends with

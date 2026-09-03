@@ -541,13 +541,20 @@ matters here: both files are read through their pane's connection, so a local
 file compares against an SFTP, SSH, FTP or inside-an-archive one with nothing
 fetched to disk first. Each side is read up to 8 MB.
 
-**`h` — head and tail at once**, of the file selected in the **other** pane.
-The first and last 20 lines with a rule between them saying how many were
-skipped — the two ends of a log without `head` and `tail` and a shell to run
-them in. `+`/`-` show ten more or fewer lines at each end; everything the
-viewer does (`/` search, `w` wrap, `l` numbers) works here too. The file is
-streamed once and only the two ends are held, so peeking at a multi-gigabyte
-log costs what peeking at a short one does.
+**`h` — head and tail, in the pane.** The active pane stops being a listing and
+becomes the two ends of whatever the **other** pane's cursor is on: the first
+and last lines with a rule between them saying how many were skipped. It
+**follows that cursor** — move down the other pane's listing and this pane
+shows the next file — which is the point of it being a pane rather than a
+window: looking into ten files costs ten arrow keys, and the listing you are
+choosing from never loses its place.
+
+The count sizes itself to the pane, so both ends are on screen at once however
+tall the pane is. `+`/`-` pin it to more or fewer lines (arrows, PgUp/PgDn,
+Home/End then scroll the overflow), `r` re-reads a file that has grown, and
+`Esc` — or `h` again — gives the pane back to its listing. The file is streamed
+once and only the two ends are held, so peeking at a multi-gigabyte log costs
+what peeking at a short one does, on a remote pane as much as a local one.
 
 ## Viewing with your own pager
 
@@ -579,7 +586,7 @@ send — so the copy is removed however the pager exits.
 | `Backspace` / `←` | parent directory | `F6` | move to other pane |
 | `Insert` / `Space` | tag file | `F7` | make directory |
 | `n` | new (empty) file here | `r` | rename the file under the cursor |
-| `D` | compare both panes' files | `h` | head + tail (other pane's file) |
+| `D` | compare both panes' files | `h` | head + tail of the other pane's file, in this pane |
 | `+` / `-` | tag all / untag all | `F8` | delete |
 | `Ctrl-U` | swap panes | `F9` | synchronize panes |
 | `Ctrl-R` | reload panes | `F10` | quit |

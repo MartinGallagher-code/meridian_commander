@@ -144,9 +144,12 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   other. `n`/`N` jump between blocks of differences. Built in rather than a
   call out to `vimdiff`, so a local file compares against an SFTP, SSH, FTP or
   in-archive one with nothing fetched to disk first.
-- **Head and tail at once** (`h`) — the first and last lines of the file
-  selected in the **other** pane, with a rule between them counting what was
-  skipped. `+`/`-` show more or fewer. The file is streamed once and only the
+- **Head and tail in a pane** (`h`) — the pane becomes the first and last lines
+  of whatever the **other** pane's cursor is on, with a rule between them
+  counting what was skipped, and it **follows that cursor** as you move it: ten
+  files is ten arrow keys, with the listing keeping its place. Sized to the
+  pane so both ends show at once; `+`/`-` pin a larger or smaller count, `r`
+  re-reads, `Esc` gives the pane back. The file is streamed once and only the
   two ends are kept, so a multi-gigabyte log costs what a short one does.
 - **New file** (`n`) and **rename** (`r`) — `touch` and a rename without
   leaving for a shell; an existing file is restamped, never emptied.

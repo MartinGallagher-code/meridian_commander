@@ -1118,19 +1118,22 @@ def test_the_context_menu_makes_a_file(app, tmp_path, monkeypatch):
 
 
 def test_the_context_menu_compares_and_peeks(app, monkeypatch):
+    from meridian_commander.peek import PeekPane
+
     opened = []
     monkeypatch.setattr(app_mod, "Comparison",
                         lambda *a: _Recorder(opened, ("compare", a[1], a[3])))
-    monkeypatch.setattr(app_mod, "PeekViewer",
-                        lambda *a: _Recorder(opened, ("peek", a[1])))
     _point_at(app.left, "file.txt")
     _point_at(app.right, "file.txt")
 
     _ScriptedDialogs(monkeypatch, menu=["Compare with other pane"])
     app._context_menu()
-    _ScriptedDialogs(monkeypatch, menu=["Head + tail (other pane)"])
+    assert [entry[0] for entry in opened] == ["compare"]
+
+    _ScriptedDialogs(monkeypatch, menu=["Head + tail in this pane"])
     app._context_menu()
-    assert [entry[0] for entry in opened] == ["compare", "peek"]
+    # The pane itself becomes the view; nothing full-screen is opened.
+    assert isinstance(app.left.plugin, PeekPane)
 
 
 def test_the_context_menu_finds_files(app, tmp_path, monkeypatch):
