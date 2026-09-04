@@ -13,6 +13,18 @@ day the version was cut.
 
 ### Added
 
+- **`u` shows what each subdirectory is holding**, in the listing itself: the
+  `<DIR>` marker becomes a real total and the `Modify time` column becomes a
+  bar scaled to the biggest entry here, files included. Deliberately no total
+  and no separate report — the answer to "where has the space gone?" is a
+  path, so you follow the longest bar down with `Enter` and end up standing in
+  it. The walk happens between keystrokes, a few listings at a time, so the
+  pane keeps answering the keyboard while it counts (it matters most on a
+  remote pane, where each listing is a round trip); a directory still being
+  counted shows its running figure in the dimmer colour. Totals are kept as
+  you move around, so walking back up a measured tree is free, and `Ctrl-R`
+  is what forgets them.
+
 - **`Options > Viewer` points `F3` at your own pager** — `less`, `less -R`,
   `more`, `$PAGER`, or any command line you name — remembered in
   `[ui] viewer`, with *Built-in viewer* on the same menu to put it back. It

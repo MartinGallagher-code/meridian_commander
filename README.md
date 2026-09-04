@@ -159,6 +159,12 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   panes included, cancellable) and get a **browsable result list**: view or
   edit a hit right from the list, or press Enter to jump the pane to the
   containing directory with the cursor on the file.
+- **Find the space** (`u`) — every subdirectory shows what is under it instead
+  of `<DIR>`, with a bar scaled to the biggest thing in the directory, so you
+  follow the longest bar down the tree with `Enter` and end up standing in
+  whatever is filling the disk. No total, no separate report: the answer is a
+  path. The walk runs between keystrokes, so the pane stays usable while it
+  counts — remote panes included.
 - **Per-pane hidden-file toggle** (`.`) — show or hide dotfiles independently in
   each pane.
 - **Terminal inside the pane** (`t`) — the pane itself becomes a
