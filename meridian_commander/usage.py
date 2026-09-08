@@ -19,12 +19,23 @@ pane is measured exactly like a local one, with no shell on the far side.
 
 from __future__ import annotations
 
+import time
+
 from .filesystems import FileSystem
 
-#: Directory listings per step.  Small enough that a step over SFTP (one round
-#: trip per listing) still returns between keystrokes, large enough that a
-#: local tree of a few thousand directories finishes in a second or two.
-DEFAULT_BUDGET = 8
+#: How long a step is allowed to work, in seconds.  A *time* box rather than a
+#: count of listings, because the two backends this runs on differ by four
+#: orders of magnitude: a local listing costs microseconds and an SFTP one is a
+#: network round trip.  Any fixed count is therefore far too slow for one or
+#: far too slow to answer the keyboard for the other -- a budget of 8 listings
+#: held a local pane to 67 listings a second when the same walk, unpaced, does
+#: fifty thousand.  A time box needs no such guess: it fits in as much work as
+#: the backend can do in the slice and stops.
+#:
+#: 15 ms is chosen against the keyboard rather than the disk.  A key pressed at
+#: the worst moment waits one slice, and at 15 ms that is below what anyone
+#: perceives as lag, while still being ~800 local listings' worth of work.
+DEFAULT_SLICE = 0.015
 
 
 class TreeSizer:
@@ -48,20 +59,34 @@ class TreeSizer:
     def finished(self) -> bool:
         return self._root is None and not self._queue
 
-    def step(self, budget: int = DEFAULT_BUDGET) -> bool:
-        """Do up to ``budget`` directory listings.  True while work remains."""
-        for _ in range(max(1, budget)):
+    def step(self, seconds: float = DEFAULT_SLICE,
+             budget: int | None = None) -> bool:
+        """Work for up to ``seconds``.  True while there is more to do.
+
+        One listing always happens, however small the slice: a step that could
+        return having done nothing would let a caller loop for ever making no
+        progress.  ``budget`` caps the listings instead of the clock, which is
+        what a test wants when it is asking about the walk rather than about
+        how long the walk took.
+        """
+        deadline = time.monotonic() + max(0.0, seconds)
+        done = 0
+        while True:
             if self._root is None:
                 if not self._queue:
                     return False
                 self._root = self._queue.pop(0)
                 self._stack = [self._root]
-                continue
-            if not self._stack:
+            elif not self._stack:
                 self.done.add(self._root)
                 self._root = None
-                continue
-            self._list(self._stack.pop(), self._root)
+            else:
+                self._list(self._stack.pop(), self._root)
+                done += 1
+                if budget is not None and done >= budget:
+                    break
+                if budget is None and time.monotonic() >= deadline:
+                    break
         return not self.finished
 
     def _list(self, path: str, root: str) -> None:
@@ -84,8 +109,13 @@ class TreeSizer:
         self.totals[root] += total
 
     def run(self, limit: int = 1_000_000) -> dict[str, int]:
-        """Finish the whole walk (for a caller with nothing else to do)."""
-        while self.step() and limit > 0:
+        """Finish the whole walk (for a caller with nothing else to do).
+
+        In slices of a second rather than the interactive 15 ms: there is no
+        keyboard to answer here, and the only thing the smaller slice would
+        buy is more clock reads.
+        """
+        while self.step(seconds=1.0) and limit > 0:
             limit -= 1
         return self.totals
 

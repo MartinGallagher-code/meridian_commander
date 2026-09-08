@@ -11,6 +11,19 @@ day the version was cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`u` was counting at a sixtieth of the speed it can.** The walk was paced
+  at eight directory listings per 120 ms poll, so a tree it can size in 0.04
+  seconds took 33 on screen: 67 listings a second against the fifty thousand
+  the same code manages unpaced. The slice is now a *time* box — work for
+  about 15 ms, then hand the keyboard back — and the loop offers a pane that
+  is still counting a poll every 5 ms rather than the 120 ms a terminal
+  plug-in is happy to wait. The same 2,221-directory tree now finishes in
+  0.06 s, in two poll cycles. A time box also retires the guess: a fixed
+  count cannot suit both a local listing (microseconds) and an SFTP one (a
+  network round trip), while a slice fits whatever the backend can do in it.
+
 ### Added
 
 - **`u` shows what each subdirectory is holding**, in the listing itself: the
@@ -18,7 +31,7 @@ day the version was cut.
   bar scaled to the biggest entry here, files included. Deliberately no total
   and no separate report — the answer to "where has the space gone?" is a
   path, so you follow the longest bar down with `Enter` and end up standing in
-  it. The walk happens between keystrokes, a few listings at a time, so the
+  it. The walk happens between keystrokes, in slices of about 15 ms, so the
   pane keeps answering the keyboard while it counts (it matters most on a
   remote pane, where each listing is a round trip); a directory still being
   counted shows its running figure in the dimmer colour. Totals are kept as

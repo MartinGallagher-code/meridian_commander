@@ -568,9 +568,12 @@ disk gone?" is a path, not a number. Follow the longest bar down with `Enter`,
 and the pane measures the directory you land in; `Backspace` comes back up.
 When you find it, you are standing in it, with the usual `F8` and `F5` to hand.
 
-The walk runs **between keystrokes**, a few directory listings at a time, so
-the pane keeps answering the keyboard while it counts — an important property
-on a remote pane, where every listing is a round trip. A directory still being
+The walk runs **between keystrokes**, in slices of about 15 ms, so the pane
+keeps answering the keyboard while it counts: a key pressed at the worst
+moment waits one slice, which nobody perceives as lag. A slice rather than a
+number of directories is what lets the same code suit both backends — a local
+listing costs microseconds and an SFTP one is a network round trip, so a fixed
+count would be far too slow for one or far too unresponsive for the other. A directory still being
 counted shows its running total in the dimmer colour; when it settles, that is
 the final figure. Totals are remembered as you move about, so walking back up a
 tree you have already measured costs nothing, and **`Ctrl-R`** (reload) is what

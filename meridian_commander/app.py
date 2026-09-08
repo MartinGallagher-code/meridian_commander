@@ -444,35 +444,46 @@ class App:
             x += seg
 
     # -- main loop --------------------------------------------------------
-    def _tick_plugins(self) -> bool:
-        """Pump plug-ins that produce output while idle (e.g. terminals).
+    #: How long getch() waits for a key before the loop pumps work again.
+    #: A terminal plug-in only needs its output collected often enough to look
+    #: live; a directory walk is *paced* by this number, because it gets one
+    #: slice of work per poll -- so waiting the plug-in's 120 ms between 15 ms
+    #: slices would leave it working one eighth of the time.
+    PLUGIN_POLL_MS = 120
+    SIZING_POLL_MS = 5
 
-        Returns True when any such plug-in is active, so the main loop knows
-        to poll with a timeout instead of blocking forever on getch().
+    def _tick_plugins(self) -> int | None:
+        """Pump plug-ins and directory walks that have work outstanding.
+
+        Returns the milliseconds ``getch()`` should wait for a key, or None to
+        block until one arrives.  Whoever wants the tighter loop wins: a pane
+        that is still counting is doing real work between polls, while a
+        terminal is only being drained.
         """
-        ticking = False
+        poll: int | None = None
         for panel in (self.left, self.right):
             # A pane counting what is under its subdirectories is work in
             # progress too, and wants the same polling loop: that is what
             # keeps the totals growing while nobody presses anything.
             if panel.step_sizing():
-                ticking = True
+                poll = self.SIZING_POLL_MS
             plugin = panel.plugin
             if plugin is not None and getattr(plugin, "wants_timer", False):
-                ticking = True
+                if poll is None:
+                    poll = self.PLUGIN_POLL_MS
                 tick = getattr(plugin, "tick", None)
                 if tick is not None:
                     try:
                         tick()
                     except Exception as exc:
                         self._set_message(f"Plugin error: {exc}")
-        return ticking
+        return poll
 
     def run(self) -> None:
         curses.curs_set(0)
         while self.running:
-            ticking = self._tick_plugins()
-            self.stdscr.timeout(120 if ticking else -1)
+            poll = self._tick_plugins()
+            self.stdscr.timeout(-1 if poll is None else poll)
             self.draw()
             try:
                 key = self.stdscr.getch()
