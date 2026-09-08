@@ -105,16 +105,81 @@ def test_a_directory_that_cannot_be_read_does_not_stop_the_walk(fs, tmp_path,
     assert sizer.finished is True
 
 
-def test_run_gives_up_rather_than_spinning_for_ever(fs, tmp_path):
-    """The limit is a safety net, not a schedule; it must not hang."""
+def test_a_step_stops_when_its_slice_is_spent(fs, tmp_path, monkeypatch):
+    """The slice is a *time* box: it fits in whatever the backend can manage.
+
+    A count would have to be guessed, and the two backends differ by four
+    orders of magnitude -- which is how a budget of 8 listings once held a
+    local pane to a few dozen a second.  Here a fake clock makes each listing
+    cost 4 ms, so a 15 ms slice must stop after four of them.
+    """
+    from meridian_commander import usage as usage_mod
+
     root = str(tmp_path / "wide")
-    for i in range(40):                        # more directories than a step
+    for i in range(40):
         write(f"{root}/d{i}/f", "x" * 10)
+
+    now = [0.0]
+    monkeypatch.setattr(usage_mod.time, "monotonic", lambda: now[0])
+    real = fs.listdir
+
+    def slow(path):
+        now[0] += 0.004                        # 4 ms a listing
+        return real(path)
+
+    monkeypatch.setattr(fs, "listdir", slow)
     sizer = TreeSizer(fs, [root])
-    sizer.run(limit=1)                         # one round, then give up
+    assert sizer.step(seconds=0.015) is True   # more to do
+    assert now[0] == pytest.approx(0.016)      # four listings, then stopped
+
+
+def test_a_step_always_makes_progress(fs, tmp_path, monkeypatch):
+    """However short the slice, one listing happens: a step that could do
+    nothing would let a caller loop for ever getting nowhere."""
+    root = _tree(tmp_path, one=(2, 10))
+    sizer = TreeSizer(fs, [f"{root}/one"])
+    while sizer.step(seconds=0.0):
+        pass
+    assert sizer.totals[f"{root}/one"] == 20
+
+
+def test_run_gives_up_rather_than_spinning_for_ever(fs, tmp_path, monkeypatch):
+    """The limit is a safety net, not a schedule; it must not hang.
+
+    A slice of ``run``'s is a whole second, so making it bite needs a backend
+    slow enough to spend one -- the fake clock here charges 0.6 s a listing,
+    which puts two in a slice and leaves the rest for the next.
+    """
+    from meridian_commander import usage as usage_mod
+
+    root = str(tmp_path / "wide")
+    for i in range(6):
+        write(f"{root}/d{i}/f", "x" * 10)
+
+    now = [0.0]
+    monkeypatch.setattr(usage_mod.time, "monotonic", lambda: now[0])
+    real = fs.listdir
+
+    def slow(path):
+        now[0] += 0.6
+        return real(path)
+
+    monkeypatch.setattr(fs, "listdir", slow)
+    sizer = TreeSizer(fs, [root])
+    sizer.run(limit=1)                          # two slices, then give up
     assert sizer.finished is False
-    assert sizer.totals[root] < 400
-    assert sizer.run()[root] == 400            # picking it up again finishes
+    assert sizer.totals[root] < 60
+    assert sizer.run()[root] == 60              # picking it up again finishes
+
+
+def test_a_budget_counts_listings_rather_than_time(fs, tmp_path):
+    """What a test wants when it is asking about the walk, not the clock."""
+    root = _tree(tmp_path, one=(2, 10))
+    sizer = TreeSizer(fs, [f"{root}/one"])
+    assert sizer.step(budget=1) is True         # the root listed, not its child
+    assert sizer.totals[f"{root}/one"] == 0
+    assert sizer.step(budget=1) is True
+    assert sizer.totals[f"{root}/one"] == 20
 
 
 # -- the bar -------------------------------------------------------------------
@@ -333,11 +398,64 @@ def test_the_menu_reaches_it_too(app):
     assert app.left.show_sizes is True
 
 
-def test_the_main_loop_keeps_counting_between_keystrokes(app, sized):
-    """The walk runs on the poll the terminal plug-in already established."""
-    assert app._tick_plugins() is True          # work outstanding: keep polling
-    _finish(sized)
-    assert app._tick_plugins() is False
+@pytest.fixture
+def unhurried(sized, monkeypatch):
+    """Make each listing cost a whole slice, on a clock the test controls.
+
+    The fixture's tree is small enough that one real slice finishes it -- the
+    point of the change being measured -- so a walk that is still going has to
+    be arranged rather than assumed.
+    """
+    from meridian_commander import usage as usage_mod
+
+    now = [0.0]
+    monkeypatch.setattr(usage_mod.time, "monotonic", lambda: now[0])
+    real = sized.fs.listdir
+
+    def slow(path):
+        now[0] += 0.02
+        return real(path)
+
+    monkeypatch.setattr(sized.fs, "listdir", slow)
+    return sized
+
+
+def test_the_main_loop_keeps_counting_between_keystrokes(app, unhurried):
+    """A pane still counting asks for the tight poll; an idle one blocks.
+
+    The interval is what *paces* the walk -- it gets one slice per poll -- so
+    a pane that is still counting must not be left waiting the 120 ms a
+    terminal plug-in is happy with.
+    """
+    assert app._tick_plugins() == app.SIZING_POLL_MS
+    assert app.SIZING_POLL_MS < app.PLUGIN_POLL_MS
+    _finish(unhurried)
+    assert app._tick_plugins() is None          # nothing left: block on getch
+
+
+def test_a_pane_counting_beats_a_plugin_ticking(app, unhurried):
+    """Both want the loop; the one doing real work between polls sets it."""
+    class _Ticker:
+        wants_timer = True
+
+        def tick(self):
+            pass
+
+    app.right.plugin = _Ticker()
+    assert app._tick_plugins() == app.SIZING_POLL_MS
+    _finish(unhurried)
+    assert app._tick_plugins() == app.PLUGIN_POLL_MS
+
+
+def test_a_small_tree_is_finished_before_the_first_poll_is_over(app, sized):
+    """The whole point: a local tree of this size costs one slice, not many.
+
+    Before the walk was time-boxed it got eight listings per 120 ms poll --
+    67 a second against the fifty thousand the same walk does unpaced.
+    """
+    assert app._tick_plugins() is None
+    photos = next(e for e in sized.entries if e.name == "photos")
+    assert sized.size_of(photos) == 4000        # already counted, first slice
 
 
 def test_reloading_measures_again(app, sized, tmp_path, monkeypatch):

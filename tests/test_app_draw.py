@@ -316,7 +316,7 @@ def test_a_plugin_whose_tick_fails_is_reported_not_fatal(loop_app):
 
     app, _ = loop_app([])
     app.left.plugin = _Broken()
-    assert app._tick_plugins() is True
+    assert app._tick_plugins() == app.PLUGIN_POLL_MS
     assert "Plugin error: tick failed" in app.message
 
 
@@ -326,7 +326,7 @@ def test_a_plugin_with_no_tick_still_asks_for_polling(loop_app):
 
     app, _ = loop_app([])
     app.left.plugin = _NoTick()
-    assert app._tick_plugins() is True
+    assert app._tick_plugins() == app.PLUGIN_POLL_MS
 
 
 def test_ctrl_c_offers_to_quit(loop_app, monkeypatch):
