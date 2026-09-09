@@ -628,7 +628,7 @@ class App:
                 self._set_message(f"Plugin error: {exc}")
                 res = True
             if res is False:
-                panel.plugin = None
+                self._close_plugin(panel)
                 panel.refresh()
                 self._set_message("Plugin closed")
                 return
@@ -999,6 +999,7 @@ class App:
         from .plugins.terminal import TerminalPlugin
 
         panel = self.active
+        self._close_plugin(panel)
         ctx = PluginContext(app=self, own_panel=panel, other_panel=self.other)
         try:
             panel.plugin = TerminalPlugin(ctx)
@@ -1117,6 +1118,7 @@ class App:
             return
         cls = classes[choice]
 
+        self._close_plugin(panel)
         ctx = PluginContext(app=self, own_panel=panel, other_panel=self.other)
         try:
             panel.plugin = cls(ctx)
@@ -1748,10 +1750,11 @@ class App:
 
         panel = self.active
         if isinstance(panel.plugin, PeekPane):
-            panel.plugin = None
+            self._close_plugin(panel)
             panel.refresh()
             self._set_message("Head + tail closed")
             return
+        self._close_plugin(panel)
         ctx = PluginContext(app=self, own_panel=panel, other_panel=self.other)
         panel.plugin = PeekPane(ctx)
         self._set_message("Head + tail of the other pane's file "
@@ -2121,14 +2124,31 @@ class App:
         )
         dialogs.message(self.stdscr, "Help", text)
 
+    def _close_plugin(self, panel: Panel) -> None:
+        """Let the pane's plug-in go, giving it its documented last word.
+
+        ``PanePlugin.on_exit`` promises to be called when a plug-in closes,
+        and a plug-in holding a pty or an SSH channel releases it there.  The
+        promise was only kept on the way out of the application: a plug-in
+        that closed itself, or was replaced by another, was simply dropped.
+        Calling it is safe more than once -- the built-in terminal already
+        calls it itself and guards every resource -- so this is the one place
+        that has to remember, rather than each caller.
+        """
+        plugin = panel.plugin
+        panel.plugin = None
+        if plugin is None:
+            return
+        exit_hook = getattr(plugin, "on_exit", None)
+        if exit_hook is not None:
+            try:
+                exit_hook()
+            except Exception as exc:
+                self._set_message(f"Plugin error: {exc}")
+
     def _close_backends(self) -> None:
         for panel in (self.left, self.right):
-            if panel.plugin is not None:
-                try:
-                    panel.plugin.on_exit()
-                except Exception:
-                    pass
-                panel.plugin = None
+            self._close_plugin(panel)
         for fs in self._backends:
             try:
                 fs.close()

@@ -13,6 +13,27 @@ day the version was cut.
 
 ### Fixed
 
+- **Directory sizes could show one machine's totals for another's directory.**
+  The measured totals were cached by path alone, and a path is not unique
+  across connections: `/etc` here and `/etc` on a server are different
+  directories with the same name. Pointing a pane at another backend — `F2`
+  to connect, leaving an archive — left the old figures in place, so the new
+  listing quietly showed the previous one's. The cache now belongs to the
+  connection it was measured through and is dropped when that changes.
+- **A pane showing sizes redrew a large listing twelve times slower than one
+  without.** The bars' scale was found by scanning every entry on every
+  frame; in a directory of 20,000 files that was 2.4 ms a frame against 0.2,
+  which is felt as soon as an arrow key is held down. Totals only grow, so
+  the scale is now carried forward and the scan happens once per listing.
+- **A plug-in that closed itself never got its `on_exit`.** The base class
+  promises the call, and it is where a plug-in releases a pty or an SSH
+  channel, but it was only made on the way out of the application: a plug-in
+  closing itself (`F10` in the terminal), or being replaced by another in the
+  same pane, was simply dropped. The built-in terminal called `on_exit`
+  itself and so leaked nothing; anything written to the documented contract
+  would have. All four paths now go through one routine that keeps the
+  promise.
+
 - **`u` was counting at a sixtieth of the speed it can.** The walk was paced
   at eight directory listings per 120 ms poll, so a tree it can size in 0.04
   seconds took 33 on screen: 67 listings a second against the fifty thousand

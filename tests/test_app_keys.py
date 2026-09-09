@@ -376,6 +376,43 @@ def test_a_plugin_returning_false_closes_itself(app):
     app.handle_key(ord("x"))
     assert app.left.plugin is None
     assert "Plugin closed" in app.message
+    # on_exit is where a plug-in releases a pty or an SSH channel, and the
+    # base class promises it is called when the plug-in closes -- including
+    # when the plug-in is the one deciding to close.
+    assert plugin.exited is True
+
+
+def test_a_plugin_taking_over_a_pane_lets_the_last_one_go(app, tmp_path):
+    """Otherwise whatever it was holding is never released."""
+    from meridian_commander.peek import PeekPane
+
+    write(str(tmp_path / "right" / "notes.txt"), "hello\n")
+    app.right.refresh()
+    _point_at(app.right, "notes.txt")
+    plugin = _Plugin(None)
+    app.left.plugin = plugin
+    app._peek()
+    assert plugin.exited is True
+    assert isinstance(app.left.plugin, PeekPane)
+
+
+def test_closing_the_application_lets_a_plugin_go(app):
+    plugin = _Plugin(None)
+    app.left.plugin = plugin
+    app._close_backends()
+    assert plugin.exited is True
+    assert app.left.plugin is None
+
+
+def test_a_plugin_whose_on_exit_raises_is_reported_not_fatal(app):
+    class _Awkward(_Plugin):
+        def on_exit(self):
+            raise RuntimeError("could not let go")
+
+    app.left.plugin = _Awkward(None)
+    app._close_plugin(app.left)             # must not propagate
+    assert app.left.plugin is None
+    assert "could not let go" in app.message
 
 
 def test_a_plugin_returning_none_hands_the_key_back(app):

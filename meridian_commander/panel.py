@@ -36,6 +36,17 @@ class Panel:
     sizes: dict[str, int] = field(default_factory=dict)
     #: The walk in progress, or None when nothing is being counted.
     sizer: object | None = None
+    #: The backend :attr:`sizes` was measured against.  Paths are not unique
+    #: across connections -- /etc on this machine and /etc on a server are
+    #: different directories with the same name -- so the totals have to be
+    #: dropped when the pane is pointed at another backend, or the remote
+    #: listing would quietly show the local machine's figures.
+    _sized_fs: object | None = None
+    #: The largest entry in the listing, kept as a running maximum rather than
+    #: rescanned per frame: this is asked on every draw and the listing can
+    #: hold tens of thousands of entries, while the answer only moves when a
+    #: total does.
+    _scale: int = 0
 
     # ".." pseudo-entry so the user can always step up a directory.
     PARENT = ".."
@@ -92,11 +103,29 @@ class Panel:
         self.sizer = None
         if not self.show_sizes:
             return
+        if self._sized_fs is not self.fs:
+            # Another backend: identity, not type, exactly as same_fs compares
+            # -- two connections to one server are still two connections, and
+            # nothing measured through one describes the other.
+            self.sizes.clear()
+            self._sized_fs = self.fs
         wanted = [self.fs.join(self.path, e.name) for e in self.entries
                   if e.is_dir and e.name != self.PARENT and not e.is_symlink]
         pending = [path for path in wanted if path not in self.sizes]
         if pending:
             self.sizer = TreeSizer(self.fs, pending)
+        self._rescale()
+
+    def _rescale(self) -> None:
+        """Recompute the bars' full scale from the listing, once."""
+        top = 0
+        for entry in self.entries:
+            if entry.is_dir:
+                top = max(top, self.sizes.get(
+                    self.fs.join(self.path, entry.name), 0))
+            else:
+                top = max(top, entry.size or 0)
+        self._scale = top
 
     def step_sizing(self) -> bool:
         """Count a little more.  True while there is more to count.
@@ -111,6 +140,10 @@ class Panel:
         more = sizer.step()
         for path in sizer.done:
             self.sizes[path] = sizer.totals[path]
+        if sizer.totals:
+            # Totals only grow, so the scale can be carried forward rather
+            # than found again over every entry in the listing.
+            self._scale = max(self._scale, max(sizer.totals.values()))
         if not more:
             self.sizer = None
         return more
@@ -143,7 +176,7 @@ class Panel:
 
     def biggest(self) -> int:
         """The largest entry in the listing, as the bars' full scale."""
-        return max((self.size_of(e) or 0 for e in self.entries), default=0)
+        return self._scale
 
     def _sorted(self, entries: list[DirEntry]) -> list[DirEntry]:
         parent = [] if self._at_root() else [DirEntry(name=self.PARENT, is_dir=True)]

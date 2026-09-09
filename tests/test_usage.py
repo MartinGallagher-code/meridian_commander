@@ -294,6 +294,70 @@ def test_a_measured_directory_is_remembered_across_a_visit(sized, tmp_path):
     assert sized.sizes == measured
 
 
+def test_totals_do_not_survive_a_change_of_backend(app, tmp_path):
+    """Paths are not unique across connections.
+
+    /etc on this machine and /etc on a server are different directories with
+    the same name, so a pane pointed at another backend must forget what it
+    measured -- otherwise the remote listing quietly shows local figures.
+    """
+    from meridian_commander.filesystems import LocalFileSystem
+
+    for base, size in (("machine", 5000), ("server", 7)):
+        (tmp_path / base / "etc" / "cron.d").mkdir(parents=True)
+        write(str(tmp_path / base / "etc" / "cron.d" / "f"), "x" * size)
+
+    class Rooted(LocalFileSystem):
+        """Two connections whose paths look alike, as real ones do."""
+
+        def __init__(self, prefix):
+            self.prefix = str(prefix)
+
+        def listdir(self, path):
+            return super().listdir(self.prefix + path)
+
+        def stat(self, path):
+            return super().stat(self.prefix + path)
+
+    panel = app.left
+    panel.fs = Rooted(tmp_path / "machine")
+    panel.path = "/etc"
+    panel.refresh()
+    panel.toggle_sizes()
+    _finish(panel)
+    here = next(e for e in panel.entries if e.name == "cron.d")
+    assert panel.size_of(here) == 5000
+
+    panel.fs = Rooted(tmp_path / "server")      # what F2 does to a pane
+    panel.path = "/etc"
+    panel.refresh()
+    _finish(panel)
+    there = next(e for e in panel.entries if e.name == "cron.d")
+    assert panel.size_of(there) == 7             # the server's own answer
+    assert len(panel.sizes) == 1                 # and only the server's
+
+
+def test_the_scale_is_carried_forward_rather_than_rescanned(sized, monkeypatch):
+    """The bars' scale is asked on every frame and the listing can be huge."""
+    _finish(sized)
+    assert sized.biggest() == 8000               # big.tar, the largest entry
+
+    joins = []
+    real = sized.fs.join
+    monkeypatch.setattr(sized.fs, "join",
+                        lambda *a: joins.append(a) or real(*a))
+    for _ in range(10):
+        sized.biggest()
+    assert joins == []                           # no walk over the entries
+
+
+def test_the_scale_grows_as_the_totals_land(sized):
+    """A running maximum has to rise while the walk is still going."""
+    assert sized.biggest() >= 8000               # the file is known at once
+    _finish(sized)
+    assert sized.biggest() == 8000
+
+
 def test_forgetting_the_sizes_measures_them_again(sized):
     _finish(sized)
     sized.forget_sizes()
