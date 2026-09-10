@@ -25,6 +25,13 @@ def _read(tmp_path, name):
     (b"a  \nb\t\n", "trim", 4, b"a\nb\n"),
     (b"a\n\n\n", "finalnl", 4, b"a\n"),
     (b"", "finalnl", 4, b""),
+    # Only lf/crlf were asked to touch the line endings.  trim has to take a
+    # CRLF apart to reach the whitespace in front of it, and used to hand the
+    # file back converted to LF as well as trimmed.
+    (b"a  \r\nb\t\r\n", "trim", 4, b"a\r\nb\r\n"),
+    (b"a\r\n\r\n\r\n", "finalnl", 4, b"a\r\n"),
+    (b"a  \rb\t\r", "trim", 4, b"a\rb\r"),
+    (b"a\t\r\n", "untabs", 4, b"a    \r\n"),
 ])
 def test_transform(data, verb, width, expected):
     assert transform(data, verb, width) == expected

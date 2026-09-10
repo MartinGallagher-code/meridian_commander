@@ -57,7 +57,8 @@ Run remote script) have no menu, and the three that already run on keys
   recoverable.
 - **Normalise text** — batch-fix line endings (`lf`/`crlf`), tabs (`untabs`),
   trailing space (`trim`) and final newline in the other pane's tagged files,
-  with `preview`.
+  with `preview`. Only `lf` and `crlf` change a file's line endings; the other
+  rules give back whatever the file arrived with.
 - **Tail file** — show the end of a file, once (`tail`) or streaming as it
   grows (`follow`, like `tail -f`), from whichever pane it lives on.
 - **Inspect file** — identify the other pane's cursor file from its magic

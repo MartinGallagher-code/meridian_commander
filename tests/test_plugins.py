@@ -375,6 +375,27 @@ def test_profile_head_and_tail(data_ctx):
     assert "3" in tail and "1" not in tail.split("\n", 2)[-1]
 
 
+def test_profile_tail_of_none_shows_no_rows(data_ctx):
+    # rows[-0:] is the whole table, which is the opposite of what was asked.
+    ctx = data_ctx({"d.csv": "id\n1\n2\n3\n"}, selected={"d.csv"})
+    plugin = CsvProfile(ctx)
+    body = "\n".join(plugin.process("tail 0")).split("\n", 2)[2:]
+    assert body == []
+    assert "\n".join(plugin.process("head 0")).split("\n", 2)[2:] == []
+
+
+def test_profile_tail_of_more_rows_than_there_are(data_ctx):
+    ctx = data_ctx({"d.csv": "id\n1\n2\n3\n"}, selected={"d.csv"})
+    lines = CsvProfile(ctx).process("tail 9")
+    assert [ln.strip() for ln in lines[2:]] == ["1", "2", "3"]
+
+
+def test_profile_head_and_tail_reject_a_negative_count(data_ctx):
+    ctx = data_ctx({"d.csv": "id\n1\n2\n"}, selected={"d.csv"})
+    assert "cannot be negative" in CsvProfile(ctx).process("tail -1")
+    assert "cannot be negative" in CsvProfile(ctx).process("head -1")
+
+
 def test_profile_head_with_a_nonsense_count(data_ctx):
     ctx = data_ctx({"d.csv": "id\n1\n"}, selected={"d.csv"})
     assert CsvProfile(ctx).process("head lots") == "usage: head [n]"
@@ -456,6 +477,19 @@ def test_clean_drop_and_keep_columns(data_ctx, tmp_path):
     assert read(str(tmp_path / "data" / "t.cleaned.csv")) == "a,c\n1,3\n"
     _clean(ctx, "keep c,a")
     assert read(str(tmp_path / "data" / "t.cleaned2.csv")) == "c,a\n3,1\n"
+
+
+def test_clean_drop_and_keep_need_a_column_named(data_ctx):
+    ctx = data_ctx({"t.csv": "a,b,c\n1,2,3\n"}, selected={"t.csv"})
+    for command in ("keep", "drop", "keep  ,  "):
+        with pytest.raises(ValueError, match="usage: (keep|drop) <column>"):
+            CsvClean(ctx).process(command)
+
+
+def test_clean_refuses_to_leave_the_table_with_no_columns(data_ctx):
+    ctx = data_ctx({"t.csv": "a,b\n1,2\n"}, selected={"t.csv"})
+    with pytest.raises(ValueError, match="would leave no columns"):
+        CsvClean(ctx).process("drop a,b")
 
 
 def test_clean_rename_a_column(data_ctx, tmp_path):

@@ -9,6 +9,9 @@ other pane and apply one rule to the set, in place --
 * ``trim``        -- strip trailing spaces and tabs from every line
 * ``finalnl``     -- ensure the file ends with exactly one newline
 
+Only ``lf`` and ``crlf`` change a file's line endings; ``trim`` and ``finalnl``
+give back whatever the file arrived with.
+
 Prefix any rule with ``preview`` to see which files *would* change without
 writing.  A file whose bytes the rule leaves unchanged is skipped, and a file
 that looks binary (a NUL byte in its first block) is never touched.  It reads
@@ -24,19 +27,45 @@ VERBS = ("lf", "crlf", "untabs", "trim", "finalnl")
 SNIFF = 8192      # bytes examined for a NUL before deciding a file is binary
 
 
+def line_ending(data: bytes) -> bytes:
+    """The line ending ``data`` is written with: CRLF, a lone CR, or LF.
+
+    A file that mixes them is already broken, so the first ending found wins
+    in the order CRLF, CR, LF -- the same rule the built-in editor uses to
+    decide what to save a file back as.
+    """
+    if b"\r\n" in data:
+        return b"\r\n"
+    if b"\r" in data:
+        return b"\r"
+    return b"\n"
+
+
 def transform(data: bytes, verb: str, tab_width: int) -> bytes:
     """Apply one normalisation rule to a file's bytes."""
-    if verb in ("lf", "crlf", "trim", "finalnl"):
-        text = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-        if verb == "trim":
-            text = b"\n".join(line.rstrip(b" \t") for line in text.split(b"\n"))
-        elif verb == "finalnl":
-            text = text.rstrip(b"\n") + b"\n" if text else text
-        if verb == "crlf":
-            text = text.replace(b"\n", b"\r\n")
-        return text
-    # untabs
-    return data.replace(b"\t", b" " * tab_width)
+    if verb == "untabs":
+        return data.replace(b"\t", b" " * tab_width)
+
+    # Every remaining rule works on LF-separated lines, ``trim`` included: a
+    # line ending in "  \r\n" has no trailing whitespace to strip until the
+    # CR is out of the way.  That is a working form, not a result -- only
+    # ``lf`` and ``crlf`` were asked to change the endings, so the other two
+    # put back whatever the file arrived with.
+    text = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    if verb == "trim":
+        text = b"\n".join(line.rstrip(b" \t") for line in text.split(b"\n"))
+    elif verb == "finalnl":
+        text = text.rstrip(b"\n") + b"\n" if text else text
+
+    if verb == "crlf":
+        ending = b"\r\n"
+    elif verb == "lf":
+        ending = b"\n"
+    else:
+        ending = line_ending(data)
+    if ending != b"\n":
+        text = text.replace(b"\n", ending)
+    return text
 
 
 class NormalizeText(InputOutputPlugin):
