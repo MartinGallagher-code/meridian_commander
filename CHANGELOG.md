@@ -13,6 +13,18 @@ day the version was cut.
 
 ### Fixed
 
+- **The editor rewrote every line ending in a file from Windows.** Lines are
+  normalised to `\n` on the way in, which is right for editing, and saved the
+  same way, which was not: typing one character into a `.bat` — or any file on
+  a Samba share, or anything checked out with CRLF — rewrote every line in it.
+  The file's own line ending is remembered and put back. (Converting endings
+  deliberately is what the "Normalise text" plug-in is for.)
+- **A plug-in's output area grew without limit.** The terminal plug-in has
+  always trimmed its scrollback; this one never did — and `follow` on a busy
+  log is *meant* to run for as long as you watch it, printing every new line
+  into a list nothing ever shortened. It now keeps the last 2,000 lines, as
+  the terminal does.
+
 - **The editor drew its cursor in the wrong column on a tab-indented line.**
   A tab is one character in the buffer and up to four columns on the screen;
   the row was drawn with the tabs expanded and the cursor placed by counting

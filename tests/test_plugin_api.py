@@ -231,6 +231,20 @@ def test_ctrl_u_clears_the_input_line(ctx):
     assert plugin.buf == [] and plugin.pos == 0
 
 
+def test_the_output_area_does_not_grow_for_ever(ctx):
+    """"follow" on a busy log prints for as long as it is watched.
+
+    The terminal plug-in has always trimmed its scrollback; this area never
+    did, so a plug-in left running kept every line it had ever printed.
+    """
+    plugin = _Echo(ctx)
+    for i in range(plugin.MAX_OUTPUT + 500):
+        plugin.print(f"line {i}")
+    assert len(plugin.output) == plugin.MAX_OUTPUT
+    # The newest lines are the ones kept.
+    assert plugin.output[-1] == f"line {plugin.MAX_OUTPUT + 499}"
+
+
 def test_a_non_ascii_key_is_inserted(ctx):
     plugin = _Echo(ctx)
     plugin.handle_key(ord("é"))
