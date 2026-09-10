@@ -530,3 +530,55 @@ def test_copy_tree_can_be_cancelled_before_it_starts(fs, tmp_path):
 ])
 def test_typed_char(key, expected):
     assert util.typed_char(key) == expected
+
+
+def test_typed_char_passes_a_character_the_number_protocol_cannot_carry():
+    # U+0100 and up collide with curses.KEY_MIN, so read_key hands those over
+    # as the string itself rather than as an ordinal.
+    assert util.typed_char("\u0101") == "\u0101"
+    assert util.typed_char("\u65e5") == "\u65e5"
+
+
+# -- read_key ------------------------------------------------------------------
+
+class _Wch:
+    """A window whose get_wch replays a script, as real curses answers."""
+
+    def __init__(self, *answers):
+        self.answers = list(answers)
+
+    def get_wch(self):
+        answer = self.answers.pop(0)
+        if isinstance(answer, curses.error):
+            raise answer
+        return answer
+
+    def getch(self):                      # pragma: no cover - must not be used
+        raise AssertionError("get_wch was available and should have been used")
+
+
+@pytest.mark.parametrize("answer, expected", [
+    ("a", ord("a")),                      # ASCII keeps its ordinal exactly
+    ("\x1b", 27),                         # so do the control codes
+    ("\n", 10),
+    ("\u00e9", 233),                      # Latin-1: still fits the number
+    ("\u0101", "\u0101"),                 # from U+0100 up it cannot
+    ("\u65e5", "\u65e5"),
+    (curses.KEY_DOWN, curses.KEY_DOWN),   # a key code arrives as a number
+    (curses.KEY_RESIZE, curses.KEY_RESIZE),
+])
+def test_read_key_keeps_the_number_protocol(answer, expected):
+    assert util.read_key(_Wch(answer)) == expected
+
+
+def test_read_key_reports_a_timeout_as_minus_one():
+    # get_wch says "nothing arrived" by raising, where getch returned -1.
+    assert util.read_key(_Wch(curses.error("no input"))) == -1
+
+
+def test_read_key_falls_back_to_getch_without_get_wch():
+    class _Old:
+        def getch(self):
+            return ord("q")
+
+    assert util.read_key(_Old()) == ord("q")

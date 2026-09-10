@@ -34,7 +34,7 @@ import re
 from . import pdfobj, theme
 from .filesystems import FileSystem
 from .image import Image, ImageError
-from .util import truncate
+from .util import read_key, truncate
 from .pdfobj import (
     Document,
     Lexer,
@@ -886,7 +886,7 @@ class PdfView:
             curses.doupdate()
             height, width = stdscr.getmaxyx()
             body_h = max(1, height - 2)
-            key = win.getch()
+            key = read_key(win)
             self.notice = ""
             if key in (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10):
                 break

@@ -588,6 +588,14 @@ def test_a_surrogate_key_encodes_to_nothing():
     assert TerminalPlugin._encode_key(0xD800) == b""
 
 
+@pytest.mark.parametrize("key", ["\u65e5", "\u0101", "\u20ac"])
+def test_a_character_no_number_can_carry_reaches_the_shell(key):
+    # From U+0100 up read_key hands over the string itself; the control-key
+    # test in front of this one is an ordering comparison, which a str would
+    # have raised on rather than fallen past.
+    assert TerminalPlugin._encode_key(key) == key.encode("utf-8")
+
+
 def test_keys_reach_the_remote_shell(app):
     channel = _FakeChannel()
     plugin = TerminalPlugin(_remote_ctx(app, channel))

@@ -13,6 +13,23 @@ day the version was cut.
 
 ### Fixed
 
+- **Typing an accented character corrupted the file.** Keys were read with
+  `getch`, which answers in *bytes*: in a UTF-8 terminal one press of `é` is
+  two of them, each became a Latin-1 character of its own, and the editor
+  saved *those* — so typing `café` wrote `caf\xc3\x83\xc2\xa9`, four bytes
+  where two were typed, and the file came back double-encoded. The same bytes
+  reached a plug-in's input line and the shell running in a pane. Keys now go
+  through `get_wch`, which decodes the sequence before anything else sees it.
+  Nothing about the existing key protocol changes: a decoded character below
+  U+0100 comes back as the same number `getch` gave, so every `Esc`, `Tab` and
+  accelerator letter means what it did — and `é` now arrives whole through that
+  same path. From U+0100 up, which collides with `curses.KEY_MIN`, the
+  character comes through as itself.
+- **A rename or mkdir prompt would not accept a non-ASCII name.** It took
+  characters 32 to 126 only, so the bytes of `é` were dropped and the name
+  could not be typed at all. It takes every typed character now — which is the
+  name a file may actually have.
+
 - **A 620-byte GIF decoded to 480 MB.** The pixel cap bounds one canvas, which
   is the whole allocation for a still image — but an animation holds a full
   canvas per frame, and the frame count was capped separately at 64. A screen

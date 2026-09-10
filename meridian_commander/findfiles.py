@@ -13,7 +13,7 @@ import fnmatch
 
 from . import theme
 from .filesystems import DirEntry, FileSystem
-from .util import human_size, human_time, ljust
+from .util import human_size, human_time, ljust, read_key
 
 MAX_RESULTS = 2000
 MAX_DEPTH = 25
@@ -157,7 +157,7 @@ class FindBrowser:
             curses.doupdate()
             height, width = stdscr.getmaxyx()
             body_h = height - 2
-            key = win.getch()
+            key = read_key(win)
             self.notice = ""
             if key in (ord("q"), ord("Q"), 27, curses.KEY_F10):
                 return None

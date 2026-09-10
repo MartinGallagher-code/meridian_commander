@@ -17,7 +17,7 @@ import curses
 
 from . import theme
 from .filesystems import FileSystem
-from .util import ljust, rjust, truncate
+from .util import ljust, read_key, rjust, truncate
 from .xlsx import Sheet, Workbook, column_name, read_workbook
 
 # Column widths are clamped into this range, then cycled by the "w" key: a
@@ -288,7 +288,7 @@ class SheetView:
             curses.doupdate()
             height, width = stdscr.getmaxyx()
             body_h = max(1, height - 3)
-            key = win.getch()
+            key = read_key(win)
             self.notice = ""
             if key in (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10):
                 break

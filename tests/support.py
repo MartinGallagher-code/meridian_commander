@@ -302,6 +302,21 @@ def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
             os.environ["TERM"] = saved_term
 
 
+def _as_wch(key):
+    """One scripted key as ``curses.get_wch()`` would answer it.
+
+    Real curses hands back a ``str`` for a character and an ``int`` for a key
+    code; the scripts are written in ints, which is what ``getch`` answered.
+    A script may also give a ``str`` directly, which is how a test types a
+    character no ``int`` can carry.
+    """
+    if isinstance(key, str):
+        return key
+    if 0 <= key < curses.KEY_MIN:
+        return chr(key)
+    return key
+
+
 class _ScriptedWindow:
     """A real curses window with its keystrokes scripted and draws recorded."""
 
@@ -313,6 +328,12 @@ class _ScriptedWindow:
 
     def getch(self):
         return self._keys.pop(0)
+
+    def get_wch(self):
+        key = self.getch()
+        if key == -1:
+            raise curses.error("no input")   # how real curses says "nothing"
+        return _as_wch(key)
 
     def addstr(self, *args):
         self.drawn.append(args)
@@ -348,6 +369,12 @@ class _KeyScript:
         if not self._keys:
             return 27          # nothing scripted left: behave as Escape
         return self._keys.pop(0)
+
+    def get_wch(self):
+        key = self.getch()
+        if key == -1:
+            raise curses.error("no input")   # how real curses says "nothing"
+        return _as_wch(key)
 
     def addstr(self, *args):
         self.drawn.append(args)

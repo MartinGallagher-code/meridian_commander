@@ -195,7 +195,7 @@ class PanePlugin:
         """Draw the plugin inside its pane's rectangle."""
         raise NotImplementedError
 
-    def handle_key(self, key: int):
+    def handle_key(self, key: int | str):
         """Handle a key pressed while the plugin's pane is active.
 
         Return ``True`` if the key was consumed, ``False`` to close the plugin
@@ -377,7 +377,7 @@ class InputOutputPlugin(PanePlugin):
         self._submit()
 
     # -- key handling ---------------------------------------------------------
-    def handle_key(self, key: int):
+    def handle_key(self, key: int | str):
         if key == 27:  # Esc closes the plugin
             self.on_exit()
             return False

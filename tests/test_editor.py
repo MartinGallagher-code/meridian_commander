@@ -385,6 +385,20 @@ def _run(monkeypatch, editor, keys, rows=10, cols=50):
     return captured["window"]
 
 
+def test_typing_an_accent_is_saved_as_the_character_typed(monkeypatch, sample,
+                                                          tmp_path):
+    """The whole point of decoding the key before anything else sees it.
+
+    getch answered in bytes: "e-acute" arrived as 0xC3 then 0xA9, each became
+    a Latin-1 character of its own, and save() encoded *those* -- so the file
+    came back double-encoded, four bytes where two were typed.
+    """
+    _run(monkeypatch, sample, [ord("c"), ord("a"), ord("f"), "\u00e9",
+                               curses.KEY_F2, curses.KEY_F10])
+    assert sample.lines[0].startswith("caf\u00e9")
+    assert read(sample.path).startswith("caf\u00e9")
+
+
 def test_the_editor_opens_and_quits(monkeypatch, sample):
     _run(monkeypatch, sample, [curses.KEY_F10])
     assert sample.dirty is False

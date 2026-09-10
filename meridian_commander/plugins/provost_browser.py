@@ -494,7 +494,7 @@ class ProvostBrowser(PanePlugin):
         return False
 
     # -- keys --------------------------------------------------------------------
-    def handle_key(self, key: int):
+    def handle_key(self, key: int | str):
         if self.mode == "filter":
             return self._filter_key(key)
         return self._list_key(key)

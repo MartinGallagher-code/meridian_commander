@@ -287,7 +287,7 @@ class TerminalPlugin(PanePlugin):
             self.status = "[process exited -- press any key to close]"
 
     # -- keys ----------------------------------------------------------------
-    def handle_key(self, key: int):
+    def handle_key(self, key: int | str):
         if self.done:
             self.on_exit()
             return False
@@ -312,7 +312,7 @@ class TerminalPlugin(PanePlugin):
         return True
 
     @staticmethod
-    def _encode_key(key: int) -> bytes:
+    def _encode_key(key: int | str) -> bytes:
         specials = {
             curses.KEY_UP: b"\x1b[A",
             curses.KEY_DOWN: b"\x1b[B",
@@ -328,7 +328,9 @@ class TerminalPlugin(PanePlugin):
             return b"\x7f"
         if key in (10, 13, curses.KEY_ENTER):
             return b"\r"
-        if 0 <= key < 32:              # control keys (^C, ^D, ^Z, ^L, Tab...)
+        # A control key is a number and only ever a number; a character from
+        # U+0100 up arrives as a str, and comparing the two raises.
+        if isinstance(key, int) and 0 <= key < 32:
             return bytes([key])
         # Text only.  The specials above are the key codes worth translating;
         # every other code -- a resize, a mouse report, an unbound function
