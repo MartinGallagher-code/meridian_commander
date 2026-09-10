@@ -10,6 +10,7 @@ import pytest
 
 from meridian_commander.plugin_api import PluginContext
 from meridian_commander.plugins import terminal as terminal_mod
+from meridian_commander.plugins import terminal
 from meridian_commander.plugins.terminal import TerminalPlugin, TermEmulator
 
 from support import _FakeRemoteBackend, with_curses_screen
@@ -111,6 +112,26 @@ def test_cursor_left_stops_at_the_margin():
     assert term.col == 0
 
 
+def test_a_huge_cursor_jump_is_bounded():
+    # "cat" a binary file and this arrives: ESC[100000000C, then one printable
+    # character used to pad the line out to a hundred million spaces.
+    term = _fed(b"\x1b[100000000C", b"x")
+    assert term.col <= terminal.MAX_COLS + 1
+    assert len(term.cur) <= terminal.MAX_COLS + 1
+
+
+def test_a_tab_cannot_walk_past_the_column_cap():
+    term = _fed(b"\x1b[100000000C", b"\t")
+    assert term.col <= terminal.MAX_COLS
+
+
+def test_an_unterminated_csi_does_not_buffer_the_rest_of_the_stream():
+    # The sequence is still swallowed to its final byte, so what follows it is
+    # printed rather than the stream losing its place.
+    term = _fed(b"\x1b[" + b"1" * 100_000 + b"m", b"after")
+    assert term.cur == "after"
+
+
 @pytest.mark.parametrize("final", [b"H", b"f"])
 def test_cursor_home_resets_the_column(final):
     term = _fed(b"abcdef\x1b[" + final)
@@ -155,6 +176,13 @@ def test_an_osc_sequence_can_end_with_a_string_terminator():
 def test_an_escape_inside_an_osc_that_is_not_a_terminator_stays_in_osc():
     term = _fed(b"\x1b]0;ti\x1bXtle\x07after")
     assert term.cur == "after"
+
+
+def test_an_unterminated_osc_is_abandoned_at_a_control_character():
+    # One stray "ESC ]" in binary output used to swallow the rest of the
+    # session; an OSC string is text, so a newline means it never ended.
+    term = _fed(b"\x1b]0;never terminated\nback to normal\n")
+    assert term.lines[-1] == "back to normal"
 
 
 # -- the visible window --------------------------------------------------------

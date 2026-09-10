@@ -39,6 +39,20 @@ from ..util import typed_char
 
 SCROLLBACK = 2000
 
+#: How far right the cursor may be moved by an escape sequence.  A real
+#: terminal clamps it to the screen; this model has no screen, and without a
+#: clamp "ESC[100000000C" followed by one printable character built a line of
+#: a hundred million spaces.  Printing still grows a line without limit -- it
+#: is a *jump* that is bounded, and no terminal is 10,000 columns wide.
+MAX_COLS = 10_000
+
+#: How many bytes of parameters a CSI sequence may carry before the rest are
+#: dropped.  Real ones carry a handful; an unterminated one in binary output
+#: carries the rest of the file, and appending to a string per byte made that
+#: quadratic as well as unbounded.  The sequence is still swallowed to its
+#: final byte, so the stream resynchronises exactly as it did.
+MAX_CSI_PARAMS = 64
+
 
 class TermEmulator:
     """A tiny line-oriented VT100-subset screen model.
@@ -77,7 +91,7 @@ class TermEmulator:
             if "@" <= ch <= "~":
                 self._csi(self._buf, ch)
                 self._state = ""
-            else:
+            elif len(self._buf) < MAX_CSI_PARAMS:
                 self._buf += ch
             return
         if self._state == "osc":
@@ -85,6 +99,14 @@ class TermEmulator:
                 self._state = ""
             elif ch == "\x1b":
                 self._state = "osc_esc"
+            elif ch < " ":
+                # An OSC string is text, so a control character means the
+                # sequence was never terminated -- binary output, or a program
+                # killed mid-title.  Abandon it and act on the character, the
+                # way a real terminal does; swallowing on regardless meant one
+                # stray "ESC ]" in a "cat" blanked the rest of the session.
+                self._state = ""
+                self._feed_char(ch)
             return
         if self._state == "osc_esc":  # ESC \ (ST) terminates OSC
             self._state = "" if ch == "\\" else "osc"
@@ -99,7 +121,7 @@ class TermEmulator:
         elif ch == "\b":
             self.col = max(0, self.col - 1)
         elif ch == "\t":
-            self.col = (self.col // 8 + 1) * 8
+            self.col = min(MAX_COLS, (self.col // 8 + 1) * 8)
             if len(self.cur) < self.col:
                 self.cur = self.cur.ljust(self.col)
         elif ch == "\x07":
@@ -124,7 +146,7 @@ class TermEmulator:
             self.cur = ""
             self.col = 0
         elif final == "C":            # cursor right
-            self.col += num()
+            self.col = min(MAX_COLS, self.col + num())
         elif final == "D":            # cursor left
             self.col = max(0, self.col - num())
         elif final in ("H", "f"):     # cursor home -- treat as column reset
