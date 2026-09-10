@@ -24,6 +24,28 @@ back to the old single-session behaviour rather than losing the ability to write
 This does not affect **SSH (shell)** panes, which already run each `cat` in its
 own channel, or FTP, or any copy between two different connections.
 
+## What a transfer refuses
+
+Two shapes are refused before anything is written, because neither can end
+well:
+
+- **A file onto itself.** The destination is opened for writing, which
+  truncates it, so the copy would empty the file it was asked to copy.
+- **A directory into its own subtree** — `project` into `project/backups` —
+  where the walk would keep finding the copy it was making, one level deeper
+  each time, until the disk filled.
+
+`F9` refuses the same overlap: syncing a directory with one inside it would put
+every file under the inner one into both indexes under two different names and
+"merge" the tree into itself.
+
+Sameness is decided by where the paths *are*, not by which object they arrived
+through: two panes on this machine hold two `LocalFileSystem` objects for one
+disk, and a check on object identity (which is the right question for "can this
+move be a rename?") misses exactly the case that matters. Paths are compared as
+written, so a symlink pointing back into the source is not caught — resolving
+one would mean asking a backend that may have no way to answer.
+
 ## Symlinked directories are left where they are
 
 A symbolic link to a directory is neither a directory nor a file, and a

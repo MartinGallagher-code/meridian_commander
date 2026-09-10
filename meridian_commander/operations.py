@@ -25,6 +25,55 @@ class OperationCancelled(Exception):
     """Raised when a caller-supplied cancel callback aborts an operation."""
 
 
+class OperationRefused(Exception):
+    """Raised for a transfer that must not be started at all."""
+
+
+def same_place(a: FileSystem, b: FileSystem) -> bool:
+    """Whether paths on ``a`` and ``b`` name files on the same filesystem.
+
+    :meth:`FileSystem.same_fs` compares *identity*, which is the right question
+    for "can this move be a rename?" and the wrong one here: each pane builds
+    its own :class:`LocalFileSystem`, so two panes on this machine are two
+    objects naming one disk.  Every guard written against ``same_fs`` was
+    therefore off between the panes, which is where a transfer starts.
+
+    Deliberately only the local case beyond identity.  Two connections to one
+    server are the same place too, but "one server" would have to be inferred
+    from a typed host name, and an FTP account rooted somewhere of its own
+    would then be told its perfectly good copy is a copy onto itself.  A guard
+    that misses is better here than one that refuses real work -- and the
+    application hands both panes a single connection anyway, which identity
+    already catches.
+    """
+    if a.same_fs(b):
+        return True
+    return getattr(a, "scheme", "") == getattr(b, "scheme", "") == "local"
+
+
+def overlapping(src_fs: FileSystem, src: str,
+                dst_fs: FileSystem, dst: str) -> bool:
+    """Whether ``dst`` is ``src`` itself, or a path inside it.
+
+    Both readings destroy something.  A file copied onto itself is *emptied*:
+    the destination is opened for writing, which truncates it, and the read
+    that follows then finds nothing to copy.  A directory copied into its own
+    subtree never finishes: the walk keeps finding the copy it is making, one
+    level deeper each time, until the disk is full.
+
+    Paths are compared as written (normalised, not resolved), so a symlink
+    pointing back into the source is not caught -- that would mean resolving a
+    path through a backend that may have no way to do it.
+    """
+    if not same_place(src_fs, dst_fs):
+        return False
+    source = src_fs.normpath(src)
+    target = dst_fs.normpath(dst)
+    if source == target:
+        return True
+    return target.startswith(source.rstrip(dst_fs.sep) + dst_fs.sep)
+
+
 def _noop_progress(current: int, total: int, label: str) -> None:
     pass
 
@@ -50,6 +99,9 @@ def copy_file(
     file's modification time after the copy, so the two stay identical in age
     (this is what keeps a synchronized pair from drifting on the next run).
     """
+    if overlapping(src_fs, src, dst_fs, dst):
+        raise OperationRefused(f"source and target are the same: {src}")
+
     parent = dst_fs.dirname(dst)
     if parent and not dst_fs.exists(parent):
         dst_fs.makedirs(parent)
@@ -140,6 +192,12 @@ def copy_path(
     There is no way to make a symlink through the filesystem interface, so the
     honest answer is to copy everything else and name what was skipped.
     """
+    if overlapping(src_fs, src, dst_fs, dst):
+        raise OperationRefused(
+            f"source and target are the same: {src}"
+            if src_fs.normpath(src) == dst_fs.normpath(dst)
+            else f"cannot copy {src} into itself: {dst} is inside it")
+
     entry = src_fs.stat(src)
     if entry.is_dir and entry.is_symlink:
         return [src]
@@ -194,6 +252,12 @@ def move_path(
     dealt with.  A rename within one filesystem moves links intact and so has
     nothing to skip.
     """
+    if overlapping(src_fs, src, dst_fs, dst):
+        raise OperationRefused(
+            f"source and target are the same: {src}"
+            if src_fs.normpath(src) == dst_fs.normpath(dst)
+            else f"cannot move {src} into itself: {dst} is inside it")
+
     if src_fs.same_fs(dst_fs):
         parent = dst_fs.dirname(dst)
         if parent and not dst_fs.exists(parent):
