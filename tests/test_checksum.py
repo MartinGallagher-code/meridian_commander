@@ -6,6 +6,7 @@ import hashlib
 
 import pytest
 
+from meridian_commander.plugins import checksum as mod
 from meridian_commander.plugins.checksum import (
     Checksum,
     _parse_sums_line,
@@ -144,6 +145,23 @@ def test_verify_reports_ok_failed_and_missing(data_ctx, tmp_path):
     assert "FAILED   b.txt" in printed
     assert "missing  gone.txt" in printed
     assert summary == "1 OK, 1 FAILED, 1 missing"
+
+
+def test_verify_says_when_the_sums_file_was_truncated(data_ctx, monkeypatch):
+    """"12 OK" for a file nobody read to the end is a clean bill of health
+    nobody checked."""
+    sums = "".join(f"{_sha256(f'contents {i}')}  f{i}.txt\n" for i in range(6))
+    files = {f"f{i}.txt": f"contents {i}" for i in range(6)}
+    ctx = data_ctx({**files, "SHA256SUMS": sums})
+
+    monkeypatch.setattr(mod, "MAX_SUMS_BYTES", 200)
+    plugin = Checksum(ctx)
+    summary = plugin.process("verify")
+
+    assert "NOT checked" in summary
+    assert any("only its first" in line for line in plugin.output)
+    # What it did check, it checked properly.
+    assert summary.startswith("2 OK")
 
 
 def test_verify_round_trips_with_write(data_ctx):

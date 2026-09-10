@@ -13,6 +13,27 @@ day the version was cut.
 
 ### Fixed
 
+- **The other pane kept showing files that had gone, and missed ones that had
+  arrived.** Only the pane doing the work was reloaded, so with both panes on
+  one directory — which is what `=` makes, and what a preset reusing a
+  connection makes — a deleted file stayed listed in the other pane (`Enter` on
+  it then failed, and `F5` offered to copy something that was no longer there)
+  and a file made with `n` or `F7` never appeared there at all. Delete, touch,
+  mkdir and rename now reload the other pane when the change reached it: the
+  same directory, or a directory inside something that was just deleted. A pane
+  somewhere else, or on another backend, is left alone, so a remote pane costs
+  no round trip for a change on this machine.
+- **A cancelled delete reported everything as deleted.** Stopping after two of
+  ten still said "Deleted 10 item(s)" — the count came from what was asked for
+  rather than from what went. It now counts what was actually removed and says
+  the run was cancelled.
+- **`verify` gave a clean bill of health for a sums file it had only partly
+  read.** The read is capped, and the cap was applied silently: a `SHA256SUMS`
+  past it reported "2 OK" for six files, with nothing to say the other four
+  were never looked at — in the one tool whose whole job is to be sure. It now
+  drops the cut final line (whose name is not any file's, and would have been
+  reported as missing) and says in the summary that the rest was not checked.
+
 - **Copying a file onto itself emptied it.** The destination is opened for
   writing, which truncates it, and the read that follows then finds nothing to
   copy. There was a guard, but it asked `same_fs` — which compares *identity*,

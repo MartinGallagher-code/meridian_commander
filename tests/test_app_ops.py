@@ -144,6 +144,110 @@ def test_a_move_that_skipped_a_link_says_the_source_was_kept(app, tmp_path,
     assert (tmp_path / "left" / "tree" / "a.txt").exists()
 
 
+# -- keeping the other pane true ----------------------------------------------
+
+def _both_panes_on(app, path):
+    """Point the right pane at ``path`` too, as '=' (mirror) would."""
+    app.right.set_location(app.left.fs, str(path))
+
+
+def test_a_delete_reaches_the_other_pane_showing_the_same_directory(
+        app, tmp_path, monkeypatch):
+    """Only the pane doing the work used to be reloaded.
+
+    The deleted file stayed listed in the other pane, where Enter on it failed
+    and F5 offered to copy something that was no longer there.
+    """
+    _files(app, tmp_path, doomed="x")
+    _both_panes_on(app, tmp_path / "left")
+    _point_at(app.left, "doomed")
+    _ScriptedDialogs(monkeypatch, confirm=[True])
+
+    app._delete()
+
+    assert "doomed" not in [e.name for e in app.right.entries]
+    assert app.message == "Deleted 1 item(s)"
+
+
+@pytest.mark.parametrize("action, prompt, expected", [
+    ("_touch", "fresh.txt", "fresh.txt"),
+    ("_mkdir", "fresh_dir", "fresh_dir"),
+])
+def test_a_new_entry_appears_in_both_panes(app, tmp_path, monkeypatch,
+                                           action, prompt, expected):
+    _both_panes_on(app, tmp_path / "left")
+    _ScriptedDialogs(monkeypatch, prompt=[prompt])
+
+    getattr(app, action)()
+
+    assert expected in [e.name for e in app.right.entries]
+
+
+def test_a_rename_reaches_the_other_pane(app, tmp_path, monkeypatch):
+    _files(app, tmp_path, before="x")
+    _both_panes_on(app, tmp_path / "left")
+    _point_at(app.left, "before")
+    _ScriptedDialogs(monkeypatch, prompt=["after"])
+
+    app._rename()
+
+    names = [e.name for e in app.right.entries]
+    assert "after" in names and "before" not in names
+
+
+def test_a_pane_inside_a_deleted_tree_is_reloaded(app, tmp_path, monkeypatch):
+    """It was left listing a directory that no longer exists."""
+    write(str(tmp_path / "left" / "tree" / "inner" / "f.txt"), "f")
+    app.left.refresh()
+    app.right.chdir(str(tmp_path / "left" / "tree" / "inner"))
+    _point_at(app.left, "tree")
+    _ScriptedDialogs(monkeypatch, confirm=[True])
+
+    app._delete()
+
+    assert app.right.error is not None
+    assert [e.name for e in app.right.entries] == [".."]
+
+
+def test_a_pane_somewhere_else_is_left_alone(app, tmp_path, monkeypatch):
+    """The other pane is not reloaded for a change it cannot see.
+
+    Which matters on a remote pane, where a reload is a round trip.
+    """
+    _files(app, tmp_path, doomed="x")
+    _point_at(app.left, "doomed")
+    write(str(tmp_path / "right" / "unseen.txt"), "new")   # behind its back
+    _ScriptedDialogs(monkeypatch, confirm=[True])
+
+    app._delete()
+
+    assert "unseen.txt" not in [e.name for e in app.right.entries]
+
+
+def test_a_cancelled_delete_counts_what_actually_went(app, tmp_path,
+                                                      monkeypatch,
+                                                      _quiet_progress):
+    """Stopping after two of four was reported as four deleted."""
+    _files(app, tmp_path, a="a", b="b", c="c", d="d")
+    app.left.selected = {"a", "b", "c", "d"}
+    _ScriptedDialogs(monkeypatch, confirm=[True])
+
+    real_factory = dialogs.ProgressDialog
+
+    def cancelling(stdscr, title):
+        dlg = real_factory(stdscr, title)
+        dlg.cancel_after = 1          # stops the run part way
+        return dlg
+
+    monkeypatch.setattr(dialogs, "ProgressDialog", cancelling)
+    app._delete()
+
+    left = {p.name for p in (tmp_path / "left").iterdir()}
+    survivors = left & {"a", "b", "c", "d"}
+    assert survivors                                   # the run did stop early
+    assert app.message == f"Delete cancelled -- {4 - len(survivors)} of 4 removed"
+
+
 def test_a_transfer_with_nothing_selected_does_nothing(app, tmp_path,
                                                        monkeypatch):
     app.left.move_to(0)                      # the ".." entry
