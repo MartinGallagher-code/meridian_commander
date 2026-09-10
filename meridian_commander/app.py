@@ -271,7 +271,12 @@ class App:
         stdscr.erase()
         height, width = stdscr.getmaxyx()
         if height < 8 or width < 24:
-            stdscr.addstr(0, 0, "Terminal too small")
+            # Through paint(), which trims to the width and swallows the
+            # error curses raises at the bottom-right cell: writing this
+            # eighteen-character sentence straight into a four-column
+            # terminal ended the application with a traceback, while it was
+            # explaining that the terminal was too small.
+            theme.paint(stdscr, 0, 0, "Terminal too small", "panel", width)
             stdscr.noutrefresh()
             curses.doupdate()
             return

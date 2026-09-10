@@ -39,9 +39,20 @@ def _cast_shadow(stdscr, y: int, x: int, height: int, width: int) -> None:
 
 
 def _center(stdscr, height: int, width: int):
+    """A centred window, never larger than the screen and never smaller than
+    one cell.
+
+    The clamp at the bottom is what keeps a dialog from taking the
+    application down with it: on a terminal one row tall (or one column
+    wide) the room left over is negative, and ``newwin`` given a negative
+    size raises rather than returning a window.  The application refuses to
+    *draw* a screen that small, but the keys still work, so a prompt could
+    still be asked for -- and it ended in a traceback.  A one-cell dialog is
+    useless, and better than that.
+    """
     max_y, max_x = stdscr.getmaxyx()
-    width = min(width, max_x - 2)
-    height = min(height, max_y - 2)
+    width = max(1, min(width, max_x - 2))
+    height = max(1, min(height, max_y - 2))
     y = max(0, (max_y - height) // 2)
     x = max(0, (max_x - width) // 2)
     _cast_shadow(stdscr, y, x, height, width)

@@ -42,6 +42,23 @@ def test_a_window_is_centred_and_clipped_to_the_screen():
     assert clipped == (18, 58)
 
 
+def test_a_window_is_never_smaller_than_one_cell():
+    """On a screen one row tall the room left over is negative.
+
+    newwin raises for a negative size, so asking for any dialog on a terminal
+    that small ended the application -- and the keys still work at sizes the
+    application refuses to draw at, so it was reachable.
+    """
+    def check(stdscr):
+        win = dialogs._center(stdscr, 8, 60)
+        dialogs._box(win, "Title", "hint")      # and drawing into it is safe
+        return win.getmaxyx()
+
+    assert with_curses_screen(1, 40, check) == (1, 38)     # no room for height
+    assert with_curses_screen(20, 1, check) == (8, 1)      # nor for width
+    assert with_curses_screen(1, 1, check) == (1, 1)       # nor for either
+
+
 def test_the_title_is_bracketed_and_truncated():
     def check(stdscr):
         win = dialogs._center(stdscr, 5, 20)
