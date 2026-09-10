@@ -13,6 +13,22 @@ day the version was cut.
 
 ### Fixed
 
+- **A GIF frame inherited the previous frame's transparency, delay and
+  disposal.** The spec is explicit that a Graphic Control Extension applies to
+  the one image that follows it, and the decoder carried its fields forward
+  instead: a frame written without an extension of its own drew nothing where
+  the previous frame's transparent index fell, ran at the previous frame's
+  speed, and had the canvas cleared under it when the previous frame asked for
+  that. Found by decoding 500 randomised animations against a reference
+  painter; all 500 agree now.
+- **Cancelling a sync during a file gave an error dialog with nothing in it.**
+  `copy_file` polls the same cancel callback every chunk and raises when it
+  trips, and `F9` treated that as a failure: `Sync error`, with the empty text
+  of an `OperationCancelled`. Pressing Esc during the one file big enough to be
+  worth cancelling was exactly when it happened. A cancel is a stop rather than
+  a failure now, and a run that was stopped says how far it got — `Sync
+  cancelled -- 1 of 3 file(s) copied` — instead of reporting itself finished.
+
 - **Leaving an archive both panes were in broke it for the other one.** `=`
   points both panes at one filesystem object, and stepping out of the archive
   in one pane closed it — leaving the other pane listing an archive whose every

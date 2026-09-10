@@ -2119,7 +2119,15 @@ class App:
 
         left.refresh()
         right.refresh()
-        self._set_message(f"Synchronized: {copied} file(s) copied")
+        planned = len(plan.actions)
+        if copied < planned:
+            # execute_sync_plan stops where the cancel came, so a smaller count
+            # is the only sign of it: "Synchronized" for three of fifty would
+            # be the delete count's mistake in another place.
+            self._set_message(
+                f"Sync cancelled -- {copied} of {planned} file(s) copied")
+        else:
+            self._set_message(f"Synchronized: {copied} file(s) copied")
 
     def _help(self) -> None:
         text = (

@@ -631,6 +631,27 @@ def test_sync_reports_when_there_is_nothing_to_do(app, tmp_path, monkeypatch):
     assert app.message == "Already in sync"
 
 
+def test_a_sync_cancelled_part_way_says_so(app, tmp_path, monkeypatch):
+    """"Synchronized: 1 file(s) copied" for a run that was stopped reads as a
+    finished job with less to do than expected."""
+    _files(app, tmp_path, a="a", b="b", c="c")
+    _ScriptedDialogs(monkeypatch, confirm=[True])
+
+    real_factory = dialogs.ProgressDialog
+
+    def cancelling(stdscr, title):
+        dlg = real_factory(stdscr, title)
+        dlg.cancel_after = 1      # the scan reports first; stop during the copy
+        return dlg
+
+    monkeypatch.setattr(dialogs, "ProgressDialog", cancelling)
+    app._sync()
+
+    assert app.message == "Sync cancelled -- 1 of 3 file(s) copied"
+    assert read(str(tmp_path / "right" / "a")) == "a"      # the one that finished
+    assert not (tmp_path / "right" / "c").exists()         # never started
+
+
 def test_sync_can_be_declined_at_the_preview(app, tmp_path, monkeypatch):
     _files(app, tmp_path, only_left="payload")
     _ScriptedDialogs(monkeypatch, confirm=[False])
