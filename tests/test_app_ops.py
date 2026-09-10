@@ -78,6 +78,22 @@ def _point_at(panel, name):
 
 # -- copy and move -------------------------------------------------------------
 
+def test_a_relative_destination_lands_beside_the_other_pane(app, tmp_path,
+                                                           monkeypatch):
+    """The prompt is pre-filled with the pane's path; clearing it and typing a
+    folder name is the ordinary way to ask for a new folder beside it.
+
+    That used to be written next to wherever the shell that started the
+    application happened to be, where the pane would never show it.
+    """
+    _files(app, tmp_path, a="payload")
+    _point_at(app.left, "a")
+    _ScriptedDialogs(monkeypatch, prompt=["backup"])
+    app._copy()
+    assert read(str(tmp_path / "right" / "backup" / "a")) == "payload"
+    assert not (tmp_path / "backup").exists()
+
+
 def test_copy_the_entry_under_the_cursor(app, tmp_path, monkeypatch):
     _files(app, tmp_path, a="payload")
     _point_at(app.left, "a")
@@ -1118,6 +1134,19 @@ def test_the_sort_menu_can_be_cancelled(app, monkeypatch):
 
 def test_go_to_path(app, tmp_path, monkeypatch):
     _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "left" / "sub")])
+    app._go_to_path()
+    assert app.left.path == str(tmp_path / "left" / "sub")
+
+
+def test_go_to_a_relative_path_is_measured_from_the_pane(app, tmp_path,
+                                                          monkeypatch):
+    """Typing a subdirectory's name is the obvious way to ask for it.
+
+    It was measured from the process's own working directory instead --
+    wherever the shell that started the application happened to be -- so it
+    missed the "sub" sitting in the pane and left the pane where it was.
+    """
+    _ScriptedDialogs(monkeypatch, prompt=["sub"])
     app._go_to_path()
     assert app.left.path == str(tmp_path / "left" / "sub")
 

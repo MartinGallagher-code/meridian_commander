@@ -13,6 +13,17 @@ day the version was cut.
 
 ### Fixed
 
+- **A typed relative path was measured from the wrong directory.** "Go to
+  directory" and the `F5`/`F6` destination resolved what you typed against the
+  *process's* working directory — wherever the shell that started the
+  application happened to be — rather than against the pane. So typing `sub`
+  into "Go to directory" looked for a sibling of that, missed the subdirectory
+  sitting in the pane, and left the pane where it was; and clearing the
+  destination field to type `backup` wrote the copy next to that same launch
+  directory, where the pane would never show it. Both now resolve against the
+  pane, which is what every other typed name in the application already did
+  (rename, make directory, new file, edit-new-file all join to their pane).
+
 - **An FTP download nobody finished reading held a thread for ever.** Chunks
   cross from the transfer thread through a bounded queue, which is what keeps a
   large file from being held in memory — and which means a reader that stops
