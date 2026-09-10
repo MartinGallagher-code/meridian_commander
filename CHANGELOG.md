@@ -13,6 +13,26 @@ day the version was cut.
 
 ### Fixed
 
+- **`/dev` over SSH listed as almost empty.** A device node has no size: `ls`
+  prints its major and minor numbers in that column instead (`1, 3`), which the
+  listing parser could not match, so it dropped the line — and a dropped line
+  is a file that is not there, with nothing said. The parser's own type
+  characters have always included `b` and `c`, so this was a case it meant to
+  handle. `stat` reads the same output, so navigating straight to `/dev/null`
+  failed too.
+- **A server with a non-English locale listed every directory as empty.** `ls`
+  writes the month in the server's `LC_TIME`, and the parser wanted exactly
+  three letters: `janv.` is five and `9月` is two, so on a French or Japanese
+  account no line matched and no file appeared. The month is now matched as a
+  token; only the date parse needs it to be English, and that already reports
+  an unknown age rather than a wrong one.
+- **One old file lost the whole zip.** A zip entry stores a DOS date, which
+  begins in 1980; "Make archive" passed a file's timestamp through unchecked,
+  so anything stamped earlier — restored from old media, or `touch -t`ed —
+  came out of `struct` as `ushort format requires 0 <= number <= 65535`, after
+  every tagged file had been read and with no archive written. Dates outside
+  what the format holds are clamped to its ends.
+
 - **"Normalise text" rewrote the line endings of a Windows file asked only to
   have its trailing spaces stripped.** All four line rules shared one working
   form — the file taken apart on `\n` — because `trim` cannot reach the

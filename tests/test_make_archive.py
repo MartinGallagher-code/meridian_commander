@@ -7,7 +7,11 @@ import zipfile
 
 import pytest
 
-from meridian_commander.plugins.make_archive import MakeArchive
+from meridian_commander.plugins.make_archive import (
+    ZIP_EARLIEST,
+    ZIP_LATEST,
+    MakeArchive,
+)
 
 
 def _run(ctx, command):
@@ -145,3 +149,28 @@ def test_survives_a_pane_that_cannot_refresh(data_ctx, monkeypatch):
 
     monkeypatch.setattr(ctx.other_panel, "refresh", broken)
     assert "Wrote" in _run(ctx, "zip pack")
+
+
+# -- timestamps a zip cannot hold ---------------------------------------------
+
+@pytest.mark.parametrize("mtime, expected", [
+    (-100_000.0, ZIP_EARLIEST),          # before 1970
+    (100_000.0, ZIP_EARLIEST),           # 1970: before the DOS epoch
+    (10_000_000_000.0, ZIP_LATEST),      # year 2286: past it
+    (1e30, ZIP_EARLIEST),                # not a time_t at all
+])
+def test_zip_time_is_clamped_to_what_the_format_holds(mtime, expected):
+    assert MakeArchive._zip_time(mtime) == expected
+
+
+@pytest.mark.parametrize("mtime", [-100_000.0, 100_000.0])
+def test_an_old_timestamp_does_not_lose_the_archive(data_ctx, tmp_path, mtime):
+    # ZipInfo.date_time is written with struct, so a pre-1980 year came out as
+    # "ushort format requires 0 <= number <= 65535" and nothing was written.
+    ctx = data_ctx({"a.txt": "1"}, selected={"a.txt"})
+    import os
+
+    os.utime(tmp_path / "data" / "a.txt", (mtime, mtime))
+    ctx.other_panel.refresh()
+    assert "Wrote" in _run(ctx, "zip pack")
+    assert _zip_names(tmp_path / "data" / "pack.zip") == ["a.txt"]

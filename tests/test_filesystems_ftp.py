@@ -359,6 +359,32 @@ def test_unix_ls_parser_resolves_a_symlink_name():
     assert entry.is_symlink is True
 
 
+@pytest.mark.parametrize("line, name", [
+    # A device has major/minor numbers where a file has its size, so the
+    # listing dropped every one of them -- most of /dev, silently.
+    ("crw-rw-rw-  1 root wheel    3,   2 Sep 10 12:00 null", "null"),
+    ("brw-rw----  1 root disk     8, 0 Sep 10 12:00 sda", "sda"),
+])
+def test_unix_ls_parser_reads_a_device_node(line, name):
+    entry = _parse_unix_ls_line(line)
+    assert entry is not None
+    assert (entry.name, entry.size, entry.is_dir) == (name, 0, False)
+
+
+@pytest.mark.parametrize("line, name", [
+    # ls writes the month in the server's locale.  "janv." is five characters
+    # and "9月" is two, and a line that does not parse is a file that does not
+    # appear -- a whole directory listed as empty because of the server's LANG.
+    ("-rw-r--r-- 1 o g 842 janv. 15 10:31 rapport.txt", "rapport.txt"),
+    ("-rw-r--r-- 1 o g 842 9\u6708 10 12:00 memo.txt", "memo.txt"),
+])
+def test_unix_ls_parser_keeps_a_line_whose_month_is_not_english(line, name):
+    entry = _parse_unix_ls_line(line)
+    assert entry is not None
+    # The age is unknown rather than wrong, which sync is written to expect.
+    assert (entry.name, entry.size, entry.mtime) == (name, 842, None)
+
+
 @pytest.mark.parametrize("line", [
     "",
     "   ",

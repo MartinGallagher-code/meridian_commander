@@ -912,6 +912,20 @@ def _parse_unix_ls_line(line: str) -> "DirEntry | None":
     Handles regular files, directories and symlinks (including the trailing
     ``-> target``), tolerating an ACL/xattr marker (``+``/``@``/``.``) after the
     permission bits.
+
+    A device node has no size: ``ls`` prints its major and minor numbers in
+    that column instead (``1, 3``).  The pair is matched and reported as a
+    size of zero -- a listing that cannot parse it drops the entry, and the
+    type characters this accepts have always included ``b`` and ``c``, so
+    ``/dev`` over SSH came back with most of itself missing and nothing said.
+
+    The month is matched as *any* single token rather than three letters,
+    because ``ls`` writes it in the server's locale: ``janv.`` is five
+    characters and ``9月`` is two, and a line that does not match is a file
+    that does not appear.  Only :func:`_parse_ls_date` needs the month to be
+    an English abbreviation, and it already answers ``None`` when it is not --
+    an entry with an unknown age, which sync is written to expect, rather than
+    no entry at all.
     """
     import re
 
@@ -920,7 +934,7 @@ def _parse_unix_ls_line(line: str) -> "DirEntry | None":
         return None
     m = re.match(
         r"^([\-dlbcps])[rwxsStT\-]{9}[\+@\.]?\s+\d+\s+\S+\s+\S+\s+"
-        r"(\d+)\s+(\w{3}\s+\d+\s+[\d:]+)\s+(.+)$",
+        r"(\d+(?:,\s*\d+)?)\s+(\S+\s+\d+\s+[\d:]+)\s+(.+)$",
         line,
     )
     if not m:
@@ -934,7 +948,7 @@ def _parse_unix_ls_line(line: str) -> "DirEntry | None":
         name=name.strip(),
         is_dir=is_dir,
         is_symlink=is_link,
-        size=int(size_s),
+        size=0 if "," in size_s else int(size_s),
         mtime=_parse_ls_date(date_s),
     )
 

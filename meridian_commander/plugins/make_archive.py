@@ -27,6 +27,13 @@ from . import _io
 from ..plugin_api import Command, InputOutputPlugin
 from ..util import human_size
 
+#: The span of dates a zip entry can carry: a DOS timestamp is a year counted
+#: from 1980 in seven bits, so 1980-01-01 to 2107-12-31 and nothing outside it.
+#: A file stamped before 1980 -- restored from old media, or ``touch -t``ed --
+#: is not an error to refuse the whole archive over, so its date is clamped.
+ZIP_EARLIEST = (1980, 1, 1, 0, 0, 0)
+ZIP_LATEST = (2107, 12, 31, 23, 59, 59)
+
 # arcname -> (payload, mtime); directories are implied by their members.
 VERBS = {
     "zip": (".zip", "zip"),
@@ -111,6 +118,23 @@ class MakeArchive(InputOutputPlugin):
         self.print(f"  + {arcname}")
 
     @staticmethod
+    def _zip_time(mtime: float) -> tuple[int, int, int, int, int, int]:
+        """``mtime`` as a zip date, clamped to what the format can hold.
+
+        ``ZipInfo.date_time`` is written with ``struct``, which is where an
+        out-of-range year ends up: not a "zip cannot store this date" but a
+        raw ``ushort format requires 0 <= number <= 65535``, out of the middle
+        of a pack that had already read every tagged file.  One odd timestamp
+        is not worth losing the archive over.
+        """
+        try:
+            stamp = time.localtime(mtime)[:6]
+        except (OSError, OverflowError, ValueError):
+            # A time_t the platform cannot represent at all.
+            return ZIP_EARLIEST
+        return min(max(stamp, ZIP_EARLIEST), ZIP_LATEST)
+
+    @staticmethod
     def _pack(kind: str, members) -> bytes:
         buf = io.BytesIO()
         if kind == "zip":
@@ -118,7 +142,7 @@ class MakeArchive(InputOutputPlugin):
                 for arcname, payload, mtime in members:
                     info = zipfile.ZipInfo(arcname)
                     if mtime:
-                        info.date_time = time.localtime(mtime)[:6]
+                        info.date_time = MakeArchive._zip_time(mtime)
                     info.compress_type = zipfile.ZIP_DEFLATED
                     zf.writestr(info, payload)
         else:
