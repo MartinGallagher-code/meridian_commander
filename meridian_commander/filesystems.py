@@ -942,15 +942,45 @@ def _parse_unix_ls_line(line: str) -> "DirEntry | None":
     type_ch, size_s, date_s, name = m.groups()
     is_link = type_ch == "l"
     is_dir = type_ch == "d"
+    size = 0 if "," in size_s else int(size_s)
     if is_link:
-        name = name.split(" -> ", 1)[0]
+        name = _link_name(name, size)
     return DirEntry(
         name=name.strip(),
         is_dir=is_dir,
         is_symlink=is_link,
-        size=0 if "," in size_s else int(size_s),
+        size=size,
         mtime=_parse_ls_date(date_s),
     )
+
+
+def _link_name(text: str, size: int) -> str:
+    """The name half of ``ls -l``'s ``name -> target`` for a symlink.
+
+    Neither half is quoted, so the text alone is ambiguous the moment either
+    contains " -> ".  ``ls`` writes ``weird -> name -> target.txt`` for a link
+    *called* "weird -> name", and splitting at the first arrow answered
+    "weird" -- a name no file has, which anything acting on it would then miss.
+
+    The size field settles it: for a symlink that is the length of the target
+    *in bytes*, so the real arrow is the one whose tail encodes to exactly
+    that many.  Only one can -- an earlier arrow leaves a longer tail and a
+    later one a shorter -- and counting characters instead of bytes is wrong
+    the moment a name is not ASCII, which is how this went in the first time.
+
+    A size that lines up with nothing (a server that reports links
+    differently, a name that did not survive decoding, or the link changed
+    between the listing and the read) falls back to the first arrow rather
+    than to nothing.
+    """
+    marker = " -> "
+    at = text.find(marker)
+    while at >= 0:
+        target = text[at + len(marker):]
+        if len(target.encode("utf-8", "surrogateescape")) == size:
+            return text[:at]
+        at = text.find(marker, at + 1)
+    return text.split(marker, 1)[0]
 
 
 # ---------------------------------------------------------------------------
