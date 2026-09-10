@@ -74,6 +74,11 @@ file's contents.
 - a file present on both sides is compared by modification time, and the
   **newer** copy overwrites the older one (times within 2 seconds are treated as
   equal to avoid needless copies);
+- two files of the same age but a **different size** are not the same file, and
+  the clock cannot say which is stale: the left pane's copy wins, as it does
+  when neither side reports a time at all. Backends differ in how finely they
+  report times — an `ls -l` listing gives minutes — so "the same age" is a
+  bucket rather than an identity;
 - the copied file is stamped with the **source file's modification time**, so
   both sides stay identical in age — a second sync finds nothing to do instead
   of copying the file back the other way;

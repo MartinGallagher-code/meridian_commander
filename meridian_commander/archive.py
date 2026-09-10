@@ -155,7 +155,7 @@ class ArchiveFileSystem(FileSystem):
                 self.skipped += 1
                 continue
             self._add(rel, info.is_dir(), info.file_size,
-                      zip_mtime(info.date_time))
+                      zip_mtime(info.date_time), member=info.filename)
 
     def _build_tar(self) -> None:
         for member in self._tar.getmembers():
@@ -166,7 +166,8 @@ class ArchiveFileSystem(FileSystem):
                 self.skipped += 1
                 continue
             self._add(rel, member.isdir(), member.size, member.mtime,
-                      is_symlink=member.issym() or member.islnk())
+                      is_symlink=member.issym() or member.islnk(),
+                      member=member.name)
 
     def _room(self) -> bool:
         if self._count < MAX_MEMBERS:
@@ -187,7 +188,16 @@ class ArchiveFileSystem(FileSystem):
         self._count += 1
 
     def _add(self, rel: str, is_dir: bool, size: int, mtime,
-             is_symlink: bool = False) -> None:
+             is_symlink: bool = False, member: str | None = None) -> None:
+        """Put one member into the tree.
+
+        ``rel`` is the tidied path it is *shown* at; ``member`` is the name it
+        is stored under, which is the only name the archive will open it by.
+        The two differ whenever :func:`clean_member` had to tidy something --
+        and ``tar czf out.tgz .``, the ordinary way to make one, writes every
+        member as ``./name``, so the whole archive listed correctly and not
+        one file in it could be read.
+        """
         full = "/" + rel
         parent = posixpath.dirname(full) or "/"
         self._ensure_dir(parent)
@@ -198,7 +208,7 @@ class ArchiveFileSystem(FileSystem):
             return
         self._dirs[parent][name] = DirEntry(name, False, is_symlink=is_symlink,
                                             size=size, mtime=mtime)
-        self._members[full] = rel
+        self._members[full] = rel if member is None else member
         self._count += 1
 
     # -- identity ---------------------------------------------------------

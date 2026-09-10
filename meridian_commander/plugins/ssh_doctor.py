@@ -153,6 +153,14 @@ class SshDoctor(InputOutputPlugin):
     # -- conversion ----------------------------------------------------------
     def _convert(self, name: str):
         directory = ssh_dir()
+        # A name, not a path.  os.path.join throws the ~/.ssh away entirely
+        # when what follows is absolute, and ".." walks out of it, so
+        # "convert /etc/ssl/private/server.key" would have been carried out on
+        # a file this plugin never listed and does not claim to touch -- and
+        # carrying it out means rewriting that file in place.
+        if not name or os.path.basename(name) != name or name in (".", ".."):
+            return (f"Give the key's name as 'list' shows it, not a path: "
+                    f"only files directly in {directory} are converted.")
         path = os.path.join(directory, name)
         if not os.path.isfile(path):
             return f"No such key: {path}"

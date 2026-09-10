@@ -107,6 +107,33 @@ def test_an_untidy_but_harmless_name_is_kept(tmp_path):
     assert fs.skipped == 0
 
 
+@pytest.mark.parametrize("stored", ["./dot.txt", "/absolute.txt", ".//odd.txt"])
+def test_an_untidy_name_reads_back_by_the_name_it_is_stored_under(tmp_path,
+                                                                  stored):
+    # The tidied path is what the member is *shown* at; the archive will only
+    # open it by the name it was written with.  "tar czf out.tgz ." writes
+    # every member as "./name", so a whole archive listed and nothing in it
+    # could be read.
+    zip_path = write_zip(str(tmp_path / "untidy.zip"), {stored: "body"})
+    fs = ArchiveFileSystem(LocalFileSystem(), zip_path)
+    shown = "/" + stored.replace("//", "/").lstrip("./").lstrip("/")
+    assert fs.open_read(shown).read() == b"body"
+
+    tar_path = write_tar(str(tmp_path / "untidy.tar"), {stored: "body"})
+    tfs = ArchiveFileSystem(LocalFileSystem(), tar_path)
+    assert tfs.open_read(shown).read() == b"body"
+
+
+def test_a_tar_of_a_whole_directory_can_be_read(tmp_path):
+    path = write_tar(str(tmp_path / "dot.tar.gz"),
+                     {"./": "", "./a.txt": "one", "./sub/b.txt": "two"},
+                     mode="w:gz")
+    fs = ArchiveFileSystem(LocalFileSystem(), path)
+    assert sorted(e.name for e in fs.listdir("/")) == ["a.txt", "sub"]
+    assert fs.open_read("/a.txt").read() == b"one"
+    assert fs.open_read("/sub/b.txt").read() == b"two"
+
+
 # -- the tree ------------------------------------------------------------------
 def test_the_root_lists_what_the_archive_holds(bundle):
     assert sorted(e.name for e in bundle.listdir("/")) == \
