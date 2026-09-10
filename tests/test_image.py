@@ -633,6 +633,31 @@ def test_gif_stops_at_the_frame_cap(monkeypatch):
     assert image.truncated is True
 
 
+def test_a_big_canvas_gets_fewer_frames(monkeypatch):
+    """The pixel cap bounds one canvas; an animation holds one per frame.
+
+    A 620-byte GIF whose screen descriptor says 2000x2000, carrying forty
+    one-pixel frames, decoded to 480 MB before the frame count came out of the
+    same budget.
+    """
+    monkeypatch.setattr(img, "MAX_PIXELS", 1_000)
+    frames = [gif_frame([0], 1, 1) for _ in range(20)]
+    image = decode(gif_bytes(20, 20, frames, palette=PALETTE))   # 400 px each
+    assert len(image.frames) == 2                                # 1000 // 400
+    assert image.truncated is True
+    assert sum(len(f.pixels) for f in image.frames) <= 1_000 * 3
+
+
+def test_one_frame_always_fits(monkeypatch):
+    # A canvas exactly at the cap buys one frame, never none.
+    monkeypatch.setattr(img, "MAX_PIXELS", 4)
+    assert img.frame_budget(2, 2) == 1
+    image = decode(gif_bytes(2, 2, [gif_frame([0, 1, 2, 3], 2, 2)],
+                             palette=PALETTE))
+    assert len(image.frames) == 1
+    assert image.truncated is False
+
+
 def test_gif_extensions_it_has_no_use_for_are_skipped():
     """A comment and an application block sit between the frames in the wild."""
     comment = b"\x21\xfe\x05hello\x00"

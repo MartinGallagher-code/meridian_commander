@@ -13,6 +13,23 @@ day the version was cut.
 
 ### Fixed
 
+- **A 620-byte GIF decoded to 480 MB.** The pixel cap bounds one canvas, which
+  is the whole allocation for a still image — but an animation holds a full
+  canvas per frame, and the frame count was capped separately at 64. A screen
+  descriptor saying 2000x2000 and forty one-pixel frames therefore fitted in
+  620 bytes and asked for 480 MB; at the caps it would have been 7.7 GB. The
+  frame count now comes out of the same pixel budget, so a large canvas gets
+  fewer frames (and says it was truncated, as it already did) while a small one
+  is unchanged.
+- **A PDF stream was expanded before its size was checked.** `zlib.decompress`
+  takes no bound, so the "decompresses to more than the limit" test could only
+  be made over the corpse of the allocation it was meant to prevent — and
+  deflate reaches about 1000:1, so a stream well inside the 64 MB file cap could
+  ask for tens of gigabytes. The cap is now applied as the bytes are produced,
+  through a `decompressobj` with a `max_length`; RunLength (128:1 from two
+  bytes) and LZW stop the same way. A truncated stream still yields whatever
+  did decompress, which is what it did before.
+
 - **`cat` on a binary file could hang the Terminal plug-in.** Its screen model
   had no bound on three things binary output supplies freely. A cursor-right
   escape with a large parameter (`ESC[100000000C`) moved the column that far,

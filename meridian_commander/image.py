@@ -114,6 +114,21 @@ def _guard_size(width: int, height: int) -> None:
             f"image is {width}x{height}; the limit is {MAX_PIXELS:,} pixels")
 
 
+def frame_budget(width: int, height: int) -> int:
+    """How many frames of a ``width`` x ``height`` animation may be kept.
+
+    :data:`MAX_PIXELS` bounds *one* canvas, which is the whole allocation for
+    a still.  An animation holds a full canvas per frame, so the frame count
+    has to come out of the same budget: a 620-byte GIF whose screen descriptor
+    says 2000x2000, carrying forty one-pixel frames, decoded to 480 MB, and at
+    the caps it would have been 7.7 GB.  A file that small buying an
+    allocation that large is exactly what the pixel cap exists to stop.
+
+    Never less than one, so a single frame of a legal size always decodes.
+    """
+    return max(1, min(MAX_FRAMES, MAX_PIXELS // (width * height)))
+
+
 def _composite(r: int, g: int, b: int, alpha: int, x: int, y: int):
     """Blend a pixel onto the checkerboard.  Opaque pixels pass straight through."""
     if alpha >= 255:
@@ -675,6 +690,7 @@ def read_gif(data: bytes) -> Image:
         shade = check_colour(i % width, i // width)
         canvas[i * 3:i * 3 + 3] = bytes((shade, shade, shade))
     frames: list[Frame] = []
+    budget = frame_budget(width, height)
     transparent = -1
     delay = 0.0
     disposal = 0
@@ -696,7 +712,7 @@ def read_gif(data: bytes) -> Image:
             continue
         if marker != GIF_IMAGE:
             raise ImageError(f"GIF block type 0x{marker:02x} is not defined")
-        if len(frames) >= MAX_FRAMES:
+        if len(frames) >= budget:
             truncated = True
             break
 
