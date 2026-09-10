@@ -13,6 +13,24 @@ day the version was cut.
 
 ### Fixed
 
+- **The editor drew its cursor in the wrong column on a tab-indented line.**
+  A tab is one character in the buffer and up to four columns on the screen;
+  the row was drawn with the tabs expanded and the cursor placed by counting
+  characters, so in a Makefile — or any tab-indented C — the cursor sat three
+  columns left of the character it was pointing at, and further left with
+  every tab in front of it. Horizontal scrolling was measured the same wrong
+  way. Both now go through the expanded line.
+- **Shrinking the terminal far enough killed the application — while it was
+  saying the terminal was too small.** The message is eighteen characters and
+  went straight into the window, so in a four-column terminal `addstr` raised
+  and took the whole application with it. It goes through the same painter as
+  everything else now, which trims to the width.
+- **Any dialog on a one-row terminal did the same.** The room left over for a
+  centred window is negative there, and `newwin` refuses a negative size. The
+  application will not *draw* a screen that small, but its keys still work, so
+  `F7` or an error message could still ask for a dialog and end the session on
+  a traceback. The window is clamped to at least one cell.
+
 - **A GIF frame inherited the previous frame's transparency, delay and
   disposal.** The spec is explicit that a Graphic Control Extension applies to
   the one image that follows it, and the decoder carried its fields forward

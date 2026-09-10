@@ -396,6 +396,42 @@ def _render(editor, rows=8, cols=40):
     return with_curses_screen(rows + 2, cols + 2, draw)
 
 
+def test_the_cursor_follows_the_tabs_it_is_drawn_past(fs, tmp_path):
+    """A tab is one character in the buffer and four columns on screen.
+
+    The cursor was placed by counting characters, so on a tab-indented line
+    -- a Makefile, most C -- it sat three columns left of the character it
+    was pointing at, and further left with every tab in front of it.
+    """
+    write(str(tmp_path / "Makefile"), "all:\n\tcc -o thing thing.c\n")
+    editor = Editor(fs, str(tmp_path / "Makefile"))
+    editor.cy, editor.cx = 1, 1        # just past the leading tab
+    editor.show_line_numbers = False
+
+    def draw(stdscr):
+        win = curses.newwin(8, 40, 0, 0)
+        editor.draw(win)
+        return win.getyx(), win.instr(2, 0, 40).decode()
+
+    (_y, x), row = with_curses_screen(10, 42, draw)
+    assert row.startswith("    cc -o thing")     # the tab drawn as four columns
+    assert x == row.index("cc")
+
+
+@pytest.mark.parametrize("text, cx, expected", [
+    ("plain", 3, 3),
+    ("\tone", 0, 0),
+    ("\tone", 1, 4),          # past one tab
+    ("\t\tone", 2, 8),        # and two
+    ("ab\tc", 3, 4),          # a tab lands on the next stop, not four on
+])
+def test_display_col_expands_what_is_in_front_of_the_cursor(fs, tmp_path, text,
+                                                            cx, expected):
+    write(str(tmp_path / "f.txt"), text + "\n")
+    editor = Editor(fs, str(tmp_path / "f.txt"))
+    assert editor.display_col(0, cx) == expected
+
+
 def test_the_header_names_the_file_and_flags_changes(sample):
     assert "Edit: notes.txt" in _render(sample)
     sample.insert_char("x")

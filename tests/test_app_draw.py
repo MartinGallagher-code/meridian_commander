@@ -159,6 +159,17 @@ def test_a_narrow_terminal_says_so(panes):
     assert "Terminal too small" in text
 
 
+def test_a_terminal_too_small_even_for_the_message(panes):
+    """The sentence is eighteen characters and the terminal had four.
+
+    Writing it straight into the window raised, so shrinking a terminal far
+    enough ended the application with a traceback -- while it was explaining
+    that the terminal was too small.
+    """
+    text, _ = _render(panes, rows=4, cols=4, prepare=None)
+    assert text.splitlines()[0].startswith("Term")
+
+
 def test_a_pane_running_a_plugin_is_drawn_by_the_plugin(panes):
     class _Plugin:
         def draw(self, stdscr, y, x, h, w):

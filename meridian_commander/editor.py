@@ -20,6 +20,12 @@ from .util import typed_char
 
 MAX_EDIT_BYTES = 8 * 1024 * 1024
 
+#: Columns a tab advances to when the buffer is drawn.  One constant rather
+#: than the number written twice: the cursor is placed by expanding the text
+#: in front of it exactly as the row itself is expanded, and the two drifting
+#: apart is what put the cursor in the wrong column to begin with.
+TAB_WIDTH = 4
+
 
 class Editor:
     def __init__(self, fs: FileSystem, path: str) -> None:
@@ -159,6 +165,16 @@ class Editor:
                 else:
                     self.cx = len(self.lines[self.cy])
 
+    def display_col(self, index: int, cx: int) -> int:
+        """Which screen column ``cx`` of line ``index`` is drawn at.
+
+        A tab is one character in the buffer and up to four columns on the
+        screen, so a line with tabs in it -- a Makefile, most C -- had its
+        cursor drawn one column short for each tab in front of it.
+        """
+        line = self.lines[index] if 0 <= index < len(self.lines) else ""
+        return len(line[:cx].expandtabs(TAB_WIDTH))
+
     def home(self) -> None:
         self.cx = 0
 
@@ -184,10 +200,13 @@ class Editor:
             self.top = self.cy - body_h + 1
         gutter = len(str(len(self.lines))) + 1 if self.show_line_numbers else 0
         text_w = width - gutter
-        if self.cx < self.left:
-            self.left = self.cx
-        elif self.cx >= self.left + text_w:
-            self.left = self.cx - text_w + 1
+        # Scrolling is in screen columns, because that is what the rows below
+        # are sliced in: the expanded line, not the buffer's own characters.
+        col = self.display_col(self.cy, self.cx)
+        if col < self.left:
+            self.left = col
+        elif col >= self.left + text_w:
+            self.left = col - text_w + 1
 
         for row in range(body_h):
             idx = self.top + row
@@ -197,7 +216,7 @@ class Editor:
             if self.show_line_numbers:
                 num = str(idx + 1).rjust(gutter - 1)
                 theme.paint(win, y, 0, num + " ", "editnum")
-            line = self.lines[idx].expandtabs(4)
+            line = self.lines[idx].expandtabs(TAB_WIDTH)
             visible = line[self.left : self.left + text_w]
             theme.paint(win, y, gutter, visible, "edit")
 
@@ -207,7 +226,7 @@ class Editor:
 
         # Position the hardware cursor.
         scr_y = self.cy - self.top + 1
-        scr_x = gutter + (self.cx - self.left)
+        scr_x = gutter + (col - self.left)
         if 1 <= scr_y < height - 1 and 0 <= scr_x < width:
             win.move(scr_y, scr_x)
         win.noutrefresh()
