@@ -215,6 +215,21 @@ def test_run_length_decode_stops_at_a_truncated_repeat():
     assert run_length_decode(bytes([252])) == b""
 
 
+def test_run_length_decode_stops_at_its_limit():
+    # Two input bytes ask for 128 output ones, so the cap has to hold while
+    # the bytes are made, not after.
+    out = run_length_decode(bytes([129, ord("x")]) * 1000, limit=100)
+    assert len(out) <= 100 + 128
+
+
+def test_lzw_decode_stops_at_its_limit():
+    codes = [256] + [ord("a")] * 2000
+    bits = "".join(format(code, "09b") for code in codes)
+    bits += "0" * (-len(bits) % 8)
+    data = bytes(int(bits[i:i + 8], 2) for i in range(0, len(bits), 8))
+    assert len(lzw_decode(data, limit=50)) <= 50 + 16
+
+
 def test_lzw_decode_round_trips_a_simple_stream():
     """Encoded here with literals only, which is valid and easy to be sure of."""
     codes = [256] + [ord(c) for c in "hello"] + [257]
@@ -421,6 +436,27 @@ def test_a_stream_that_decompresses_past_the_limit(monkeypatch):
     stream = Stream({"Filter": "FlateDecode"}, zlib.compress(b"x" * 1000))
     with pytest.raises(PdfError, match="more than the limit"):
         doc.decode_stream(stream)
+
+
+def test_a_flate_bomb_is_not_expanded_before_it_is_refused(monkeypatch):
+    """The cap must hold while zlib works, not be checked over its corpse.
+
+    zlib.decompress() has no bound, and deflate reaches about 1000:1 -- a
+    stream well inside the file-size cap could ask for tens of gigabytes.
+    """
+    monkeypatch.setattr(pdfobj, "MAX_STREAM_BYTES", 1024)
+    doc = Document(simple_pdf(b"", resources="<< >>"))
+    stream = Stream({"Filter": "FlateDecode"},
+                    zlib.compress(b"\0" * (8 * 1024 * 1024)))
+    with pytest.raises(PdfError, match="more than the limit"):
+        doc.decode_stream(stream)
+
+
+def test_a_truncated_flate_stream_still_yields_what_it_had():
+    doc = Document(simple_pdf(b"", resources="<< >>"))
+    whole = zlib.compress(b"readable text, then nothing" * 40)
+    stream = Stream({"Filter": "FlateDecode"}, whole[:-6])
+    assert doc.decode_stream(stream).startswith(b"readable text")
 
 
 def test_a_predictor_named_in_decode_parms_is_applied():

@@ -389,10 +389,16 @@ def ascii85_decode(data: bytes) -> bytes:
         raise PdfError(f"ASCII85Decode stream is damaged: {exc}") from None
 
 
-def run_length_decode(data: bytes) -> bytes:
+def run_length_decode(data: bytes, limit: int = MAX_STREAM_BYTES) -> bytes:
+    """Decode PDF's RunLength, stopping once ``limit`` bytes are exceeded.
+
+    Two input bytes can ask for 128 output ones, so the cap has to be applied
+    as the bytes are produced.  Stopping one byte past it hands the caller
+    something its own length check refuses, which is where the error belongs.
+    """
     out = bytearray()
     at = 0
-    while at < len(data):
+    while at < len(data) and len(out) <= limit:
         length = data[at]
         at += 1
         if length == 128:                   # end of data
@@ -408,12 +414,16 @@ def run_length_decode(data: bytes) -> bytes:
     return bytes(out)
 
 
-def lzw_decode(data: bytes, early: int = 1) -> bytes:
+def lzw_decode(data: bytes, early: int = 1,
+               limit: int = MAX_STREAM_BYTES) -> bytes:
     """PDF's LZW, which is GIF's read the other way up: codes are MSB-first.
 
     ``early`` is the ``EarlyChange`` parameter: nearly every writer increases
     the code width one code sooner than the plain algorithm would, and a
     decoder that disagrees produces plausible-looking rubbish.
+
+    ``limit`` stops the output growing without bound, as it does in
+    :func:`run_length_decode`.
     """
     out = bytearray()
     table = [bytes([i]) for i in range(256)] + [b"", b""]
@@ -421,7 +431,7 @@ def lzw_decode(data: bytes, early: int = 1) -> bytes:
     previous = b""
     at = 0
     total = len(data) * 8
-    while at + code_size <= total:
+    while at + code_size <= total and len(out) <= limit:
         byte = at >> 3
         window = int.from_bytes(data[byte:byte + 3].ljust(3, b"\x00"), "big")
         code = (window >> (24 - code_size - (at & 7))) & ((1 << code_size) - 1)
@@ -757,15 +767,18 @@ class Document:
 
     def _one_filter(self, kind: str, data: bytes, setting) -> bytes:
         if kind == "flate":
+            # Through a decompressobj with a max_length rather than
+            # zlib.decompress(), which has no bound: deflate reaches about
+            # 1000:1, so a stream well inside MAX_BYTES could ask for tens of
+            # gigabytes, and the size check below would have been made over
+            # its corpse.  Stopping one byte past the cap is what that check
+            # then refuses.  A truncated stream is common in the wild and
+            # comes back as whatever did decompress, exactly as before.
+            decompressor = zlib.decompressobj()
             try:
-                data = zlib.decompress(data)
+                data = decompressor.decompress(data, MAX_STREAM_BYTES + 1)
             except zlib.error:
-                # Truncated streams are common; keep whatever decompressed.
-                decompressor = zlib.decompressobj()
-                try:
-                    data = decompressor.decompress(data)
-                except zlib.error:
-                    raise PdfError("a Flate stream is corrupt") from None
+                raise PdfError("a Flate stream is corrupt") from None
         elif kind == "lzw":
             early = 1
             if isinstance(setting, dict):
