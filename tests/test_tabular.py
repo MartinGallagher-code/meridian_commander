@@ -383,3 +383,36 @@ def test_read_table_drops_a_trailing_blank_line(fs, tmp_path):
     table = tabular.read_table(fs, str(tmp_path / "t.csv"))
     # The blank line at the end is not a row of data.
     assert table.rows == [["1", "x"]]
+
+
+def test_tabular_write_bytes_reports_a_failure_on_close(fs, tmp_path):
+    """The data side has its own writer, with the same bargain."""
+
+    class _FailsOnClose(LocalFileSystem):
+        def open_write(self, path):
+            real = super().open_write(path)
+
+            class _Handle:
+                def write(self, data):
+                    return len(data)
+
+                def close(self):
+                    real.close()
+                    raise OSError("connection reset while sending")
+
+            return _Handle()
+
+    with pytest.raises(OSError, match="connection reset"):
+        tabular.write_bytes(_FailsOnClose(), str(tmp_path / "out.csv"), b"a,b\n")
+
+
+def test_tabular_write_bytes_copes_with_a_handle_that_cannot_close(fs, tmp_path):
+    class _NoClose(LocalFileSystem):
+        def open_write(self, path):
+            class _Handle:
+                def write(self, data):
+                    return len(data)
+
+            return _Handle()
+
+    tabular.write_bytes(_NoClose(), str(tmp_path / "out.csv"), b"a,b\n")

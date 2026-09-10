@@ -1003,6 +1003,13 @@ class App:
         name = host.basename(fs.archive_path)
         panel.set_location(host, host.dirname(fs.archive_path))
         panel.refresh(keep_name=name)
+        if any(p.fs is fs for p in (self.left, self.right)):
+            # The other pane is still in this archive -- "=" points both panes
+            # at one filesystem object, and closing it here left that pane
+            # listing an archive whose every file then failed to open.  It
+            # closes when the pane that is still in it leaves, or on the way
+            # out with the rest of the backends.
+            return
         if fs in self._backends:
             self._backends.remove(fs)
         fs.close()

@@ -385,6 +385,47 @@ def test_leaving_an_archive_returns_to_the_directory_holding_it(app, tmp_path):
     assert app.left.current().name == "bundle.zip"
 
 
+def test_leaving_an_archive_the_other_pane_is_still_in_keeps_it_open(
+        app, tmp_path):
+    """'=' points both panes at one filesystem object.
+
+    Closing it when the first pane left took the archive out from under the
+    other one, which went on listing it while every file in it failed to open.
+    """
+    write_zip(str(tmp_path / "left" / "bundle.zip"), {"a.txt": "inside"})
+    app.left.refresh()
+    _point_at(app.left, "bundle.zip")
+    app._activate_entry()
+    shared = app.left.fs
+    app._mirror_to_other_pane()
+    assert app.right.fs is shared
+
+    app._leave_archive()
+
+    assert isinstance(app.left.fs, LocalFileSystem)
+    assert app.right.fs is shared
+    assert app.right.fs.open_read("/a.txt").read() == b"inside"
+    # And it is still registered, so it closes with everything else.
+    assert shared in app._backends
+
+
+def test_the_last_pane_out_closes_the_archive(app, tmp_path):
+    write_zip(str(tmp_path / "left" / "bundle.zip"), {"a.txt": "inside"})
+    app.left.refresh()
+    _point_at(app.left, "bundle.zip")
+    app._activate_entry()
+    shared = app.left.fs
+    app._mirror_to_other_pane()
+
+    app._leave_archive()                    # the left pane goes
+    app.active = app.right
+    app._leave_archive()                    # and now the right one
+
+    assert shared not in app._backends
+    with pytest.raises(FileSystemError, match="has been closed"):
+        shared.open_read("/a.txt")
+
+
 def test_an_archive_that_will_not_open_is_reported(app, tmp_path):
     write(str(tmp_path / "left" / "broken.zip"), "not a zip at all")
     app.left.refresh()

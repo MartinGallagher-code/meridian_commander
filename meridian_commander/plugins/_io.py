@@ -54,12 +54,22 @@ def read_bytes(fs, path, *, max_bytes: int | None = None):
 
 
 def write_bytes(fs, path, data: bytes) -> None:
-    """Write ``data`` to ``path`` through the filesystem backend."""
+    """Write ``data`` to ``path`` through the filesystem backend.
+
+    ``close()`` is *not* swallowed here, unlike on the read side.  A remote
+    backend sends on close -- paramiko flushes there, and the FTP writer
+    raises there when the transfer failed -- so swallowing it turned a write
+    that never arrived into a plug-in reporting "changed a.txt" for a file it
+    had emptied.  A failure on the way in is only a closed handle; a failure
+    on the way out is the write.
+    """
     stream = fs.open_write(path)
     try:
         stream.write(data)
     finally:
-        close(stream)
+        closer = getattr(stream, "close", None)
+        if callable(closer):
+            closer()
 
 
 def hash_file(fs, path, algo: str) -> str:
