@@ -13,6 +13,7 @@ from meridian_commander import config, sync, util
 from meridian_commander.filesystems import DirEntry, LocalFileSystem
 from meridian_commander.operations import (
     OperationCancelled,
+    OperationRefused,
     copy_file,
     copy_path,
     count_tree,
@@ -151,7 +152,11 @@ def test_sync_action_renders_and_totals(fs, tmp_path):
     rendered = plan.actions[0].render()
     assert rendered == " ->  a.txt    (new on left)"
 
-    empty = build_sync_plan(fs, str(tmp_path / "r"), fs, str(tmp_path / "r"))
+    # Two empty directories have nothing to say to each other.  (A directory
+    # against *itself* is refused before the scan -- see below.)
+    (tmp_path / "e1").mkdir()
+    (tmp_path / "e2").mkdir()
+    empty = build_sync_plan(fs, str(tmp_path / "e1"), fs, str(tmp_path / "e2"))
     assert bool(empty) is False
     assert empty.total_bytes == 0
 
@@ -336,6 +341,19 @@ def test_scan_handles_a_tree_deeper_than_the_recursion_limit(fs, tmp_path):
 
 
 # -- operations: the failure corners of copy -----------------------------------
+
+def test_copy_file_refuses_a_file_onto_itself(fs, tmp_path):
+    """The guard again one level down, where sync copies file by file.
+
+    Writing would truncate the file and the read would then find nothing, so
+    the copy that was asked for would delete what it was copying.
+    """
+    path = tmp_path / "a.txt"
+    path.write_text("payload")
+    with pytest.raises(OperationRefused, match="source and target are the same"):
+        copy_file(fs, str(path), LocalFileSystem(), str(path))
+    assert path.read_text() == "payload"
+
 
 def test_copy_survives_a_backend_that_cannot_stat(fs, tmp_path):
     """A backend with no stat() still copies; only the progress total is lost."""

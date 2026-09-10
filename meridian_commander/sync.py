@@ -32,10 +32,12 @@ from .filesystems import DirEntry, FileSystem
 from .operations import (
     CancelCB,
     OperationCancelled,
+    OperationRefused,
     ProgressCB,
     _noop_cancel,
     _noop_progress,
     copy_file,
+    overlapping,
 )
 
 # Modification times from different systems (and filesystems with coarse
@@ -208,8 +210,20 @@ def build_sync_plan(
     """Compare two trees and return the list of copies needed to reconcile them.
 
     Raises :class:`~meridian_commander.operations.OperationCancelled` if
-    ``cancel`` returns true while either side is being scanned.
+    ``cancel`` returns true while either side is being scanned, and
+    :class:`~meridian_commander.operations.OperationRefused` when one root
+    lies inside the other: every file under the inner one is then in both
+    indexes under two different names, so the "merge" copies the inner tree
+    into itself and back up into the outer one.  Nothing is lost -- a sync
+    deletes nothing -- but the result is a directory full of duplicates that
+    the user then has to unpick.
     """
+    if overlapping(left_fs, left_root, right_fs, right_root) or \
+            overlapping(right_fs, right_root, left_fs, left_root):
+        raise OperationRefused(
+            f"{left_root} and {right_root} are the same directory, or one is "
+            "inside the other -- there is nothing to synchronize between them")
+
     left = _index_tree(left_fs, left_root, "left: ", progress, cancel)
     right = _index_tree(right_fs, right_root, "right: ", progress, cancel)
 

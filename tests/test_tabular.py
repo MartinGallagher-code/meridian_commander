@@ -42,6 +42,29 @@ def test_read_text_replaces_undecodable_bytes(fs, tmp_path):
     assert "caf" in text and "�" in text
 
 
+def test_a_byte_order_mark_is_not_part_of_the_first_column(fs, tmp_path):
+    """A spreadsheet exporting UTF-8 CSV writes one.
+
+    Left in place it became the first character of the first header cell, so
+    the column called "id" answered to nothing: every verb that takes a column
+    reported "no such column: 'id'" for an ordinary file.
+    """
+    path = tmp_path / "sales.csv"
+    path.write_bytes(b"\xef\xbb\xbfid,name\n1,widget\n")
+    table = tabular.read_table(fs, str(path))
+    assert table.header == ["id", "name"]
+    assert table.index("id") == 0
+
+
+def test_a_byte_order_mark_mid_file_is_left_alone(fs, tmp_path):
+    """Only a *leading* mark is a marker; elsewhere it is content."""
+    mark = "\ufeff"
+    path = tmp_path / "odd.csv"
+    path.write_bytes(("name\nwidget" + mark + "\n").encode("utf-8"))
+    text, _ = tabular.read_text(fs, str(path))
+    assert text == "name\nwidget" + mark + "\n"
+
+
 def test_a_stream_that_fails_to_close_is_ignored(fs, tmp_path):
     class _BadClose(LocalFileSystem):
         def open_read(self, path):

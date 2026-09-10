@@ -1840,11 +1840,6 @@ class App:
                 target = dst_fs.join(dest, entry.name)
                 dlg.set_overall(f"{verb} {i + 1}/{len(sources)}: {entry.name}")
 
-                # Guard against copying a directory into itself.
-                if src_panel.fs.same_fs(dst_fs) and \
-                        dst_fs.normpath(target) == src_panel.fs.normpath(src):
-                    errors.append(f"{entry.name}: source and target are the same")
-                    continue
                 try:
                     if move:
                         skipped += move_path(src_panel.fs, src, dst_fs, target,

@@ -13,6 +13,30 @@ day the version was cut.
 
 ### Fixed
 
+- **Copying a file onto itself emptied it.** The destination is opened for
+  writing, which truncates it, and the read that follows then finds nothing to
+  copy. There was a guard, but it asked `same_fs` — which compares *identity*,
+  the right question for "can this move be a rename?" and the wrong one here,
+  because each pane builds its own `LocalFileSystem`. Between the two panes it
+  never fired, so pointing the other pane at the same directory (or typing the
+  source's own path at the `F5` prompt) destroyed the file it was asked to
+  copy. Copy, move and sync now compare where the paths *are*, not which
+  object they came through.
+- **Copying a directory into its own subtree never finished.** The walk kept
+  finding the copy it was making, one level deeper each time, writing until
+  the disk filled — `F5` on a project directory into its own `backups/` was
+  enough. It is refused now, by name, before anything is written. `F9` between
+  a directory and one inside it is refused for the same reason: every file
+  under the inner one is in both indexes under two different names, so the
+  "merge" copied the inner tree into itself and back up into the outer one.
+- **A byte-order mark made the first column of a CSV unaddressable.** A
+  spreadsheet exporting UTF-8 writes one, and decoding left it as the first
+  character of the first header cell: the column called `id` arrived as
+  `\ufeffid`, so `drop id`, `filter id == 1` and every other verb that takes a
+  column reported "no such column: 'id'" for a perfectly ordinary file. A
+  leading mark is now dropped, where it always was a marker rather than
+  content.
+
 - **Multi-rename could destroy a file and report success.** A rule that moves
   names *among* the tagged set is allowed — that is what makes renumbering and
   swapping work — but the moves were carried out in the order the plan was

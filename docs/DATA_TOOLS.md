@@ -220,6 +220,10 @@ Everything is **bounded** — a file is read at most `max_bytes`, and a tool tel
 you when it stopped early (`! source was truncated at the byte cap`), so a
 multi-gigabyte CSV cannot lock up the interface.
 
+A file saved as "CSV UTF-8" by a spreadsheet starts with a byte-order mark.
+It is dropped on the way in, so the first column answers to the name printed in
+its header rather than to that name with an invisible character in front of it.
+
 ## 5. A complete worked example
 
 You have a messy `sales.csv` and want per-region totals from clean, deduped data:

@@ -168,6 +168,36 @@ def test_copying_onto_itself_is_refused(app, tmp_path, monkeypatch):
     app.right.set_location(app.left.fs, str(tmp_path / "left"))
     app._copy()
     assert "source and target are the same" in scripted.last_message
+    assert read(str(tmp_path / "left" / "a")) == "payload"
+
+
+def test_copying_onto_itself_is_refused_between_the_panes_too(app, tmp_path,
+                                                              monkeypatch):
+    """The panes hold two LocalFileSystem objects for the one disk.
+
+    The guard used to ask ``same_fs``, which compares identity, so it never
+    fired here -- and the copy emptied the file it was asked to copy.
+    """
+    _files(app, tmp_path, a="payload")
+    _point_at(app.left, "a")
+    assert app.left.fs is not app.right.fs
+    scripted = _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "left")])
+    app._copy()
+    assert "source and target are the same" in scripted.last_message
+    assert read(str(tmp_path / "left" / "a")) == "payload"
+
+
+def test_copying_a_directory_into_its_own_subtree_is_refused(app, tmp_path,
+                                                             monkeypatch):
+    write(str(tmp_path / "left" / "tree" / "notes.txt"), "N")
+    (tmp_path / "left" / "tree" / "backups").mkdir()
+    app.left.refresh()
+    _point_at(app.left, "tree")
+    scripted = _ScriptedDialogs(
+        monkeypatch, prompt=[str(tmp_path / "left" / "tree" / "backups")])
+    app._copy()
+    assert "into itself" in scripted.last_message
+    assert not (tmp_path / "left" / "tree" / "backups" / "tree").exists()
 
 
 def test_a_failing_copy_is_reported(app, tmp_path, monkeypatch):

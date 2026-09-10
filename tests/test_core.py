@@ -24,7 +24,14 @@ from meridian_commander.filesystems import (
 )
 from meridian_commander import app as app_mod
 from meridian_commander import dialogs, presets
-from meridian_commander.operations import copy_path, count_tree, move_path
+from meridian_commander.operations import (
+    OperationRefused,
+    copy_path,
+    count_tree,
+    move_path,
+    overlapping,
+    same_place,
+)
 from meridian_commander.panel import Panel
 from meridian_commander.sync import build_sync_plan, execute_sync_plan
 
@@ -117,6 +124,77 @@ def test_a_move_that_skipped_something_keeps_the_source(tmp_path):
     assert read(str(dst / "real" / "a.txt")) == "A"
     assert (root / "link").is_symlink()      # still there to be dealt with
     assert (root / "real" / "a.txt").exists()
+
+
+def test_copying_a_file_onto_itself_is_refused(tmp_path):
+    """It used to *empty* the file.
+
+    open_write truncates the destination, and the read that follows then finds
+    nothing to copy.  The application's own guard asked ``same_fs``, which
+    compares identity -- and each pane builds its own LocalFileSystem, so
+    between the two panes it never fired.
+    """
+    left, right = LocalFileSystem(), LocalFileSystem()   # what two panes hold
+    path = tmp_path / "report.txt"
+    path.write_text("important contents")
+
+    with pytest.raises(OperationRefused, match="source and target are the same"):
+        copy_path(left, str(path), right, str(path))
+    assert path.read_text() == "important contents"
+
+
+def test_copying_a_directory_into_itself_is_refused(tmp_path):
+    """Otherwise the walk keeps finding the copy it is making."""
+    left, right = LocalFileSystem(), LocalFileSystem()
+    root = tmp_path / "project"
+    write(str(root / "notes.txt"), "N")
+    (root / "backups").mkdir()
+
+    with pytest.raises(OperationRefused, match="is inside it"):
+        copy_path(left, str(root), right, str(root / "backups" / "project"))
+    assert not (root / "backups" / "project").exists()
+
+
+def test_moving_a_directory_into_itself_is_refused(tmp_path):
+    left, right = LocalFileSystem(), LocalFileSystem()
+    root = tmp_path / "project"
+    write(str(root / "notes.txt"), "N")
+
+    with pytest.raises(OperationRefused, match="is inside it"):
+        move_path(left, str(root), right, str(root / "inner"))
+    assert (root / "notes.txt").exists()
+
+
+def test_overlapping_only_applies_to_the_same_filesystem(fs, tmp_path):
+    """Two panes on one machine are one disk; a remote pane is not."""
+    other = LocalFileSystem()
+    assert same_place(fs, other) is True
+    assert overlapping(fs, str(tmp_path), other, str(tmp_path / "sub")) is True
+    assert overlapping(fs, str(tmp_path / "sub"), other, str(tmp_path)) is False
+
+    remote = _FakeRemoteBackend()
+    assert same_place(fs, remote) is False
+    assert overlapping(fs, "/srv", remote, "/srv/www") is False
+
+
+def test_a_name_that_merely_starts_the_same_is_not_inside(fs, tmp_path):
+    write(str(tmp_path / "site" / "a.txt"), "A")
+    (tmp_path / "site-backup").mkdir()
+    copy_path(fs, str(tmp_path / "site"), fs, str(tmp_path / "site-backup" / "site"))
+    assert read(str(tmp_path / "site-backup" / "site" / "a.txt")) == "A"
+
+
+def test_sync_between_overlapping_roots_is_refused(fs, tmp_path):
+    """Every file under the inner root is in both indexes under two names."""
+    root = tmp_path / "project"
+    write(str(root / "notes.txt"), "N")
+    write(str(root / "backups" / "old.txt"), "O")
+
+    with pytest.raises(OperationRefused, match="inside the other"):
+        build_sync_plan(fs, str(root), fs, str(root / "backups"))
+    with pytest.raises(OperationRefused, match="inside the other"):
+        build_sync_plan(fs, str(root / "backups"), fs, str(root))
+    assert not (root / "backups" / "backups").exists()
 
 
 def test_count_tree(fs, tmp_path):

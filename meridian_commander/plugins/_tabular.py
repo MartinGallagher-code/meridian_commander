@@ -49,7 +49,8 @@ def read_text(fs, path, *, encoding: str = "utf-8", max_bytes: int = MAX_BYTES):
     """Read ``path`` as text, capped at ``max_bytes``.
 
     Returns ``(text, truncated)``.  Relies only on the ``read(n)`` primitive of
-    :meth:`FileSystem.open_read`, so it works for every backend.
+    :meth:`FileSystem.open_read`, so it works for every backend.  A leading
+    byte-order mark is dropped -- see below.
     """
     stream = fs.open_read(path)
     chunks: list[bytes] = []
@@ -68,7 +69,13 @@ def read_text(fs, path, *, encoding: str = "utf-8", max_bytes: int = MAX_BYTES):
                 truncated = True
     finally:
         _close(stream)
-    return b"".join(chunks).decode(encoding, errors="replace"), truncated
+    text = b"".join(chunks).decode(encoding, errors="replace")
+    # A spreadsheet exporting UTF-8 CSV writes a byte-order mark, and decoding
+    # leaves it as the first character of the first header cell: the column
+    # called "id" arrives as "\ufeffid", so `drop id`, `filter id == 1` and the
+    # rest answer "no such column: 'id'" for an ordinary file.  It is a marker,
+    # not content, so it goes.
+    return text.lstrip("\ufeff"), truncated
 
 
 def write_bytes(fs, path, data: bytes) -> None:
