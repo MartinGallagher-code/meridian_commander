@@ -7,7 +7,10 @@ Tag files in the other pane and:
 * ``write [algo] [name]`` -- save those lines to a sums file (default
   ``SHA256SUMS``), in the usual ``sha256sum -c`` layout;
 * ``verify [name]`` -- read a sums file from the other pane, re-hash each listed
-  file, and report ``OK`` / ``FAILED`` / ``missing``.
+  file, and report ``OK`` / ``FAILED`` / ``missing``.  A sums file past the
+  size cap is checked as far as it was read and says so: an unqualified "12
+  OK" for a file with a thousand lines in it would be a clean bill of health
+  nobody checked.
 
 Hashing streams each file in chunks through the pane's own filesystem, so it
 covers remote (SFTP/SSH/FTP) panes without pulling whole files into memory, and
@@ -118,13 +121,26 @@ class Checksum(InputOutputPlugin):
         fs, root = self.ctx.other_fs, self.ctx.other_path
         sums_path = fs.join(root, name)
         try:
-            raw_bytes, _ = _io.read_bytes(fs, sums_path, max_bytes=MAX_SUMS_BYTES)
+            raw_bytes, truncated = _io.read_bytes(fs, sums_path,
+                                                  max_bytes=MAX_SUMS_BYTES)
             text = raw_bytes.decode("utf-8", errors="replace")
         except Exception as exc:
             return f"Could not read {name}: {exc}"
 
+        lines = text.splitlines()
+        if truncated:
+            # The last line came back cut, so its name is not the name of any
+            # file; checking it would report a file that is perfectly fine as
+            # missing.  Everything after it was never read at all, which is
+            # what the summary has to say: "12 OK" for a file with a thousand
+            # lines in it is a clean bill of health nobody checked.
+            lines = lines[:-1]
+            self.print(f"  ! {name} is larger than "
+                       f"{MAX_SUMS_BYTES // (1024 * 1024)} MiB -- only its "
+                       f"first {len(lines)} line(s) were checked")
+
         ok = failed = missing = 0
-        for raw in text.splitlines():
+        for raw in lines:
             entry = _parse_sums_line(raw)
             if entry is None:
                 continue
@@ -156,6 +172,8 @@ class Checksum(InputOutputPlugin):
             summary += f", {failed} FAILED"
         if missing:
             summary += f", {missing} missing"
+        if truncated:
+            summary += " -- sums file truncated, the rest was NOT checked"
         return summary
 
 

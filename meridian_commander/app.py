@@ -58,6 +58,7 @@ from .operations import (
     copy_path,
     count_tree,
     move_path,
+    overlapping,
 )
 from .archive import is_archive, open_archive
 from .browsers import has_own_browser, viewer_for
@@ -238,6 +239,31 @@ class App:
 
     def _set_message(self, text: str) -> None:
         self.message = text
+
+    def _reload_after_change(self, panel: Panel, keep_name: str | None = None,
+                             gone: tuple[str, ...] = ()) -> None:
+        """Reload ``panel``, and the other pane when the change reached it too.
+
+        Both panes on one directory is not a corner case: it is what ``=``
+        makes, and what a preset reusing a live connection makes.  Only the
+        pane doing the work was reloaded, so a file deleted in one pane stayed
+        listed in the other -- where Enter on it then failed, and F5 offered to
+        copy something that was no longer there -- and a file created here
+        never appeared there at all.
+
+        ``gone`` names paths that have just been removed: a pane standing
+        *inside* one of them is looking at a directory that no longer exists,
+        which is worth the reload as much as sharing the directory is.  A pane
+        somewhere else, or on another backend, is not touched -- the check is
+        the same one a transfer uses to refuse copying into itself, so a remote
+        pane costs no round trip for a change on this machine.
+        """
+        panel.refresh(keep_name=keep_name)
+        other = self.right if panel is self.left else self.left
+        for path in (panel.path, *gone):
+            if overlapping(panel.fs, path, other.fs, other.path):
+                other.refresh()
+                return
 
     # -- drawing ----------------------------------------------------------
     def draw(self) -> None:
@@ -1388,7 +1414,7 @@ class App:
         dst = panel.fs.join(panel.path, new_name)
         try:
             panel.fs.rename(src, dst)
-            panel.refresh(keep_name=new_name)
+            self._reload_after_change(panel, keep_name=new_name)
             self._set_message(f"Renamed to {new_name}")
         except Exception as exc:
             dialogs.message(self.stdscr, "Rename error", str(exc), error=True)
@@ -1893,7 +1919,8 @@ class App:
         target = panel.fs.join(panel.path, name)
         try:
             panel.fs.makedirs(target)
-            panel.refresh(keep_name=name.split(panel.fs.sep)[0].split("/")[0])
+            self._reload_after_change(
+                panel, keep_name=name.split(panel.fs.sep)[0].split("/")[0])
             self._set_message(f"Created {name}")
         except Exception as exc:
             dialogs.message(self.stdscr, "Mkdir error", str(exc), error=True)
@@ -1914,7 +1941,8 @@ class App:
         existed = panel.fs.exists(target)
         try:
             panel.fs.touch(target)
-            panel.refresh(keep_name=name.split(panel.fs.sep)[0].split("/")[0])
+            self._reload_after_change(
+                panel, keep_name=name.split(panel.fs.sep)[0].split("/")[0])
             self._set_message(("Touched " if existed else "Created ") + name)
         except Exception as exc:
             dialogs.message(self.stdscr, "New file error", str(exc), error=True)
@@ -1942,10 +1970,13 @@ class App:
         keep = panel.name_after_removing({t.name for t in targets})
 
         errors: list[str] = []
+        removed: list[str] = []
+        cancelled = False
         dlg = dialogs.ProgressDialog(self.stdscr, "Delete")
         try:
             for i, entry in enumerate(targets):
                 if dlg.cancelled():
+                    cancelled = True
                     break
                 dlg.set_overall(f"Deleting {i + 1}/{len(targets)}: {entry.name}")
                 dlg.update(i, len(targets), entry.name)
@@ -1954,16 +1985,23 @@ class App:
                     panel.fs.delete_tree(target)
                 except Exception as exc:
                     errors.append(f"{entry.name}: {exc}")
+                    continue
+                removed.append(target)
         finally:
             dlg.close()
 
         panel.clear_selection()
-        panel.refresh(keep_name=keep)
+        self._reload_after_change(panel, keep_name=keep, gone=tuple(removed))
         if errors:
             dialogs.message(self.stdscr, "Delete errors",
                             "\n".join(errors[:8]), error=True)
+        elif cancelled:
+            # Count what actually went, not what was asked for: stopping after
+            # two of ten used to be reported as ten deleted.
+            self._set_message(
+                f"Delete cancelled -- {len(removed)} of {len(targets)} removed")
         else:
-            self._set_message(f"Deleted {len(targets)} item(s)")
+            self._set_message(f"Deleted {len(removed)} item(s)")
 
     def _sync_scope_warning(self) -> str | None:
         """Text to show before syncing two panes, or None if they look sane.
