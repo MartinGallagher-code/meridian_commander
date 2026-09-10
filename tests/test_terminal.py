@@ -251,6 +251,21 @@ def test_a_local_terminal_in_a_directory_that_has_gone(local_ctx, monkeypatch,
         plugin.on_exit()
 
 
+@pytest.mark.parametrize("key, expected", [
+    (ord("x"), b"x"),
+    (curses.KEY_UP, b"\x1b[A"),          # the specials it does translate
+    (3, b"\x03"),                        # Ctrl-C reaches the shell
+    (curses.KEY_RESIZE, b""),            # ... and the key codes it must not
+    (curses.KEY_MOUSE, b""),
+    (curses.KEY_F5, b""),
+    (curses.KEY_BTAB, b""),
+])
+def test_only_text_and_known_keys_reach_the_shell(key, expected):
+    """An unbound key code was encoded as a character and sent to the shell,
+    where the next Enter would have run it."""
+    assert TerminalPlugin._encode_key(key) == expected
+
+
 def test_closing_a_local_terminal_twice_is_harmless(local_ctx, monkeypatch):
     monkeypatch.setenv("SHELL", "/bin/sh")
     plugin = TerminalPlugin(local_ctx)

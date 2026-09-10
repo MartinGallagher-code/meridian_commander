@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from meridian_commander.plugins.multi_rename import MultiRename, rename_one
+from meridian_commander.plugins.multi_rename import (
+    MultiRename,
+    order_renames,
+    rename_one,
+)
 
 
 def _run(ctx, command):
@@ -45,6 +49,43 @@ def test_rename_one_rejects_bad_rules(verb, args, message):
 def test_number_reports_a_bad_template():
     with pytest.raises(ValueError, match="bad template"):
         rename_one("x.txt", "number", ["{nope}"], 1)
+
+
+# -- ordering the renames ------------------------------------------------------
+
+def test_order_renames_leaves_an_independent_plan_alone():
+    plan = [("a.txt", "x.txt"), ("b.txt", "y.txt")]
+    assert order_renames(plan, lambda name: False) == [
+        ("a.txt", "x.txt", "a.txt"), ("b.txt", "y.txt", "b.txt")]
+
+
+def test_order_renames_moves_the_blocking_file_first():
+    """a.txt -> n1.txt must wait until n1.txt has moved out of the way."""
+    plan = [("a.txt", "n1.txt"), ("n1.txt", "n2.txt")]
+    assert order_renames(plan, lambda name: False) == [
+        ("n1.txt", "n2.txt", "n1.txt"), ("a.txt", "n1.txt", "a.txt")]
+
+
+def test_order_renames_parks_a_file_to_break_a_cycle():
+    plan = [("a.b", "b.a"), ("b.a", "a.b")]
+    steps = order_renames(plan, lambda name: False)
+    parked = steps[0][1]
+    assert steps == [("a.b", parked, None),
+                     ("b.a", "a.b", "b.a"),
+                     (parked, "b.a", "a.b")]
+    assert parked.startswith(".mc-rename-")
+
+
+def test_order_renames_parks_under_a_name_nothing_uses():
+    """The obvious parking names are taken -- by the plan, and on disk."""
+    # A three-cycle, one of whose names is the first parking candidate.
+    plan = [("a", "b"), ("b", ".mc-rename-1"), (".mc-rename-1", "a")]
+    steps = order_renames(plan, lambda name: name == ".mc-rename-2")
+    parked = next(dst for _src, dst, shown in steps if shown is None)
+    assert parked == ".mc-rename-3"
+    # Still a complete plan: every file ends up where the rule asked.
+    assert sorted((shown, dst) for _s, dst, shown in steps
+                  if shown is not None) == sorted(plan)
 
 
 # -- the plug-in, end to end ---------------------------------------------------
@@ -131,6 +172,32 @@ def test_swapping_names_among_the_set_is_allowed(data_ctx, tmp_path):
     ctx = data_ctx({"a.txt": "1", "b.txt": "2"}, selected={"a.txt", "b.txt"})
     out = _run(ctx, "suffix -x")
     assert "Renamed 2 file(s)" in out
+
+
+def test_a_chained_rename_keeps_both_files(data_ctx, tmp_path):
+    """a.txt -> n1.txt and n1.txt -> n2.txt, in that order, destroyed n1.txt.
+
+    The set is safe -- no two files end up sharing a name -- but carrying it
+    out in plan order wrote over n1.txt before it had moved, and the plug-in
+    reported "Renamed 2 file(s)" for two files that had become one.
+    """
+    ctx = data_ctx({"a.txt": "AAA", "n1.txt": "ORIGINAL"},
+                   selected={"a.txt", "n1.txt"})
+    assert "Renamed 2 file(s)" in _run(ctx, "number n{n}.txt")
+    data = tmp_path / "data"
+    assert (data / "n1.txt").read_text() == "AAA"
+    assert (data / "n2.txt").read_text() == "ORIGINAL"
+
+
+def test_two_files_can_swap_names(data_ctx, tmp_path):
+    """A true cycle: each name is wanted by the other file."""
+    ctx = data_ctx({"a.b": "FIRST", "b.a": "SECOND"}, selected={"a.b", "b.a"})
+    assert "Renamed 2 file(s)" in _run(ctx, "number {ext}.{name}")
+    data = tmp_path / "data"
+    assert (data / "a.b").read_text() == "SECOND"
+    assert (data / "b.a").read_text() == "FIRST"
+    # The name the cycle was broken with is not left behind.
+    assert {p.name for p in data.iterdir()} == {"a.b", "b.a"}
 
 
 def test_an_invalid_target_name_is_refused(data_ctx):

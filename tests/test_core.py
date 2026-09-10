@@ -381,6 +381,20 @@ def test_preset_round_trip(tmp_path):
         assert "password" not in f.read()
 
 
+def test_preset_round_trip_with_a_percent_in_the_path(tmp_path):
+    """A directory called 100%complete is an ordinary place to save.
+
+    With configparser's interpolation on, writing that path raised ValueError
+    out of the Save-preset dialog -- which the application does not catch, so
+    it left the file manager on a traceback.
+    """
+    path = str(tmp_path / "presets.ini")
+    item = presets.Preset(name="stats", scheme="local",
+                          path="/srv/reports/100%complete")
+    presets.save([item], path)
+    assert presets.load(path) == [item]
+
+
 def test_preset_load_missing_file_is_empty(tmp_path):
     assert presets.load(str(tmp_path / "nothing.ini")) == []
 

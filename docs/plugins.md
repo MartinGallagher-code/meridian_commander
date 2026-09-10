@@ -80,7 +80,10 @@ Run remote script) have no menu, and the three that already run on keys
 - **Multi-rename** — rename the other pane's tagged files in bulk by one rule:
   `replace`, `prefix`, `suffix`, `case` or a `number` template. Prefix a rule
   with `preview` to see the mapping first; a rule that would collide two names
-  or overwrite an existing file is refused in full.
+  or overwrite an existing file is refused in full. A rule that only *reorders*
+  the set's own names — renumbering a run of files, or swapping two — is
+  allowed, and the moves are ordered so none writes over a file that has not
+  moved yet.
 - **Make archive** — pack the other pane's tagged files and directories into a
   `zip`, `tar` or `tgz` beside them (the counterpart to browsing *into* an
   archive). Works on remote panes.

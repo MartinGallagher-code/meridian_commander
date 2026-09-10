@@ -57,6 +57,7 @@ import curses
 from dataclasses import dataclass, field
 
 from . import theme
+from .util import typed_char
 
 
 @dataclass(frozen=True)
@@ -410,18 +411,12 @@ class InputOutputPlugin(PanePlugin):
             self.buf = []
             self.pos = 0
             return True
-        if 32 <= key < 127:
-            self.buf.insert(self.pos, chr(key))
-            self.pos += 1
-            return True
-        if 127 < key < curses.KEY_MIN:
-            # Above ASCII but still text.  From KEY_MIN up the number is a key
-            # code -- a resize, a mouse report, an unbound function key -- and
-            # inserting the character it happens to name put junk in the
+        char = typed_char(key)
+        if char is not None:
+            # Text only: a key code inserted as a character put junk in the
             # command line the plugin was about to be handed.
-            self.buf.insert(self.pos, chr(key))
+            self.buf.insert(self.pos, char)
             self.pos += 1
-            return True
         return True
 
     def _history(self, step: int) -> None:

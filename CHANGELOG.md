@@ -13,6 +13,34 @@ day the version was cut.
 
 ### Fixed
 
+- **Multi-rename could destroy a file and report success.** A rule that moves
+  names *among* the tagged set is allowed — that is what makes renumbering and
+  swapping work — but the moves were carried out in the order the plan was
+  built. `a.txt -> n1.txt` together with `n1.txt -> n2.txt` is a safe *set*,
+  since no two files end up sharing a name, and fatal in that order: the first
+  rename writes over `n1.txt` before the second can move it. Two files went in,
+  one came out, and the plug-in said "Renamed 2 file(s)". The moves are now
+  ordered so none lands on a file that has not moved yet, and a true cycle (a
+  swap) is broken by parking one file under a name nothing uses, so swapping
+  two names now works instead of losing one of them.
+- **A `%` anywhere in the config or presets file was fatal.** Both files are
+  read with `configparser`, whose interpolation treats `%` as the start of a
+  substitution — but every value in them is a literal. Saving a preset for a
+  directory called `100%complete` raised `ValueError` straight out of the Save
+  dialog, and since the main loop does not catch it, the file manager exited on
+  a traceback. A viewer of `less -Ps%f` or an editor of `vim -c "set
+  titlestring=%f"` did the same on the way in, from the lookup `F3` and `F4`
+  do on every keystroke. Both files are now parsed with interpolation off, so a
+  `%` is just a character.
+- **Key codes were still being typed as text in three more places.** The same
+  defect fixed in the editor last release, found by grepping for what it
+  actually is rather than for the line that expressed it: the process browser's
+  filter, the provost browser's filter, and — worst — the terminal running in a
+  pane, which encoded an unbound key code as a character and *sent it to the
+  shell*, where the next Enter would have run it. Resizing the window was
+  enough to do it. All five places now ask one helper, `util.typed_char`,
+  whether a key is text.
+
 - **Deleting a symlink on an SFTP pane deleted the directory it pointed at.**
   The listing had it right — the pane drew it as a link — but `stat` on that
   backend followed the link and then reported `is_symlink=False`, and

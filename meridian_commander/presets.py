@@ -16,7 +16,9 @@ per preset::
 
 The file is separate from ``config.ini`` because the application rewrites it
 (and rewriting the main config would throw away its explanatory comments).  It
-is plain text and safe to edit by hand.
+is plain text and safe to edit by hand -- ``%`` included, since a
+directory called ``100%complete`` is a perfectly ordinary place to save
+(the parser is built with interpolation off, so a value is a literal).
 
 Presets are kept in alphabetical order, both in the menu and in the file.
 Ordering by name rather than by when they were saved means a preset is always
@@ -147,7 +149,7 @@ def from_location(name: str, fs, path: str) -> Preset:
 
 def load(path: str | None = None) -> list[Preset]:
     """Read the presets file.  A missing or broken file yields no presets."""
-    parser = configparser.ConfigParser()
+    parser = configparser.ConfigParser(interpolation=None)
     try:
         parser.read(path or presets_path())
     except (OSError, configparser.Error):
@@ -174,7 +176,7 @@ def load(path: str | None = None) -> list[Preset]:
 def save(presets: list[Preset], path: str | None = None) -> str:
     """Write ``presets`` out, replacing the file.  Returns the path written."""
     target = path or presets_path()
-    parser = configparser.ConfigParser()
+    parser = configparser.ConfigParser(interpolation=None)
     # configparser writes sections in the order they are added, so sorting
     # here is what keeps the file itself alphabetical.
     for preset in in_order(presets):

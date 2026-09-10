@@ -288,6 +288,23 @@ def test_choosing_an_editor_remembers_it(app, monkeypatch, tmp_path):
     assert app.message == "Editor: vim"
 
 
+def test_a_command_with_a_percent_in_it_is_saved_and_read_back(monkeypatch,
+                                                               tmp_path):
+    """``less -Ps%f`` and ``vim -c "set titlestring=%f"`` are ordinary settings.
+
+    With configparser's interpolation on, saving one raised ValueError and
+    reading one back raised InterpolationSyntaxError -- out of the lookup F3
+    does on every view.
+    """
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    assert config_mod.save_viewer("less -Ps%f") is True
+    assert config_mod.external_viewer() == "less -Ps%f"
+    assert config_mod.save_editor('vim -c "set titlestring=%f"') is True
+    assert config_mod.external_editor() == 'vim -c "set titlestring=%f"'
+    # And the rest of the file still reads.
+    assert config_mod.colour_scheme() == "turbo"
+
+
 def test_choosing_the_built_in_editor_puts_it_back(app, monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     assert config_mod.save_editor("vim") is True

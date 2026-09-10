@@ -2,7 +2,27 @@
 
 from __future__ import annotations
 
+import curses
 import time
+
+
+def typed_char(key: int) -> str | None:
+    """The character ``key`` stands for, or ``None`` when it is not text.
+
+    ``getch`` answers with two different kinds of number.  Below 256 it is a
+    character (or a control code); from ``KEY_MIN`` up it is a *key code* --
+    a terminal resize, a mouse report, a function key nothing is bound to --
+    and the two are told apart only by that boundary.
+
+    Every place that took "anything above space" as text has had to be fixed
+    for the same reason: ``KEY_RESIZE`` arrives as 410, and turning it into
+    ``chr(410)`` typed a stray letter into whatever was accepting input --
+    the file being edited, a filter box, the shell running in a pane.  Asking
+    here instead of writing the comparison again is what stops the next one.
+    """
+    if 32 <= key < 127 or 127 < key < curses.KEY_MIN:
+        return chr(key)
+    return None
 
 
 def human_size(size: int | None) -> str:

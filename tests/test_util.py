@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import curses
 import runpy
 import sys
 import time
@@ -467,3 +468,23 @@ def test_copy_tree_can_be_cancelled_before_it_starts(fs, tmp_path):
     with pytest.raises(OperationCancelled):
         copy_path(fs, str(tmp_path / "src"), fs, str(tmp_path / "dst"),
                   cancel=lambda: True)
+
+
+# -- telling a typed character from a key code ---------------------------------
+
+@pytest.mark.parametrize("key, expected", [
+    (ord("a"), "a"),
+    (ord(" "), " "),
+    (ord("~"), "~"),
+    (200, "\u00c8"),                  # a byte above ASCII: still text
+    (31, None),                        # a control code
+    (127, None),                       # DEL, which everything treats as erase
+    (curses.KEY_MIN, None),
+    (curses.KEY_RESIZE, None),         # the window was resized
+    (curses.KEY_MOUSE, None),          # a mouse report
+    (curses.KEY_F5, None),             # an unbound function key
+    (0x110000, None),                  # beyond any character at all
+    (-1, None),                        # the timeout getch answers with
+])
+def test_typed_char(key, expected):
+    assert util.typed_char(key) == expected

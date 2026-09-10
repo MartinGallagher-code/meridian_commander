@@ -31,7 +31,7 @@ import time
 from .. import theme
 from ..config import plugin_settings
 from ..plugin_api import PanePlugin
-from ..util import human_size
+from ..util import human_size, typed_char
 
 DEFAULTS = {
     "refresh": 2,          # seconds between automatic refreshes
@@ -323,9 +323,11 @@ class ProcessesPlugin(PanePlugin):
             self._rebuild_view()
         elif key == 9:
             return None
-        elif 32 <= key < 0x110000:
-            self.filter += chr(key)
-            self._rebuild_view()
+        else:
+            char = typed_char(key)
+            if char is not None:
+                self.filter += char
+                self._rebuild_view()
         return True
 
     def _confirm_key(self, key: int):

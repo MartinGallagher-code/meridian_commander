@@ -35,6 +35,7 @@ import struct
 
 from .. import theme
 from ..plugin_api import PanePlugin
+from ..util import typed_char
 
 SCROLLBACK = 2000
 
@@ -307,12 +308,12 @@ class TerminalPlugin(PanePlugin):
             return b"\r"
         if 0 <= key < 32:              # control keys (^C, ^D, ^Z, ^L, Tab...)
             return bytes([key])
-        if 32 <= key < 0x110000:
-            try:
-                return chr(key).encode("utf-8")
-            except ValueError:
-                return b""
-        return b""
+        # Text only.  The specials above are the key codes worth translating;
+        # every other code -- a resize, a mouse report, an unbound function
+        # key -- is not a character, and encoding one sent a stray letter to
+        # the shell, where the next Enter would have run it.
+        char = typed_char(key)
+        return char.encode("utf-8") if char is not None else b""
 
     def _send(self, data: bytes) -> None:
         try:
