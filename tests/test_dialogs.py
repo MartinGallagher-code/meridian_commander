@@ -731,11 +731,22 @@ def test_progress_is_not_cancelled_by_an_idle_terminal():
 
 
 def test_progress_treats_a_failed_read_as_no_key():
-    class _RefusesGetch:
+    class _RefusesToRead:
+        """A window that reports no input, whichever reader is asked.
+
+        Both, deliberately.  __getattr__ hands anything it does not define
+        straight to the real window underneath, so refusing only getch left
+        the real get_wch reachable -- and that one *waits*, on a terminal
+        nothing is typing into.
+        """
+
         def __init__(self, win):
             self._win = win
 
         def getch(self):
+            raise curses.error("no input")
+
+        def get_wch(self):
             raise curses.error("no input")
 
         def __getattr__(self, name):
@@ -743,7 +754,7 @@ def test_progress_treats_a_failed_read_as_no_key():
 
     def run(stdscr):
         progress = dialogs.ProgressDialog(stdscr, "Copying")
-        progress.win = _RefusesGetch(progress.win)
+        progress.win = _RefusesToRead(progress.win)
         cancelled = progress.cancelled()
         return cancelled
 
