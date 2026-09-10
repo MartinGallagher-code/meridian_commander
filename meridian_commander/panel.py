@@ -279,9 +279,25 @@ class Panel:
         self.refresh(keep_name=leaving)
         return True
 
+    def resolve(self, path: str) -> str:
+        """A typed path made absolute against *this pane*.
+
+        Where else a relative path could be measured from, there is only one
+        answer a file manager can give: the directory being looked at.  It was
+        measured from the process's own working directory instead -- wherever
+        the shell that started the application happened to be -- so "sub"
+        typed into "Go to directory" looked for a sibling of that, missed the
+        subdirectory sitting in the pane, and left the pane where it was.
+        Every other typed name in the application is joined to its pane
+        already; this is that rule, written once.
+        """
+        if path.startswith(self.fs.sep):
+            return path
+        return self.fs.join(self.path, path)
+
     def chdir(self, path: str, keep_name: str | None = None) -> bool:
         old = self.path
-        self.path = self.fs.normpath(path)
+        self.path = self.fs.normpath(self.resolve(path))
         self.selected.clear()
         self.cursor = 0
         self.top = 0

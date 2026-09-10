@@ -24,6 +24,14 @@ back to the old single-session behaviour rather than losing the ability to write
 This does not affect **SSH (shell)** panes, which already run each `cat` in its
 own channel, or FTP, or any copy between two different connections.
 
+## Where a typed destination goes
+
+`F5` and `F6` pre-fill the destination with the other pane's directory, so
+pressing Enter copies there. A path typed **without** a leading `/` is measured
+from that same directory: clearing the field and typing `backup` makes a folder
+beside what the other pane is showing, which is where you are looking. The same
+holds for a relative path typed into "Go to directory".
+
 ## What a transfer refuses
 
 Two shapes are refused before anything is written, because neither can end

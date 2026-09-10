@@ -1845,7 +1845,13 @@ class App:
         if dest is None:
             return
         dst_fs = dst_panel.fs
-        dest = dst_fs.normpath(dest)
+        # Against the destination *pane*, not the process's working directory.
+        # The prompt is pre-filled with the pane's path, so clearing it and
+        # typing "backup" is the ordinary way to ask for a new folder beside
+        # what you are looking at -- and that used to write it next to
+        # wherever the shell that started the application happened to be,
+        # where the pane would never show it.
+        dest = dst_fs.normpath(dst_panel.resolve(dest))
 
         # Pre-count for an overall byte total across all sources.
         try:
