@@ -13,6 +13,19 @@ day the version was cut.
 
 ### Fixed
 
+- **An FTP download nobody finished reading held a thread for ever.** Chunks
+  cross from the transfer thread through a bounded queue, which is what keeps a
+  large file from being held in memory — and which means a reader that stops
+  early leaves that thread blocked in `put` on a full queue, with nobody left
+  to empty it. Stopping early is the common case rather than the exception: a
+  cancelled copy, a viewer taking only its first megabytes, "Inspect file"
+  taking 256 bytes of whatever the cursor happens to be on. Closing now empties
+  the queue and raises out of the callback, so the transfer ends and the thread
+  goes. It does not wait while doing it — a server that has stopped sending
+  must not be able to wedge the close. (The control connection is still left
+  mid-transfer by an abort; that part is inherent, and untestable from here
+  without a real server.)
+
 - **A symlink whose name contained `" -> "` was listed under the wrong name.**
   `ls -l` writes `name -> target` and quotes neither half, so a link called
   `weird -> name` comes out as `weird -> name -> target.txt` and splitting at
