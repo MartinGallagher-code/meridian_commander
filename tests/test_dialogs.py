@@ -197,6 +197,27 @@ def test_prompt_returns_what_was_typed(monkeypatch):
     assert "Enter=OK" in _text(window)
 
 
+def test_prompt_accepts_a_character_that_is_not_ascii(monkeypatch):
+    """A rename field has to take the name a file actually has.
+
+    getch answered in bytes, so "e-acute" arrived as two of them and the
+    field, which only took 32..126, dropped both: the name could not be typed
+    at all.  Now the terminal's decoding happens first.
+    """
+    answer, _ = _run(monkeypatch,
+                     lambda s: dialogs.prompt(s, "Name", "New name:"),
+                     _typed("caf\u00e9") + [10])
+    assert answer == "caf\u00e9"
+
+
+def test_prompt_accepts_a_character_no_number_can_carry(monkeypatch):
+    # From U+0100 up read_key hands over the string itself.
+    answer, _ = _run(monkeypatch,
+                     lambda s: dialogs.prompt(s, "Name", "New name:"),
+                     ["\u65e5", "\u672c", 10])
+    assert answer == "\u65e5\u672c"
+
+
 def test_prompt_escape_cancels(monkeypatch):
     answer, _ = _run(monkeypatch,
                      lambda s: dialogs.prompt(s, "Name", "New name:"), [27])

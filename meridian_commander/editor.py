@@ -16,7 +16,7 @@ import curses
 
 from . import theme
 from .filesystems import FileSystem
-from .util import typed_char
+from .util import read_key, typed_char
 
 MAX_EDIT_BYTES = 8 * 1024 * 1024
 
@@ -244,7 +244,7 @@ class Editor:
         win.noutrefresh()
 
     # -- key handling -------------------------------------------------------
-    def handle_key(self, key: int, page: int = 20) -> str | None:
+    def handle_key(self, key: int | str, page: int = 20) -> str | None:
         """Apply one key press to the buffer.
 
         Returns ``"quit"`` when the user asked to leave (the caller decides
@@ -304,7 +304,7 @@ class Editor:
             while True:
                 self.draw(win)
                 curses.doupdate()
-                key = win.getch()
+                key = read_key(win)
                 self.message = ""
                 if self.handle_key(key, page=height - 3) == "quit":
                     if self.dirty and not self._confirm_discard(win):
@@ -332,7 +332,7 @@ class Editor:
         theme.paint(win, height - 1, 0, prompt, "dialogerror", width)
         win.refresh()
         while True:
-            k = win.getch()
+            k = read_key(win)
             if k in (ord("y"), ord("Y")):
                 return True
             if k in (ord("n"), ord("N"), 27):

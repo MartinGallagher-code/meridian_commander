@@ -24,7 +24,7 @@ import curses
 from . import termimage, theme
 from .filesystems import FileSystem
 from .image import Image, ImageError, MAX_BYTES, decode
-from .util import truncate
+from .util import read_key, truncate
 
 #: Upper half block: foreground is the top pixel, background the bottom.
 HALF_BLOCK = "▀"
@@ -497,7 +497,7 @@ class ImageView:
             height, width = stdscr.getmaxyx()
             body = max(1, height - 2)
             step = max(1, width // 8)
-            key = win.getch()
+            key = read_key(win)
             self.notice = ""
             if key in (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10):
                 break

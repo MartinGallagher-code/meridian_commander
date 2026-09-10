@@ -233,7 +233,7 @@ class PeekPane(PanePlugin):
         more = "" if len(self.rows) <= body else f"  row {self.top + 1}"
         return f" {shown}{more}   +/- lines   r reload   Esc/h close "
 
-    def handle_key(self, key: int):
+    def handle_key(self, key: int | str):
         page = max(1, self._body)
         if key in (27, ord("q"), ord("h"), curses.KEY_F10):
             return False                       # give the pane back

@@ -604,6 +604,13 @@ send — so the copy is removed however the pager exits.
 
 ## Key bindings
 
+Keys are read decoded, so anywhere text is typed — the editor, a rename or
+mkdir prompt, a plug-in's input line, the shell in a pane — takes whatever the
+terminal sends, accents and non-Latin scripts included, and stores exactly the
+character that was typed. (Column arithmetic still counts one column per
+character, so a script whose glyphs are two columns wide draws a little wide of
+where it should.)
+
 | Key | Action | Key | Action |
 | --- | --- | --- | --- |
 | `Tab` | switch active pane | `F1` | help |

@@ -24,6 +24,7 @@ from dataclasses import dataclass
 
 from . import theme
 from .filesystems import FileSystem
+from .util import read_key
 
 MAX_COMPARE_BYTES = 8 * 1024 * 1024  # 8 MiB per side
 
@@ -267,7 +268,7 @@ class Comparison:
             self.draw(win)
             curses.doupdate()
             body_h = stdscr.getmaxyx()[0] - 2
-            key = win.getch()
+            key = read_key(win)
             if key in (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10):
                 break
             elif key in (curses.KEY_DOWN, ord("j")):

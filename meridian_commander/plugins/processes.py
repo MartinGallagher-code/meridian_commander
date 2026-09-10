@@ -265,7 +265,7 @@ class ProcessesPlugin(PanePlugin):
         self.refresh()
 
     # -- keys ---------------------------------------------------------------
-    def handle_key(self, key: int):
+    def handle_key(self, key: int | str):
         if self.mode == "confirm":
             return self._confirm_key(key)
         if self.mode == "filter":

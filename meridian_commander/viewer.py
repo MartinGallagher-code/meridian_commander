@@ -16,6 +16,7 @@ import curses
 
 from . import theme
 from .filesystems import FileSystem
+from .util import read_key
 
 MAX_VIEW_BYTES = 16 * 1024 * 1024  # 16 MiB safety cap
 
@@ -323,7 +324,7 @@ class Viewer:
             curses.doupdate()
             height, width = stdscr.getmaxyx()
             body_h = height - 2
-            key = win.getch()
+            key = read_key(win)
             if key in (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10):
                 break
             elif key in (curses.KEY_DOWN, ord("j")):

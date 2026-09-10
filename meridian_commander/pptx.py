@@ -43,7 +43,7 @@ from .ooxml import (
     related,
     relationships,
 )
-from .util import ljust, truncate
+from .util import ljust, read_key, truncate
 from .viewer import wrap_line
 
 PRESENTATION_SUFFIXES = (".pptx", ".pptm")
@@ -435,7 +435,7 @@ class SlideView:
             curses.doupdate()
             height, width = stdscr.getmaxyx()
             body_h = max(1, height - 2)
-            key = win.getch()
+            key = read_key(win)
             self.notice = ""
             if key in (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10):
                 break

@@ -19,6 +19,7 @@ from __future__ import annotations
 import curses
 
 from . import theme
+from .util import read_key, typed_char
 
 
 def _cast_shadow(stdscr, y: int, x: int, height: int, width: int) -> None:
@@ -97,7 +98,7 @@ def message(stdscr, title: str, text: str, error: bool = False) -> None:
         theme.paint(win, 1 + i, 3, line[: win_w - 6], role)
     _buttons(win, min(win_h - 3, len(body) + 2), [("~O~K", True)], win_w)
     win.refresh()
-    win.getch()
+    read_key(win)
 
 
 def confirm(stdscr, title: str, text: str, default_yes: bool = False) -> bool:
@@ -117,7 +118,7 @@ def confirm(stdscr, title: str, text: str, default_yes: bool = False) -> bool:
         _buttons(win, min(win_h - 3, len(body) + 2),
                  [("~Y~es", choice), ("~N~o", not choice)], win_w)
         win.refresh()
-        k = win.getch()
+        k = read_key(win)
         if k in (curses.KEY_LEFT, curses.KEY_RIGHT, 9):
             choice = not choice
         elif k in (ord("y"), ord("Y")):
@@ -155,7 +156,7 @@ def prompt(stdscr, title: str, label: str, default: str = "",
                         "inputcursor")
             win.move(2, 3 + caret)
             win.refresh()
-            k = win.getch()
+            k = read_key(win)
             if k in (10, 13, curses.KEY_ENTER):
                 return "".join(buf)
             elif k == 27:
@@ -175,9 +176,14 @@ def prompt(stdscr, title: str, label: str, default: str = "",
                 pos = 0
             elif k == curses.KEY_END:
                 pos = len(buf)
-            elif 32 <= k < 127:
-                buf.insert(pos, chr(k))
-                pos += 1
+            else:
+                # Every typed character, not just ASCII: this is the field a
+                # file gets renamed in, and a name with an accent in it is an
+                # ordinary name.
+                char = typed_char(k)
+                if char is not None:
+                    buf.insert(pos, char)
+                    pos += 1
     finally:
         curses.curs_set(0)
 
@@ -260,9 +266,9 @@ def menu(stdscr, title: str, options: list[str],
                             "selhot" if selected else "dialoghot")
         theme.scrollbar(win, 1, win_w - 2, body, top, body, len(options))
         win.refresh()
-        k = win.getch()
-        if keys and 32 <= k < 127:
-            pressed = chr(k).lower()
+        k = read_key(win)
+        pressed = (typed_char(k) or "").lower()
+        if keys and pressed:
             for i, key in enumerate(keys):
                 if key == pressed:
                     return i
@@ -372,7 +378,7 @@ def dropdown(stdscr, items: list[dict], y: int, x: int) -> str | None:
                             ("menusel" if chosen else "menushortcut"))
         win.refresh()
 
-        k = win.getch()
+        k = read_key(win)
         if k in (27, 3):
             return None
         if k == curses.KEY_UP:
@@ -391,9 +397,11 @@ def dropdown(stdscr, items: list[dict], y: int, x: int) -> str | None:
             item = entries[sel]
             if not item.get("sep") and not item.get("disabled"):
                 return item.get("name", "")
-        elif 32 <= k < 127:
+        elif typed_char(k) is not None:
             # An accelerator letter selects and activates in one keystroke.
-            letter = chr(k).lower()
+            # Accelerators are ASCII, so a character from outside it simply
+            # matches nothing rather than needing a guard of its own.
+            letter = (typed_char(k) or "").lower()
             for item in entries:
                 if theme.hotkey_letter(item.get("label", "")) == letter:
                     if item.get("disabled"):
@@ -533,11 +541,9 @@ class ProgressDialog:
         self.draw()
 
     def _poll_keys(self) -> None:
-        try:
-            k = self.win.getch()
-        except curses.error:
-            k = -1
-        if k in (27, ord("q"), ord("Q")):
+        # No guard of its own: read_key already answers -1 for "nothing is
+        # waiting", which on a non-blocking window is what curses raises.
+        if read_key(self.win) in (27, ord("q"), ord("Q")):
             self._cancelled = True
 
     def cancelled(self) -> bool:

@@ -67,7 +67,7 @@ from .panel import Panel
 from . import usage
 from .peek import PeekPane
 from .sync import build_sync_plan, execute_sync_plan, survey_directory
-from .util import human_size, human_time, ljust, rjust
+from .util import human_size, human_time, ljust, read_key, rjust
 
 
 def _cwd(fs: FileSystem) -> str:
@@ -517,7 +517,7 @@ class App:
             self.stdscr.timeout(-1 if poll is None else poll)
             self.draw()
             try:
-                key = self.stdscr.getch()
+                key = read_key(self.stdscr)
             except KeyboardInterrupt:
                 if dialogs.confirm(self.stdscr, "Quit", "Exit Meridian Commander?"):
                     break
@@ -647,7 +647,7 @@ class App:
         finally:
             self.stdscr.timeout(-1)
 
-    def handle_key(self, key: int) -> None:
+    def handle_key(self, key: int | str) -> None:
         panel = self.active
         body_h = self.stdscr.getmaxyx()[0] - 6
 
