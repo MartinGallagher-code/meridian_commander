@@ -124,19 +124,32 @@ def copy_path(
     progress: ProgressCB = _noop_progress,
     cancel: CancelCB = _noop_cancel,
     preserve_mtime: bool = False,
-) -> None:
+) -> list[str]:
     """Copy a file or a whole directory tree from ``src`` to ``dst``.
 
     ``preserve_mtime`` gives each copied file the same modification time as its
     source (see :func:`copy_file`).
+
+    Returns the source paths of any **symlinked directories** that were left
+    behind, so the caller can say so.  A link to a directory is not a
+    directory: :func:`_iter_tree` does not descend into one (that would copy
+    the target twice, or for ever if it points at an ancestor), and it is not a
+    file either -- opening one for reading is an ``IsADirectoryError``, which
+    is what used to come out of here and take the rest of the tree with it.
+    Nor is it an empty directory, which is what recreating it would produce.
+    There is no way to make a symlink through the filesystem interface, so the
+    honest answer is to copy everything else and name what was skipped.
     """
     entry = src_fs.stat(src)
+    if entry.is_dir and entry.is_symlink:
+        return [src]
     if not entry.is_dir:
         copy_file(src_fs, src, dst_fs, dst, progress, cancel,
                   preserve_mtime=preserve_mtime)
-        return
+        return []
 
     # Directory: recreate the tree on the destination side.
+    skipped: list[str] = []
     dst_fs.makedirs(dst)
     for rel, node in _iter_tree(src_fs, src):
         if cancel():
@@ -146,11 +159,14 @@ def copy_path(
         s = src_fs.join(src, rel)
         # Translate the relative path into the destination's separator scheme.
         d = dst_fs.join(dst, *_split_rel(src_fs, rel))
-        if node.is_dir and not node.is_symlink:
+        if node.is_dir and node.is_symlink:
+            skipped.append(s)
+        elif node.is_dir:
             dst_fs.makedirs(d)
         else:
             copy_file(src_fs, s, dst_fs, d, progress, cancel,
                       preserve_mtime=preserve_mtime)
+    return skipped
 
 
 def _split_rel(fs: FileSystem, rel: str) -> list[str]:
@@ -165,21 +181,30 @@ def move_path(
     dst: str,
     progress: ProgressCB = _noop_progress,
     cancel: CancelCB = _noop_cancel,
-) -> None:
+) -> list[str]:
     """Move a file or directory tree.
 
     When both sides are the same live filesystem this is a cheap rename;
     otherwise it is a copy followed by deleting the source.
+
+    Returns what :func:`copy_path` skipped.  A move across filesystems that
+    could not reproduce everything does **not** delete the source: a symlink
+    the copy could not make is one the delete would destroy, and the point of
+    naming it rather than dropping it silently is that it is still there to be
+    dealt with.  A rename within one filesystem moves links intact and so has
+    nothing to skip.
     """
     if src_fs.same_fs(dst_fs):
         parent = dst_fs.dirname(dst)
         if parent and not dst_fs.exists(parent):
             dst_fs.makedirs(parent)
         src_fs.rename(src, dst)
-        return
+        return []
 
-    copy_path(src_fs, src, dst_fs, dst, progress, cancel)
-    src_fs.delete_tree(src)
+    skipped = copy_path(src_fs, src, dst_fs, dst, progress, cancel)
+    if not skipped:
+        src_fs.delete_tree(src)
+    return skipped
 
 
 def count_tree(fs: FileSystem, path: str) -> tuple[int, int]:

@@ -24,6 +24,26 @@ back to the old single-session behaviour rather than losing the ability to write
 This does not affect **SSH (shell)** panes, which already run each `cat` in its
 own channel, or FTP, or any copy between two different connections.
 
+## Symlinked directories are left where they are
+
+A symbolic link to a directory is neither a directory nor a file, and a
+transfer can do nothing useful with one. Descending into it would copy the
+target a second time — and, for a link that points at one of its own
+ancestors, for ever. Opening it as a file is an error. Recreating it at the far
+end would leave an empty directory pretending to be a link, and there is no way
+to *make* a symlink through the filesystem interface: local disk, SFTP, FTP and
+archives share one small set of operations, and creating links is not among
+them.
+
+So `F5` and `F6` copy everything else and tell you which links they left, by
+name. An `F6` move between two different connections keeps its source in that
+case rather than deleting a link it could not reproduce; a move *within* one
+filesystem is a rename, which moves links intact and has nothing to skip. `F9`
+leaves them out of the sync plan for the same reason.
+
+A link to a *file* is followed as it always was: copying one gives you the
+file's contents.
+
 ## How synchronization works
 
 `F9` builds a plan by walking both panes' directory trees:

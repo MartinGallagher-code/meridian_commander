@@ -237,9 +237,15 @@ def test_a_non_ascii_key_is_inserted(ctx):
     assert "".join(plugin.buf) == "é"
 
 
-def test_a_key_that_is_not_a_character_is_swallowed(ctx):
+@pytest.mark.parametrize("key", [
+    curses.KEY_RESIZE,     # the window was resized while typing
+    curses.KEY_MOUSE,      # a mouse report
+    curses.KEY_F5,         # a function key the plugin does not bind
+    0x110000,              # outside the Unicode range
+])
+def test_a_key_that_is_not_a_character_is_swallowed(ctx, key):
     plugin = _Echo(ctx)
-    plugin.handle_key(0x110000)                  # outside the Unicode range
+    assert plugin.handle_key(key) is True
     assert plugin.buf == []
     # An unrecognised control key is consumed without changing anything.
     assert plugin.handle_key(1) is True

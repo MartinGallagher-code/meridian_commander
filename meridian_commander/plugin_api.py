@@ -414,12 +414,13 @@ class InputOutputPlugin(PanePlugin):
             self.buf.insert(self.pos, chr(key))
             self.pos += 1
             return True
-        if key > 127:
-            try:
-                self.buf.insert(self.pos, chr(key))
-                self.pos += 1
-            except ValueError:
-                pass
+        if 127 < key < curses.KEY_MIN:
+            # Above ASCII but still text.  From KEY_MIN up the number is a key
+            # code -- a resize, a mouse report, an unbound function key -- and
+            # inserting the character it happens to name put junk in the
+            # command line the plugin was about to be handed.
+            self.buf.insert(self.pos, chr(key))
+            self.pos += 1
             return True
         return True
 

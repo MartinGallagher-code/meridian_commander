@@ -13,6 +13,36 @@ day the version was cut.
 
 ### Fixed
 
+- **Deleting a symlink on an SFTP pane deleted the directory it pointed at.**
+  The listing had it right — the pane drew it as a link — but `stat` on that
+  backend followed the link and then reported `is_symlink=False`, and
+  `delete_tree` believes `stat`. Told a link to a directory was a plain
+  directory, it listed it, deleted everything it found and emptied the target,
+  which typically belongs to somebody else entirely. `stat` now asks `lstat`
+  first, so the link flag is the truth and the rest of the answer still
+  describes the target (a symlinked directory is still enterable, a symlinked
+  file still readable). A plain file still costs one round trip; only a link
+  pays for the second.
+- **One symlinked directory could stop a copy or a sync dead.** A link to a
+  directory is not a directory — the walk does not descend into one, or it
+  would copy the target twice and loop for ever on a link to an ancestor — and
+  it was therefore treated as a file. Opening one for reading is an
+  `IsADirectoryError`, which escaped `copy_path` and took everything the walk
+  had not yet reached with it; in a sync it ended the run at whichever file the
+  plan reached first, sometimes before anything at all was copied. Both now
+  leave symlinked directories alone and finish the rest of the tree. There is
+  no way to *make* a symlink through the filesystem interface, so `F5` says
+  which ones it left rather than turning them into empty directories, and an
+  `F6` move across filesystems that could not reproduce one keeps its source
+  instead of deleting a link it failed to copy.
+- **Resizing the terminal typed a character into the file being edited.** The
+  editor inserted any key above ASCII as text, and from `KEY_MIN` up those
+  numbers are not characters but *key codes*: a resize, a mouse report,
+  Shift-Up, an unbound function key. `KEY_RESIZE` arrived as 410 and put `ƚ`
+  in the buffer, marked it unsaved, and would have saved it there. The same
+  line was in the plug-in input widget, where it fed junk to the command about
+  to be run. Both now stop at the top of the character range.
+
 - **Directory sizes could show one machine's totals for another's directory.**
   The measured totals were cached by path alone, and a path is not unique
   across connections: `/etc` here and `/etc` on a server are different
