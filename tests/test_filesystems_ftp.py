@@ -539,6 +539,33 @@ def test_ftp_download_streams_through_a_queue(ftp):
     reader.close()
 
 
+def test_closing_a_download_early_lets_its_worker_go(ftp):
+    """A reader that stops early is the common case, not the exception.
+
+    The queue is bounded, so a worker nobody is reading blocks in put() and
+    stays there for the life of the process, holding the transfer open --
+    "Inspect file" takes 256 bytes of whatever the cursor is on.
+    """
+    fake = _FakeFTP()
+    fake.download = b"x" * (4 * 1024 * 1024)      # far more than the queue holds
+    fs, _ = ftp(fake)
+    reader = fs.open_read("/big.bin")
+    assert reader.read(16) == b"x" * 16
+    reader.close()
+    reader._thread.join(timeout=5)
+    assert reader._thread.is_alive() is False
+
+
+def test_a_download_closed_before_it_is_read_lets_its_worker_go(ftp):
+    fake = _FakeFTP()
+    fake.download = b"y" * (4 * 1024 * 1024)
+    fs, _ = ftp(fake)
+    reader = fs.open_read("/big.bin")
+    reader.close()
+    reader._thread.join(timeout=5)
+    assert reader._thread.is_alive() is False
+
+
 def test_ftp_download_of_an_empty_file(ftp):
     fake = _FakeFTP()
     fake.download = b""

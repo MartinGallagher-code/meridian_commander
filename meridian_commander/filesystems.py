@@ -1192,12 +1192,24 @@ class FTPFileSystem(FileSystem):
                 pass
 
 
+class _FTPAbort(Exception):
+    """Raised inside the RETR callback to end a transfer nobody is reading."""
+
+
 class _FTPReader:
     """Adapt FTP ``RETR`` (callback based) to a blocking ``read(n)`` API.
 
     ftplib delivers a download by invoking a callback with chunks.  We run that
     transfer on a background thread and hand the bytes across through a bounded
     queue, so the caller sees an ordinary read-until-EOF stream.
+
+    The queue is bounded, which is what keeps a large file from being held in
+    memory -- and which is why :meth:`close` has work to do.  A reader that
+    stops early is the common case, not the exception: a cancelled copy, a
+    viewer taking only its first megabytes, "Inspect file" taking 256 bytes of
+    whatever the cursor is on.  The worker is then blocked in ``put`` on a full
+    queue with nobody to empty it, and stays blocked for the life of the
+    process, holding the transfer open.
     """
 
     def __init__(self, ftp, path: str) -> None:
@@ -1207,11 +1219,19 @@ class _FTPReader:
         self._buf = b""
         self._eof = False
         self._error: Exception | None = None
+        self._closed = threading.Event()
         self._queue: "queue.Queue[bytes | None]" = queue.Queue(maxsize=16)
+
+        def deliver(chunk: bytes) -> None:
+            if self._closed.is_set():
+                raise _FTPAbort()
+            self._queue.put(chunk)
 
         def worker() -> None:
             try:
-                ftp.retrbinary(f"RETR {path}", self._queue.put, blocksize=CHUNK_SIZE)
+                ftp.retrbinary(f"RETR {path}", deliver, blocksize=CHUNK_SIZE)
+            except _FTPAbort:
+                pass                    # nobody is reading; not an error
             except Exception as exc:
                 self._error = exc
             finally:
@@ -1236,7 +1256,21 @@ class _FTPReader:
         return data
 
     def close(self) -> None:
+        import queue
+
         self._eof = True
+        self._closed.set()
+        # Emptying the queue is what lets the worker go.  Setting the flag is
+        # not enough on its own: the worker may already be blocked inside
+        # ``put``, where it cannot see it, and only a free slot returns that
+        # call so the *next* callback can raise.  Draining without waiting, so
+        # closing never blocks on a server that has stopped sending -- the
+        # thread is a daemon and ends on its own once the socket does.
+        try:
+            while True:
+                self._queue.get_nowait()
+        except queue.Empty:
+            pass
 
     def __enter__(self):
         return self
