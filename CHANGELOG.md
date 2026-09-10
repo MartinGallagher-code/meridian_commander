@@ -13,6 +13,18 @@ day the version was cut.
 
 ### Fixed
 
+- **`cat` on a binary file could hang the Terminal plug-in.** Its screen model
+  had no bound on three things binary output supplies freely. A cursor-right
+  escape with a large parameter (`ESC[100000000C`) moved the column that far,
+  and the next printable character padded the line out to match — a hundred
+  million characters from twelve bytes of input. An unterminated `CSI`
+  accumulated the rest of the file as its parameters, one string concatenation
+  per byte, so it was quadratic as well as unbounded. And an unterminated `OSC`
+  swallowed everything that followed it, for the rest of the session. A cursor
+  *jump* is now capped (printing still grows a line freely), CSI parameters
+  stop at 64 bytes with the sequence still swallowed to its final byte, and an
+  OSC is abandoned at a control character, which is what a real terminal does.
+
 - **Sync left two different files alone when their timestamps matched.** Files
   on both sides were compared by modification time only: same age within the
   two-second tolerance meant "already in sync", whatever the sizes. A 25-byte
