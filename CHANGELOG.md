@@ -13,6 +13,16 @@ day the version was cut.
 
 ### Fixed
 
+- **A symlink whose name contained `" -> "` was listed under the wrong name.**
+  `ls -l` writes `name -> target` and quotes neither half, so a link called
+  `weird -> name` comes out as `weird -> name -> target.txt` and splitting at
+  the first arrow answered `weird` — a name no file has, which anything acting
+  on it would then miss. The size field settles it: for a symlink that is the
+  target's length in bytes, and only the real arrow leaves a tail that long.
+  (In *bytes*: counting characters is wrong the moment a name is not ASCII, and
+  a fuzz over real `ls` output caught exactly that on the first attempt at this
+  fix.) A size that lines up with nothing still falls back to the old reading.
+
 - **Typing an accented character corrupted the file.** Keys were read with
   `getch`, which answers in *bytes*: in a UTF-8 terminal one press of `é` is
   two of them, each became a Latin-1 character of its own, and the editor

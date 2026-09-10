@@ -359,6 +359,38 @@ def test_unix_ls_parser_resolves_a_symlink_name():
     assert entry.is_symlink is True
 
 
+@pytest.mark.parametrize("line, size, name", [
+    # ls writes "name -> target" and quotes neither half, so the text alone
+    # is ambiguous the moment either contains " -> ".  The size field is the
+    # target's length in bytes, and only the real arrow leaves a tail that
+    # long.
+    ("lrwxrwxrwx 1 o g 10 Jan 15 10:32 weird -> name -> target.txt",
+     10, "weird -> name"),
+    ("lrwxrwxrwx 1 o g  6 Jan 15 10:32 odd-target -> a -> b",
+     6, "odd-target"),
+    ("lrwxrwxrwx 1 o g  9 Jan 15 10:32 arr -> ow -> arr -> ow",
+     9, "arr -> ow"),
+    # The length is in bytes, not characters: three characters of Japanese
+    # are nine bytes, and counting characters split this in the wrong place.
+    ("lrwxrwxrwx 1 o g  9 Jan 15 10:32 arr -> ow -> \u65e5\u672c\u8a9e",
+     9, "arr -> ow"),
+    ("lrwxrwxrwx 1 o g  7 Jan 15 10:32 current -> releases",
+     7, "current"),
+])
+def test_unix_ls_parser_splits_a_link_at_the_arrow_the_size_names(line, size,
+                                                                  name):
+    entry = _parse_unix_ls_line(line)
+    assert entry is not None
+    assert (entry.name, entry.is_symlink, entry.size) == (name, True, size)
+
+
+def test_a_link_whose_size_lines_up_with_nothing_falls_back():
+    # A server that reports a link's size differently still gets an answer.
+    entry = _parse_unix_ls_line(
+        "lrwxrwxrwx 1 o g 999 Jan 15 10:32 a -> b -> c")
+    assert entry.name == "a"
+
+
 @pytest.mark.parametrize("line, name", [
     # A device has major/minor numbers where a file has its size, so the
     # listing dropped every one of them -- most of /dev, silently.
