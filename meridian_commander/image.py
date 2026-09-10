@@ -723,6 +723,13 @@ def read_gif(data: bytes) -> Image:
             _gif_clear(canvas, width, left, top, fw, fh)
         elif disposal == 3 and saved:
             canvas[:] = saved
+        # "The scope of this block is the next graphic rendering block, ...
+        # It applies only to that block": a control extension is spent once
+        # the image after it has been drawn.  Carrying it forward gave a frame
+        # that has no extension of its own the previous frame's transparent
+        # index (so it drew nothing where it should have drawn), its delay,
+        # and its disposal (so the canvas was cleared under it).
+        transparent, delay, disposal = -1, 0.0, 0
 
     if not frames:
         raise ImageError("GIF has no frames")

@@ -272,6 +272,13 @@ def execute_sync_plan(
 
     ``on_action`` (if given) is called before each file as
     ``on_action(action, index, total)`` for coarse-grained progress display.
+
+    Cancelling stops the run and returns the count so far, whether the key
+    came between two files or in the middle of one: :func:`copy_file` polls
+    the same callback per chunk and raises, and letting that escape turned
+    Esc during the one file big enough to be worth cancelling into an error
+    dialog with nothing in it.  The file being written when the key came is
+    left where it got to, as a cancelled copy is.
     """
     total = len(plan.actions)
     copied = 0
@@ -295,7 +302,10 @@ def execute_sync_plan(
         # Preserve the source timestamp so both copies stay identical in age;
         # otherwise the just-written file would look "newer" and the next sync
         # would copy it straight back the other way.
-        copy_file(src_fs, src, dst_fs, dst, progress, cancel,
-                  preserve_mtime=True)
+        try:
+            copy_file(src_fs, src, dst_fs, dst, progress, cancel,
+                      preserve_mtime=True)
+        except OperationCancelled:
+            break
         copied += 1
     return copied

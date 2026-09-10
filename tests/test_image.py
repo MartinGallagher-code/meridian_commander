@@ -595,6 +595,30 @@ def test_gif_disposal_three_restores_what_was_there_before():
     assert px(image, 0, 0, frame=2) == RED
 
 
+def test_gif_a_control_block_applies_only_to_the_frame_after_it():
+    """"The scope of this block is the next graphic rendering block."
+
+    A frame with no control extension of its own was given the previous
+    frame's transparent index, delay and disposal: it drew nothing where it
+    should have drawn, ran at the wrong speed, and had the canvas cleared
+    under it.
+    """
+    frames = [
+        gif_frame([0, 1], 2, 1, transparent=1, delay=25, disposal=2),
+        gif_frame([1, 1], 2, 1),          # no extension: the defaults apply
+    ]
+    image = decode(gif_bytes(2, 1, frames, palette=PALETTE))
+
+    # Frame 0 honours its own extension: index 1 is transparent.
+    assert px(image, 0, 0, frame=0) == RED
+    assert px(image, 1, 0, frame=0) == (img.CHECK_LIGHT,) * 3
+    # Frame 1 has none, so index 1 is painted rather than skipped ...
+    assert px(image, 0, 0, frame=1) == GREEN
+    assert px(image, 1, 0, frame=1) == GREEN
+    # ... and it does not inherit the delay either.
+    assert [round(f.delay, 2) for f in image.frames] == [0.25, 0.0]
+
+
 def test_gif_frame_hanging_off_the_canvas_is_clipped_not_fatal():
     frames = [gif_frame([0, 1, 2, 3], 2, 2, left=1, top=1)]
     image = decode(gif_bytes(2, 2, frames, palette=PALETTE))
