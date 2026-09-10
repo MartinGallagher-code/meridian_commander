@@ -647,7 +647,10 @@ def test_a_sync_cancelled_part_way_says_so(app, tmp_path, monkeypatch):
     monkeypatch.setattr(dialogs, "ProgressDialog", cancelling)
     app._sync()
 
-    assert app.message == "Sync cancelled -- 1 of 3 file(s) copied"
+    # Four, not three: both panes carry the fixture's own file.txt, holding
+    # "left" and "right" -- the same age and different sizes, so the plan has
+    # something to say about those too.
+    assert app.message == "Sync cancelled -- 1 of 4 file(s) copied"
     assert read(str(tmp_path / "right" / "a")) == "a"      # the one that finished
     assert not (tmp_path / "right" / "c").exists()         # never started
 

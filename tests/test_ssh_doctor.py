@@ -133,6 +133,22 @@ def test_convert_needs_a_name(ssh_home, data_ctx):
     assert SshDoctor(_ctx(data_ctx)).process("convert") == "usage: convert <key-name>"
 
 
+def test_convert_refuses_a_path_and_leaves_the_file_alone(ssh_home, data_ctx,
+                                                          tmp_path):
+    # os.path.join drops the ~/.ssh when what follows is absolute, and ".."
+    # walks out of it -- and converting means rewriting the file in place.
+    d, calls = ssh_home
+    outside = tmp_path / "server.key"
+    outside.write_text(LEGACY_PLAIN)
+    plugin = SshDoctor(_ctx(data_ctx))
+    for name in (str(outside), "../server.key", "sub/id_rsa"):
+        out = plugin.process(f"convert {name}")
+        assert "not a path" in out
+    assert calls == []                              # ssh-keygen never ran
+    assert outside.read_text() == LEGACY_PLAIN      # and nothing was touched
+    assert not (tmp_path / "server.key.bak").exists()
+
+
 def test_convert_missing_key(ssh_home, data_ctx):
     assert "No such key" in SshDoctor(_ctx(data_ctx)).process("convert nope")
 

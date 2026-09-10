@@ -255,7 +255,18 @@ def build_sync_plan(
             elif rt - lt > MTIME_TOLERANCE:
                 actions.append(
                     SyncAction(rel, "<-", "right is newer", there.size or 0))
-            # else: same age within tolerance -> already in sync, skip.
+            elif (here.size or 0) != (there.size or 0):
+                # Same age, different size: one of them is stale and the clock
+                # cannot say which.  The tolerance above is two seconds and a
+                # backend's clock can be far coarser than that -- an ls -l
+                # listing reports minutes -- so "same age" is a bucket, not an
+                # identity, and treating it as one left a 25-byte file and a
+                # 5-byte file sitting opposite each other with nothing to do.
+                # Left is the source of truth, as it is when there is no mtime
+                # at all, and the plan is shown before it runs.
+                actions.append(
+                    SyncAction(rel, "->", "differs (same age)", here.size or 0))
+            # else: same age and same size -> already in sync, skip.
 
     return SyncPlan(left_root, right_root, actions)
 

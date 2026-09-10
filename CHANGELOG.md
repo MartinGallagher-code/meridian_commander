@@ -13,6 +13,32 @@ day the version was cut.
 
 ### Fixed
 
+- **Sync left two different files alone when their timestamps matched.** Files
+  on both sides were compared by modification time only: same age within the
+  two-second tolerance meant "already in sync", whatever the sizes. A 25-byte
+  file opposite a 5-byte one of the same name and stamp was reported as nothing
+  to do. Backends report times far more coarsely than two seconds — an `ls -l`
+  listing gives minutes — so "same age" is a bucket, not an identity. A size
+  difference now settles it, copying left to right, which is the preference the
+  planner already applies when neither side reports a time at all.
+
+- **Nothing in a `tar czf out.tgz .` archive could be read.** A member name is
+  tidied before it goes into the tree — a leading `./` or `/` dropped, `.`
+  components removed — and the tidied path was then also used as the name to
+  ask the archive for. Those are different names: `./readme.txt` is shown at
+  `/readme.txt` and stored as `./readme.txt`, so the listing was right and
+  every open failed with "filename 'readme.txt' not found". Packing the current
+  directory is the ordinary way to make a tar, so this was most tarballs.
+  The name a member is shown at and the name it is stored under are now kept
+  apart.
+- **"SSH doctor" would convert a key outside `~/.ssh`.** The typed name was
+  joined onto `~/.ssh`, which throws the directory away entirely when what
+  follows is absolute, and `..` walks out of it — so `convert
+  /etc/ssl/private/server.key` was carried out on a file the plug-in never
+  listed and does not claim to touch, and carrying it out means rewriting that
+  file in place. Only a plain name, of a file directly in `~/.ssh`, is
+  accepted.
+
 - **`/dev` over SSH listed as almost empty.** A device node has no size: `ls`
   prints its major and minor numbers in that column instead (`1, 3`), which the
   listing parser could not match, so it dropped the line — and a dropped line

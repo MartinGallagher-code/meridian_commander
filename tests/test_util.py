@@ -187,6 +187,30 @@ def test_sync_without_mtimes_falls_back_to_size(fs, tmp_path):
     assert "same.txt" not in changed
 
 
+def test_sync_copies_a_same_age_file_whose_size_differs(fs, tmp_path):
+    """Equal mtimes are a bucket, not an identity: the size still decides."""
+    import os
+
+    stamp = time.time() - 3600
+    write(str(tmp_path / "l" / "notes.txt"), "the full document, edited")
+    write(str(tmp_path / "r" / "notes.txt"), "short")
+    write(str(tmp_path / "l" / "same.txt"), "identical")
+    write(str(tmp_path / "r" / "same.txt"), "identical")
+    for side in ("l", "r"):
+        for name in ("notes.txt", "same.txt"):
+            os.utime(str(tmp_path / side / name), (stamp, stamp))
+
+    plan = build_sync_plan(fs, str(tmp_path / "l"), fs, str(tmp_path / "r"))
+    changed = {a.rel: a for a in plan.actions}
+    assert changed["notes.txt"].reason == "differs (same age)"
+    assert changed["notes.txt"].direction == "->"
+    # Same age and same size really is nothing to do.
+    assert "same.txt" not in changed
+
+    execute_sync_plan(plan, fs, fs)
+    assert read(str(tmp_path / "r" / "notes.txt")) == "the full document, edited"
+
+
 def _three_file_plan(fs, tmp_path):
     for name in ("a.txt", "b.txt", "c.txt"):
         write(str(tmp_path / "l" / name), name)
