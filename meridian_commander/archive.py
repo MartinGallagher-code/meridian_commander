@@ -240,6 +240,11 @@ class ArchiveFileSystem(FileSystem):
         member = self._members.get(key)
         if member is None:
             raise FileSystemError(f"no such file in {self.name}: {path}")
+        if self._zip is None and self._tar is None:
+            # The tree is still in memory, so the listing goes on working after
+            # close() -- but there is nothing left to read the bytes from, and
+            # saying so beats the AttributeError that came out of the handle.
+            raise FileSystemError(f"{self.name} has been closed")
         try:
             if self._zip is not None:
                 return self._zip.open(member)

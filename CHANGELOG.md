@@ -13,6 +13,25 @@ day the version was cut.
 
 ### Fixed
 
+- **Leaving an archive both panes were in broke it for the other one.** `=`
+  points both panes at one filesystem object, and stepping out of the archive
+  in one pane closed it — leaving the other pane listing an archive whose every
+  file then failed to open with `'NoneType' object has no attribute
+  'extractfile'`. The archive is closed by whichever pane leaves it last now,
+  and a closed one says so plainly if anything still asks it for a file.
+- **A write that failed as it was sent was reported as a success.** The
+  plug-in write helper swallowed errors from `close()` — which is exactly
+  where a remote write fails, since that is when the bytes are flushed — so
+  "Normalise text" said `changed a.txt` for a file it had emptied, and
+  `write`, "Make archive" and the CSV tools all reported files that never
+  arrived. Failures on the way out are heard now; the read side, where a
+  close error costs nothing, is unchanged.
+- **`join` shifted every column right of a gap.** A row whose trailing empty
+  fields were left out of the file — which is ordinary CSV — is shorter than
+  the header, and the joined columns were appended straight onto it: an
+  `amount` landed under `city`, in a written file, reported as a clean
+  `2/2 rows matched`. Short rows are padded to the header first.
+
 - **The other pane kept showing files that had gone, and missed ones that had
   arrived.** Only the pane doing the work was reloaded, so with both panes on
   one directory — which is what `=` makes, and what a preset reusing a

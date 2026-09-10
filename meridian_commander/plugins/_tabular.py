@@ -79,11 +79,19 @@ def read_text(fs, path, *, encoding: str = "utf-8", max_bytes: int = MAX_BYTES):
 
 
 def write_bytes(fs, path, data: bytes) -> None:
+    """Write ``data``, letting a failure on close be heard.
+
+    A remote backend sends the file as it is closed, so swallowing that error
+    -- which the read side does, where it costs nothing -- reported a written
+    file that never arrived.
+    """
     stream = fs.open_write(path)
     try:
         stream.write(data)
     finally:
-        _close(stream)
+        closer = getattr(stream, "close", None)
+        if callable(closer):
+            closer()
 
 
 # -- delimiter / table model ------------------------------------------------

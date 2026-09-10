@@ -587,6 +587,25 @@ def test_build_join_keeps_unmatched_left_rows(data_ctx, tmp_path):
         "id,name,age\n1,alice,30\n2,bob,\n"
 
 
+def test_build_join_pads_a_short_left_row(data_ctx, tmp_path):
+    """A row whose trailing empty fields were left out of the file.
+
+    Appending the right side to it put every joined value one column to the
+    left -- an amount landing under "city", silently, in a written file.
+    """
+    ctx = data_ctx({
+        "people.csv": "id,name,city\n1,alice,rome\n2,bob\n",
+        "sales.csv": "id,amount\n1,10\n2,20\n",
+    }, selected={"people.csv", "sales.csv"})
+
+    CsvBuild(ctx).process("join id")
+
+    assert read(str(tmp_path / "data" / "joined.csv")) == (
+        "id,name,city,amount\n"
+        "1,alice,rome,10\n"
+        "2,bob,,20\n")
+
+
 def test_build_groupby_without_pandas(data_ctx, tmp_path, monkeypatch):
     from meridian_commander.plugins import csv_build
 

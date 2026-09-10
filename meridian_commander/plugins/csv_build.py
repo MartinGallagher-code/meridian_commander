@@ -184,12 +184,18 @@ class CsvBuild(InputOutputPlugin):
         blanks = [""] * len(right_cols)
         rows = []
         matched = 0
+        width = len(left.header)
         for row in left.rows:
             k = row[li] if li < len(row) else ""
             extra = rindex.get(k)
             if extra is not None:
                 matched += 1
-            rows.append(list(row) + (extra if extra is not None else blanks))
+            # Pad first: a row whose trailing empty fields were left out of the
+            # file is shorter than the header, and appending the right side to
+            # it put every joined value one column to the left -- an amount
+            # landing under "city", silently, in a written file.
+            padded = [row[i] if i < len(row) else "" for i in range(width)]
+            rows.append(padded + (extra if extra is not None else blanks))
         out = self._write("joined.csv", header, rows)
         return (f"left join on {key!r}: {files[0].name} + {files[1].name} -> {out}  "
                 f"({matched}/{len(rows)} rows matched)")
