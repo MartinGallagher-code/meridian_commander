@@ -256,11 +256,15 @@ class Editor:
             self.insert_char("    ")
         elif 32 <= key < 127:
             self.insert_char(chr(key))
-        elif key > 127:
-            try:
-                self.insert_char(chr(key))
-            except ValueError:
-                pass
+        elif 127 < key < curses.KEY_MIN:
+            # A byte above ASCII -- part of a typed character.  Stopping at
+            # KEY_MIN is the point: everything from there up is a *key code*,
+            # not text, and the ones this editor does not bind (a terminal
+            # resize, a mouse report, Shift-Left, F5) were turned into whatever
+            # character their number happened to name and inserted into the
+            # file.  Resizing the window while editing wrote a stray letter
+            # into the buffer and marked it dirty.
+            self.insert_char(chr(key))
         return None
 
     # -- main loop --------------------------------------------------------

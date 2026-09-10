@@ -91,11 +91,12 @@ class DirectorySurvey:
 def survey_directory(entries: Iterable[DirEntry]) -> DirectorySurvey:
     """Count what a sync would find at the top of ``entries``.
 
-    Symlinked directories count as files, because that is what
-    :func:`_index_tree` makes of them: it records them and does not descend, so
-    they cost one entry rather than a subtree.  A ``".."`` pseudo-entry -- which
-    a panel puts at the head of its listing, and which is not part of the
-    directory -- is ignored.
+    Symlinked directories count as files, because that is what they cost the
+    scan: :func:`_index_tree` does not descend into one, so it is a single
+    entry rather than a subtree.  (It is not copied either, but the question
+    here is how long the walk will take, not what it will find.)  A ``".."``
+    pseudo-entry -- which a panel puts at the head of its listing, and which is
+    not part of the directory -- is ignored.
     """
     survey = DirectorySurvey()
     for entry in entries:
@@ -147,6 +148,14 @@ def _index_tree(
     Directories are walked but only files are recorded -- directories are
     created implicitly as their files are copied.
 
+    A symlink to a directory is neither: it is not descended into (that would
+    copy the target twice, or for ever if it points at an ancestor), and
+    recording it as a file put a directory in the plan for :func:`copy_file` to
+    open, which is an ``IsADirectoryError`` that ended the whole sync at
+    whichever file it happened to reach first.  There is no way to make a
+    symlink through the filesystem interface, so it is left out of the plan
+    altogether and the rest of both trees still reconciles.
+
     The walk is a stack rather than recursion.  Partly so a deep tree cannot
     exhaust the interpreter's stack, but mostly because a loop has somewhere
     obvious to check for a cancel key: the scan is the slowest part of a sync
@@ -177,6 +186,8 @@ def _index_tree(
             child_path = fs.join(path, entry.name)
             if entry.is_dir and not entry.is_symlink:
                 stack.append((child_path, child_rel))
+            elif entry.is_dir:
+                continue          # a link to a directory: neither walked nor copied
             else:
                 index[child_rel] = entry
                 since_report += 1

@@ -316,10 +316,24 @@ def test_printable_and_wide_characters(sample):
     assert sample.lines[0].startswith("Zé")
 
 
-def test_a_key_outside_the_character_range_is_ignored(sample):
+@pytest.mark.parametrize("key", [
+    curses.KEY_RESIZE,     # the window was resized while editing
+    curses.KEY_MOUSE,      # a mouse report
+    curses.KEY_SR,         # Shift-Up
+    curses.KEY_F5,         # a function key with nothing bound to it
+    0x110000,              # beyond any character at all
+])
+def test_a_key_code_is_never_inserted_as_text(sample, key):
+    """A key code is not a character.
+
+    Every one of these was turned into whatever character its number named
+    and typed into the file: resizing the terminal wrote a stray letter into
+    the buffer and marked it unsaved.
+    """
     before = list(sample.lines)
-    sample.handle_key(0x110000)
+    assert sample.handle_key(key) is None
     assert sample.lines == before
+    assert sample.dirty is False
 
 
 def test_an_unrecognised_control_key_is_ignored(sample):

@@ -60,6 +60,65 @@ def test_copy_directory_tree(fs, tmp_path):
     assert read(str(dst / "nested" / "deep" / "three.txt")) == "3"
 
 
+def test_copy_leaves_a_symlinked_directory_and_copies_the_rest(fs, tmp_path):
+    """A link to a directory is neither walked nor opened as a file.
+
+    Opening one for reading is an IsADirectoryError, and it used to escape
+    copy_path and abandon whatever the walk had not reached yet.
+    """
+    root = tmp_path / "src"
+    write(str(root / "real" / "a.txt"), "A")
+    write(str(root / "z_last.txt"), "Z")
+    os.symlink(str(root / "real"), str(root / "link"))
+
+    dst = tmp_path / "dst"
+    skipped = copy_path(fs, str(root), fs, str(dst))
+
+    assert skipped == [str(root / "link")]
+    assert read(str(dst / "real" / "a.txt")) == "A"
+    assert read(str(dst / "z_last.txt")) == "Z"     # reached, not abandoned
+    assert not (dst / "link").exists()              # not an empty directory
+
+
+def test_copying_a_symlinked_directory_itself_is_skipped(fs, tmp_path):
+    real = tmp_path / "real"
+    write(str(real / "a.txt"), "A")
+    link = tmp_path / "link"
+    os.symlink(str(real), str(link))
+
+    dst = tmp_path / "dst"
+    assert copy_path(fs, str(link), fs, str(dst)) == [str(link)]
+    assert not dst.exists()
+
+
+def test_copying_a_symlinked_file_still_follows_it(fs, tmp_path):
+    """Only *directories* are skipped: a linked file copies its contents."""
+    target = tmp_path / "target.txt"
+    target.write_text("payload")
+    link = tmp_path / "link.txt"
+    os.symlink(str(target), str(link))
+
+    dst = tmp_path / "copy.txt"
+    assert copy_path(fs, str(link), fs, str(dst)) == []
+    assert dst.read_text() == "payload"
+
+
+def test_a_move_that_skipped_something_keeps_the_source(tmp_path):
+    """Deleting what the copy could not reproduce would destroy the link."""
+    left, right = LocalFileSystem(), LocalFileSystem()   # two backends: no rename
+    root = tmp_path / "src"
+    write(str(root / "real" / "a.txt"), "A")
+    os.symlink(str(root / "real"), str(root / "link"))
+
+    dst = tmp_path / "dst"
+    skipped = move_path(left, str(root), right, str(dst))
+
+    assert skipped == [str(root / "link")]
+    assert read(str(dst / "real" / "a.txt")) == "A"
+    assert (root / "link").is_symlink()      # still there to be dealt with
+    assert (root / "real" / "a.txt").exists()
+
+
 def test_count_tree(fs, tmp_path):
     root = tmp_path / "src"
     write(str(root / "a"), "12345")      # 5 bytes
@@ -87,6 +146,24 @@ def test_move_directory(fs, tmp_path):
     assert read(str(dst / "x.txt")) == "x"
     assert read(str(dst / "y" / "z.txt")) == "z"
     assert not root.exists()
+
+
+def test_sync_leaves_symlinked_directories_out_of_the_plan(fs, tmp_path):
+    """One link used to end the whole sync with an IsADirectoryError."""
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    write(str(left / "real" / "a.txt"), "A")
+    write(str(left / "z_last.txt"), "Z")
+    right.mkdir()
+    os.symlink(str(left / "real"), str(left / "link"))
+
+    plan = build_sync_plan(fs, str(left), fs, str(right))
+    assert [a.rel for a in plan.actions] == ["real/a.txt", "z_last.txt"]
+
+    assert execute_sync_plan(plan, fs, fs) == 2
+    assert read(str(right / "real" / "a.txt")) == "A"
+    assert read(str(right / "z_last.txt")) == "Z"
+    assert not (right / "link").exists()
 
 
 def test_sync_new_files_both_directions(fs, tmp_path):

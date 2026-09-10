@@ -773,12 +773,32 @@ class SFTPFileSystem(FileSystem):
         return entries
 
     def stat(self, path: str) -> DirEntry:
-        attr = self._sftp.stat(path)
+        """One entry's details, saying truthfully whether it is a symlink.
+
+        ``lstat`` first, because SFTP's ``stat`` follows links and cannot then
+        be asked what it followed -- and something has to know.  ``delete_tree``
+        asks: told a link to a directory was a plain directory, it listed it,
+        deleted what it found and so emptied the directory the link *pointed
+        at*.  A link is one ``rm`` and the target belongs to somebody else.
+
+        The rest of the answer still describes the target, exactly as the local
+        backend's ``os.stat`` does, so entering a symlinked directory and
+        reading a symlinked file go on working; only a link that resolves to
+        nothing falls back to the link's own details.  A plain file costs one
+        round trip, as before -- the second only happens for a link.
+        """
+        attr = self._sftp.lstat(path)
+        is_link = stat_mod.S_ISLNK(attr.st_mode or 0)
+        if is_link:
+            try:
+                attr = self._sftp.stat(path)
+            except Exception:
+                pass          # broken link: its own details are all there are
         mode = attr.st_mode or 0
         return DirEntry(
             name=self.basename(self.normpath(path)),
             is_dir=stat_mod.S_ISDIR(mode),
-            is_symlink=False,
+            is_symlink=is_link,
             size=attr.st_size or 0,
             mtime=float(attr.st_mtime) if attr.st_mtime else None,
             mode=mode,

@@ -109,6 +109,41 @@ def test_move_removes_the_source(app, tmp_path, monkeypatch):
     assert "Move complete" in app.message
 
 
+def test_a_copy_says_which_symlinked_directories_it_left(app, tmp_path,
+                                                         monkeypatch):
+    write(str(tmp_path / "left" / "tree" / "a.txt"), "A")
+    (tmp_path / "left" / "tree" / "sub").mkdir()
+    os.symlink(str(tmp_path / "left" / "tree" / "sub"),
+               str(tmp_path / "left" / "tree" / "link"))
+    app.left.refresh()
+    _point_at(app.left, "tree")
+    scripted = _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+
+    app._copy()
+
+    assert read(str(tmp_path / "right" / "tree" / "a.txt")) == "A"
+    assert "1 symlinked directory skipped" in app.message
+    assert "link" in scripted.last_message
+
+
+def test_a_move_that_skipped_a_link_says_the_source_was_kept(app, tmp_path,
+                                                             monkeypatch):
+    write(str(tmp_path / "left" / "tree" / "a.txt"), "A")
+    (tmp_path / "left" / "tree" / "sub").mkdir()
+    for name in ("link", "link2"):
+        os.symlink(str(tmp_path / "left" / "tree" / "sub"),
+                   str(tmp_path / "left" / "tree" / name))
+    app.left.refresh()
+    _point_at(app.left, "tree")
+    _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+
+    app._move()
+
+    assert read(str(tmp_path / "right" / "tree" / "a.txt")) == "A"
+    assert "2 symlinked directories skipped, source kept" in app.message
+    assert (tmp_path / "left" / "tree" / "a.txt").exists()
+
+
 def test_a_transfer_with_nothing_selected_does_nothing(app, tmp_path,
                                                        monkeypatch):
     app.left.move_to(0)                      # the ".." entry
@@ -171,9 +206,13 @@ def test_a_copy_cancelled_between_items(app, tmp_path, monkeypatch,
 
     copied = []
     # A copy that ignores the cancel callback, so the only place the run can
-    # stop is the check at the top of the loop.
-    monkeypatch.setattr(app_mod, "copy_path",
-                        lambda *a, **k: copied.append(a[1]))
+    # stop is the check at the top of the loop.  It skips nothing, hence the
+    # empty list every copy answers with.
+    def fake_copy(*a, **k):
+        copied.append(a[1])
+        return []
+
+    monkeypatch.setattr(app_mod, "copy_path", fake_copy)
 
     real_factory = dialogs.ProgressDialog
 

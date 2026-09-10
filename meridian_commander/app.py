@@ -1827,6 +1827,10 @@ class App:
 
         cancelled = False
         errors: list[str] = []
+        #: Symlinked directories the transfer could not reproduce.  Named
+        #: rather than left unmentioned: the alternative is a copy that looks
+        #: complete and is not.
+        skipped: list[str] = []
         try:
             for i, entry in enumerate(sources):
                 if dlg.cancelled():
@@ -1843,11 +1847,11 @@ class App:
                     continue
                 try:
                     if move:
-                        move_path(src_panel.fs, src, dst_fs, target,
-                                  progress, dlg.cancelled)
+                        skipped += move_path(src_panel.fs, src, dst_fs, target,
+                                             progress, dlg.cancelled)
                     else:
-                        copy_path(src_panel.fs, src, dst_fs, target,
-                                  progress, dlg.cancelled)
+                        skipped += copy_path(src_panel.fs, src, dst_fs, target,
+                                             progress, dlg.cancelled)
                 except OperationCancelled:
                     cancelled = True
                     break
@@ -1866,7 +1870,25 @@ class App:
         elif cancelled:
             self._set_message(f"{verb} cancelled")
         else:
-            self._set_message(f"{verb} complete: {len(sources)} item(s)")
+            self._set_message(
+                f"{verb} complete: {len(sources)} item(s)"
+                + self._skipped_note(skipped, move))
+        if skipped:
+            dialogs.message(
+                self.stdscr, f"{verb}: symlinked directories",
+                "These are links, not directories, and there is no way to "
+                "make a link on the other side, so they were left alone:\n"
+                + "\n".join(skipped[:8])
+                + ("\n\nThe source was kept." if move else ""))
+
+    @staticmethod
+    def _skipped_note(skipped: list[str], move: bool) -> str:
+        """The tail of the status line when symlinked directories were left."""
+        if not skipped:
+            return ""
+        count = len(skipped)
+        note = f" -- {count} symlinked director{'y' if count == 1 else 'ies'} skipped"
+        return note + (", source kept" if move else "")
 
     def _mkdir(self) -> None:
         panel = self.active

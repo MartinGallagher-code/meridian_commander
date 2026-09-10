@@ -35,9 +35,12 @@ FILE_MODE = stat_mod.S_IFREG | 0o644
 
 
 class _FakeSftp:
-    def __init__(self, listing=None, stats=None, home="/home/deploy"):
+    def __init__(self, listing=None, stats=None, home="/home/deploy",
+                 links=None):
         self.listing = listing or []
         self.stats = stats or {}
+        #: Paths that are symlinks, by the attributes lstat reports for them.
+        self.links = links or {}
         self.home = home
         self.calls: list = []
         self.closed = False
@@ -56,6 +59,13 @@ class _FakeSftp:
         if path in self.stats:
             return self.stats[path]
         raise FileNotFoundError(path)
+
+    def lstat(self, path):
+        """As the real one: the link itself, never what it points at."""
+        self.calls.append(("lstat", path))
+        if path in self.links:
+            return self.links[path]
+        return self.stat(path)
 
     def open(self, path, mode):
         self.calls.append(("open", path, mode))
@@ -812,6 +822,56 @@ def test_sftp_stat(sftp_fs):
     assert entry.size == 7
     assert entry.mtime == 99.0
     assert entry.is_symlink is False
+
+
+def test_sftp_stat_says_a_symlink_is_one(sftp_fs):
+    """The link flag comes from lstat; everything else still follows.
+
+    Told a link to a directory was a plain directory, delete_tree listed it
+    and removed what it found -- emptying the directory the link pointed at.
+    """
+    sftp = _FakeSftp(
+        stats={"/srv/link": _Attr("link", mode=DIR_MODE, size=4096)},
+        links={"/srv/link": _Attr("link", mode=LINK_MODE, size=9)},
+    )
+    fs, _, _ = sftp_fs(sftp=sftp)
+    entry = fs.stat("/srv/link")
+    assert entry.is_symlink is True
+    assert entry.is_dir is True          # still enterable, still readable
+    assert entry.size == 4096            # the target's, as os.stat reports
+
+
+def test_sftp_stat_of_a_broken_symlink_describes_the_link(sftp_fs):
+    sftp = _FakeSftp(links={"/srv/dangling": _Attr("dangling", mode=LINK_MODE,
+                                                   size=11)})
+    fs, _, _ = sftp_fs(sftp=sftp)
+    entry = fs.stat("/srv/dangling")
+    assert entry.is_symlink is True
+    assert entry.is_dir is False
+    assert entry.size == 11
+
+
+def test_sftp_stat_of_a_plain_file_costs_one_round_trip(sftp_fs):
+    """Only a link pays for the second call."""
+    sftp = _FakeSftp(stats={"/srv/a.txt": _Attr("a.txt")})
+    fs, _, _ = sftp_fs(sftp=sftp)
+    fs.stat("/srv/a.txt")
+    assert [c for c in sftp.calls if c[0] in ("stat", "lstat")] == \
+        [("lstat", "/srv/a.txt"), ("stat", "/srv/a.txt")]
+
+
+def test_sftp_delete_tree_removes_a_symlinked_directory_as_a_link(sftp_fs):
+    sftp = _FakeSftp(
+        stats={"/srv/link": _Attr("link", mode=DIR_MODE)},
+        links={"/srv/link": _Attr("link", mode=LINK_MODE)},
+        listing=[_Attr("keep.txt", mode=FILE_MODE)],
+    )
+    fs, _, _ = sftp_fs(sftp=sftp)
+    fs.delete_tree("/srv/link")
+    assert ("remove", "/srv/link") in sftp.calls
+    # The target was neither listed nor emptied.
+    assert not [c for c in sftp.calls if c[0] in ("listdir_attr", "rmdir")]
+    assert ("remove", "/srv/link/keep.txt") not in sftp.calls
 
 
 def test_sftp_stat_without_a_timestamp(sftp_fs):
