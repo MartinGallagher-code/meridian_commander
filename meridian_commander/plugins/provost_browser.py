@@ -38,7 +38,7 @@ import time
 from .. import theme
 from ..config import plugin_settings
 from ..plugin_api import PanePlugin
-from ..util import human_size
+from ..util import human_size, typed_char
 from ._tabular import read_text
 
 DEFAULTS = {
@@ -569,8 +569,10 @@ class ProvostBrowser(PanePlugin):
             view.set_filter("")
         elif key == 9:
             return None
-        elif 32 <= key < 0x110000:
-            view.set_filter(view.filter + chr(key))
+        else:
+            char = typed_char(key)
+            if char is not None:
+                view.set_filter(view.filter + char)
         return True
 
     # -- drawing --------------------------------------------------------------

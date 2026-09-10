@@ -309,6 +309,14 @@ def test_filter_narrows_the_table(plugin):
     assert len(plugin.stack) == 2
 
 
+def test_a_key_code_is_not_typed_into_the_filter(plugin):
+    keys(plugin, 10, "/", "s")
+    view = plugin.stack[-1]
+    keys(plugin, curses.KEY_RESIZE, curses.KEY_MOUSE, curses.KEY_F5)
+    keys(plugin, "d")
+    assert view.filter == "sd"
+
+
 def test_filter_backspace_and_ctrl_u(plugin):
     keys(plugin, "/", "d", "f")
     view = plugin.stack[-1]

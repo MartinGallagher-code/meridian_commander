@@ -263,6 +263,19 @@ def test_filter_matches_the_user_too(plugin):
     assert [p.pid for p in plugin.view] == [314]
 
 
+def test_a_key_code_is_not_typed_into_the_filter(plugin):
+    """Resizing the window while filtering used to append a stray letter."""
+    plugin.handle_key(ord("/"))
+    for ch in "ngin":
+        plugin.handle_key(ord(ch))
+    for key in (curses.KEY_RESIZE, curses.KEY_MOUSE, curses.KEY_UP,
+                curses.KEY_F5):
+        assert plugin.handle_key(key) is True
+    plugin.handle_key(ord("x"))
+    assert plugin.filter == "nginx"
+    assert [p.pid for p in plugin.view] == [999]
+
+
 def test_escape_clears_the_filter(plugin):
     plugin.handle_key(ord("/"))
     plugin.handle_key(ord("z"))

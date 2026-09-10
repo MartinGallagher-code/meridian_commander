@@ -134,7 +134,16 @@ def ensure_config() -> str:
 
 
 def load() -> configparser.ConfigParser:
-    parser = configparser.ConfigParser()
+    """The config file, parsed.  A missing or broken file yields an empty one.
+
+    ``interpolation=None`` because every value here is a literal, not a
+    template: an editor of ``vim -c "set titlestring=%f"`` or a pager of
+    ``less -Ps%f`` is an ordinary setting, and with interpolation on the ``%``
+    made writing it raise ``ValueError`` and reading it back raise
+    ``InterpolationSyntaxError`` -- out of :func:`external_viewer`, which F3
+    calls, so the file manager exited on a keystroke.
+    """
+    parser = configparser.ConfigParser(interpolation=None)
     try:
         parser.read(config_path())
     except (OSError, configparser.Error):

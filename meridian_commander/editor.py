@@ -16,6 +16,7 @@ import curses
 
 from . import theme
 from .filesystems import FileSystem
+from .util import typed_char
 
 MAX_EDIT_BYTES = 8 * 1024 * 1024
 
@@ -254,17 +255,12 @@ class Editor:
             self.newline()
         elif key == 9:  # Tab
             self.insert_char("    ")
-        elif 32 <= key < 127:
-            self.insert_char(chr(key))
-        elif 127 < key < curses.KEY_MIN:
-            # A byte above ASCII -- part of a typed character.  Stopping at
-            # KEY_MIN is the point: everything from there up is a *key code*,
-            # not text, and the ones this editor does not bind (a terminal
-            # resize, a mouse report, Shift-Left, F5) were turned into whatever
-            # character their number happened to name and inserted into the
-            # file.  Resizing the window while editing wrote a stray letter
-            # into the buffer and marked it dirty.
-            self.insert_char(chr(key))
+        else:
+            # Text, and only text: a key code (a resize, a mouse report, an
+            # unbound function key) is not a character to type into the file.
+            char = typed_char(key)
+            if char is not None:
+                self.insert_char(char)
         return None
 
     # -- main loop --------------------------------------------------------

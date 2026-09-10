@@ -15,11 +15,16 @@ plugin, and apply one rule to the whole set:
 Prefix any rule with ``preview`` to see the old -> new mapping without touching
 a thing.  Nothing is renamed unless the whole set is safe: a rule that would
 collide two names onto one, or land on a name that already exists, is refused
-in full so the pane is never left half-renamed.  It renames through the pane's
-own filesystem, so it works on remote (SFTP/SSH/FTP) panes as well as local.
+in full so the pane is never left half-renamed.  A set that merely *reorders*
+its own names -- a shift, or a swap -- is allowed, and is carried out in an
+order that never writes over a file still waiting to move.  It renames through
+the pane's own filesystem, so it works on remote (SFTP/SSH/FTP) panes as well
+as local.
 """
 
 from __future__ import annotations
+
+from typing import Callable
 
 from ..plugin_api import Command, InputOutputPlugin
 
@@ -67,6 +72,60 @@ def rename_one(name: str, verb: str, args: list[str], index: int) -> str:
         except (KeyError, IndexError, ValueError) as exc:
             raise ValueError(f"bad template: {exc}") from exc
     raise ValueError(f"unknown verb '{verb}' (try {', '.join(VERBS)})")
+
+
+#: Name a file is parked under while a cycle of renames is broken.  It is
+#: gone again by the end of the same rule; the prefix only has to be something
+#: nothing else in the directory is called.
+TEMP_PREFIX = ".mc-rename-"
+
+
+def order_renames(
+    plan: list[tuple[str, str]],
+    exists: Callable[[str], bool],
+) -> list[tuple[str, str, str | None]]:
+    """Order ``plan`` so no rename lands on a file that has not moved yet.
+
+    A validated plan can still destroy a file when it is carried out in the
+    order it was built: ``a.txt -> n1.txt`` together with ``n1.txt -> n2.txt``
+    is safe as a *set* -- nothing ends up sharing a name -- and fatal in that
+    order, because the first rename writes over ``n1.txt`` before the second
+    can move it.  Two files went in and one came out.
+
+    So the moves are sorted here instead: at each step take one whose target
+    is not still occupied.  When none is (every remaining move lands on a file
+    that is itself waiting to move -- a true cycle, which is what a swap is),
+    park one file under a name nothing uses and the cycle becomes a chain.
+
+    ``exists(name)`` says whether a name is taken in the directory.  Returns
+    ``(source, target, shown)`` triples; ``shown`` is the name to report the
+    move under, or ``None`` for a parking step, which is bookkeeping rather
+    than something the user asked for.
+    """
+    remaining = [(old, new, old) for old, new in plan]
+    occupied = {old for old, _ in plan}
+    reserved = occupied | {new for _, new in plan}
+    steps: list[tuple[str, str, str | None]] = []
+    counter = 0
+    while remaining:
+        index = next((i for i, (_s, target, _n) in enumerate(remaining)
+                      if target not in occupied), None)
+        if index is None:
+            source, target, shown = remaining[0]
+            counter += 1
+            parked = f"{TEMP_PREFIX}{counter}"
+            while parked in reserved or exists(parked):
+                counter += 1
+                parked = f"{TEMP_PREFIX}{counter}"
+            reserved.add(parked)
+            steps.append((source, parked, None))
+            occupied.discard(source)
+            remaining[0] = (parked, target, shown)
+            continue
+        source, target, shown = remaining.pop(index)
+        steps.append((source, target, shown))
+        occupied.discard(source)
+    return steps
 
 
 class MultiRename(InputOutputPlugin):
@@ -136,13 +195,17 @@ class MultiRename(InputOutputPlugin):
         fs = self.ctx.other_fs
         root = self.ctx.other_path
         done = 0
-        for old, new in changed:
+        steps = order_renames(changed,
+                              lambda name: fs.exists(fs.join(root, name)))
+        for source, target, shown in steps:
             try:
-                fs.rename(fs.join(root, old), fs.join(root, new))
-                self.print(f"  {old} -> {new}")
-                done += 1
+                fs.rename(fs.join(root, source), fs.join(root, target))
             except Exception as exc:
-                self.print(f"  ! {old}: {exc}")
+                self.print(f"  ! {shown or source}: {exc}")
+                continue
+            if shown is not None:
+                self.print(f"  {shown} -> {target}")
+                done += 1
         try:
             self.ctx.refresh_other()
         except Exception:

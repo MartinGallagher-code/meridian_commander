@@ -39,3 +39,9 @@ and the built-in editor is used for that edit.
 the command you chose is not on your `PATH`. See
 [Editing with your own editor](usage.md#editing-with-your-own-editor) for what
 happens on a remote pane.
+
+A `%` in a value is an ordinary character, here and in `presets.ini`: a pager
+of `less -Ps%f`, an editor of `vim -c "set titlestring=%f"` and a saved
+location under `/srv/reports/100%complete` all mean what they say. Both files
+are read with INI interpolation switched off, since every value in them is a
+literal rather than a template.
