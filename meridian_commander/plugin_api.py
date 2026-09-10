@@ -256,6 +256,14 @@ class InputOutputPlugin(PanePlugin):
     #: Row offered by a path picker for the commands that also run bare.
     ANY_PATH = "(everything -- no path)"
 
+    #: Lines of output kept.  The terminal plug-in has always trimmed its
+    #: scrollback; this area never did, and it is the one a plug-in can print
+    #: into for ever -- "follow" on a busy log appends every new line for as
+    #: long as it is watched, and nothing dropped the old ones.  2000 lines is
+    #: what the terminal keeps, which is more than a pane can show and far
+    #: more than anyone scrolls back through.
+    MAX_OUTPUT = 2000
+
     def on_start(self) -> None:
         self.output: list[str] = []
         self.scroll = 0            # 0 = pinned to the bottom
@@ -278,9 +286,16 @@ class InputOutputPlugin(PanePlugin):
         raise NotImplementedError
 
     def print(self, text: str) -> None:
-        """Append text (possibly multi-line) to the output area."""
+        """Append text (possibly multi-line) to the output area.
+
+        The oldest lines fall off the top once there are more than
+        :attr:`MAX_OUTPUT` of them, so a plug-in that prints for as long as it
+        is left running does not grow without limit.
+        """
         for line in str(text).splitlines() or [""]:
             self.output.append(line)
+        if len(self.output) > self.MAX_OUTPUT:
+            del self.output[: len(self.output) - self.MAX_OUTPUT]
         self.scroll = 0
 
     def command_options(self, command: Command) -> list[str] | None:

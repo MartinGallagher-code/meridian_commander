@@ -81,6 +81,41 @@ def test_saving_writes_the_buffer(sample, tmp_path):
     assert "Saved" in sample.message
 
 
+def test_saving_puts_back_the_line_endings_it_found(fs, tmp_path):
+    """A file from Windows must not be rewritten because a key was pressed.
+
+    Every line ending in it changed the moment one character was typed and
+    saved: a whole-file diff nobody asked for, and on a .bat a change of
+    meaning.
+    """
+    path = tmp_path / "setup.bat"
+    path.write_bytes(b"@echo off\r\nset X=1\r\n")
+    editor = Editor(fs, str(path))
+    assert editor.line_ending == "\r\n"
+    editor.insert_char("R")
+    assert editor.save() is True
+    assert path.read_bytes() == b"R@echo off\r\nset X=1\r\n"
+
+
+def test_a_unix_file_stays_unix(fs, tmp_path):
+    path = tmp_path / "run.sh"
+    path.write_bytes(b"#!/bin/sh\necho hi\n")
+    editor = Editor(fs, str(path))
+    assert editor.line_ending == "\n"
+    editor.insert_char("#")
+    editor.save()
+    assert path.read_bytes() == b"##!/bin/sh\necho hi\n"
+
+
+def test_a_new_file_is_written_with_unix_endings(fs, tmp_path):
+    editor = Editor(fs, str(tmp_path / "fresh.txt"))
+    editor.insert_char("a")
+    editor.newline()                      # the Enter key, not the setting
+    editor.insert_char("b")
+    editor.save()
+    assert (tmp_path / "fresh.txt").read_bytes() == b"a\nb"
+
+
 def test_a_read_only_buffer_refuses_to_save(fs, tmp_path, monkeypatch):
     monkeypatch.setattr(editor_mod, "MAX_EDIT_BYTES", 5)
     path = tmp_path / "big.txt"

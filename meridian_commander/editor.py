@@ -42,6 +42,12 @@ class Editor:
         self.error: str | None = None
         self.readonly = False
         self.show_line_numbers = True
+        #: What ended the lines in the file as it was read, so saving puts
+        #: them back the same way.  Everything in between works in "\n"; a
+        #: file written on Windows would otherwise come back with every line
+        #: ending rewritten because one character was typed into it.  (Not
+        #: "newline": that is the Enter key's method.)
+        self.line_ending = "\n"
         self._load()
 
     def _load(self) -> None:
@@ -65,6 +71,12 @@ class Editor:
             self.message = "File too large -- read only"
             data = data[:MAX_EDIT_BYTES]
         text = data.decode("utf-8", errors="replace")
+        # CRLF is the one worth keeping: it is what a file from Windows has,
+        # and it survives the round trip.  A lone CR (a file from before OS X)
+        # is read the same way and saved as LF, which is the conversion the
+        # "Normalise text" plug-in exists to make deliberately.
+        if "\r\n" in text:
+            self.line_ending = "\r\n"
         text = text.replace("\r\n", "\n").replace("\r", "\n")
         # split() always yields at least one element, so the buffer is never
         # empty and always has a line for the cursor to sit on.
@@ -75,7 +87,7 @@ class Editor:
         if self.readonly:
             self.message = "Read-only: cannot save"
             return False
-        data = "\n".join(self.lines).encode("utf-8")
+        data = self.line_ending.join(self.lines).encode("utf-8")
         try:
             writer = self.fs.open_write(self.path)
             try:
