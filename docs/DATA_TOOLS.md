@@ -101,6 +101,9 @@ file `‹name›.cleaned.csv` — the source is never modified. Prefix any comma
 **filter operators:** `==` `!=` `>` `<` `>=` `<=` `contains` (numeric comparison
 when both sides are numbers, otherwise text).
 
+`drop` and `keep` both need at least one column named, and neither will leave
+the table with no columns at all.
+
 **Preview before committing:**
 
 ```

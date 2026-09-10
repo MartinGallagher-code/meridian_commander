@@ -13,6 +13,26 @@ day the version was cut.
 
 ### Fixed
 
+- **"Normalise text" rewrote the line endings of a Windows file asked only to
+  have its trailing spaces stripped.** All four line rules shared one working
+  form — the file taken apart on `\n` — because `trim` cannot reach the
+  whitespace in front of a `\r\n` until the `\r` is out of the way. Only `lf`
+  and `crlf` were asked to change the endings, so `trim` and `finalnl` now put
+  back whatever the file arrived with (CRLF, a lone CR, or LF). The rule
+  writes in place, so this was every line of a `.bat` changed by a command
+  that said it had stripped trailing space.
+- **`keep` with no columns named wrote a file of blank lines.** An empty
+  column list resolved to no columns at all, and "keep none of them" was
+  carried out: the output had no header and one empty row per input row, and
+  the plug-in reported it as a success ("keep (400 -> 400 rows)"). Naming no
+  column is a typo rather than an instruction, and `drop` and `keep` now say
+  so; so does a `drop` that would leave the table with no columns.
+- **`tail 0` in "Profile table" showed the whole table.** `rows[-0:]` is
+  `rows[0:]`, so asking for no rows printed every one of them. Asking for
+  none now shows none, a negative count is refused rather than silently
+  slicing from the wrong end, and `tail` of more rows than the table has
+  shows all of them (it used to drop the first few).
+
 - **The editor rewrote every line ending in a file from Windows.** Lines are
   normalised to `\n` on the way in, which is right for editing, and saved the
   same way, which was not: typing one character into a `.bat` — or any file on

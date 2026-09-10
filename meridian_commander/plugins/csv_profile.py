@@ -163,5 +163,12 @@ class CsvProfile(InputOutputPlugin):
             count = int(rest) if rest else int(self.config["preview_rows"])
         except ValueError:
             return f"usage: {verb} [n]"
-        rows = table.rows[:count] if verb == "head" else table.rows[-count:]
+        if count < 0:
+            return f"usage: {verb} [n]  (n cannot be negative)"
+        if verb == "head":
+            rows = table.rows[:count]
+        else:
+            # ``rows[-count:]`` is the whole table when count is 0, because
+            # -0 is 0; the number of rows asked for was none.
+            rows = table.rows[-count:] if count else []
         return tabular.format_rows(table.header, rows)

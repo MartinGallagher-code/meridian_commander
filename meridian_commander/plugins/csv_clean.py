@@ -180,10 +180,18 @@ class CsvClean(InputOutputPlugin):
 
         if verb in ("drop", "keep"):
             idxs = table.indices(rest)
+            # A bare ``keep`` resolves to no columns, and keeping no columns
+            # once wrote out a file of blank lines and called it a success.
+            # Naming nothing is a typo, not an instruction; so is dropping
+            # every column there is.
+            if not idxs:
+                raise ValueError(f"usage: {verb} <column>[,<column>...]")
             if verb == "drop":
                 keep_idx = [i for i in range(len(header)) if i not in set(idxs)]
             else:
                 keep_idx = idxs
+            if not keep_idx:
+                raise ValueError(f"{verb} {rest} would leave no columns")
             new_header = [header[i] for i in keep_idx]
             new_rows = [[row[i] if i < len(row) else "" for i in keep_idx]
                         for row in rows]
