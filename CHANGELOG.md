@@ -11,6 +11,26 @@ day the version was cut.
 
 ## [Unreleased]
 
+### Added
+
+- **The Git plug-in opens on a summary, and can push.** The pane used to be a
+  prompt that echoed `git`: everything it knew, it knew because you had typed
+  a command. It now leads with the state of the repository — branch, upstream,
+  how far ahead or behind, what is staged and what is not, the last commit,
+  the stash, and a warning when a merge or rebase is half-finished — with the
+  changed files under it, redrawn after every command that can change it.
+  `switch` (with the branches offered in the F2 menu), `stash` and `pop` join
+  the existing verbs, and switching or pulling now reloads the file pane next
+  door instead of leaving it showing a tree that no longer exists.
+- **`fetch`, `pull` and `push` in the Git plug-in.** They were left out because
+  `git` can stop dead waiting for a credential a line-oriented pane cannot
+  type, which is a real failure but a fixable one: the prompts are switched
+  off so git reports the problem instead of waiting for it, every network
+  command runs under a timeout so an unanticipated hang still ends in a
+  message, and the common failures come back with a line saying what to do.
+  `push` on a branch with no upstream sets one rather than printing the longer
+  command for you to retype.
+
 ### Fixed
 
 - **A typed relative path was measured from the wrong directory.** "Go to

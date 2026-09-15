@@ -63,8 +63,17 @@ Run remote script) have no menu, and the three that already run on keys
   grows (`follow`, like `tail -f`), from whichever pane it lives on.
 - **Inspect file** — identify the other pane's cursor file from its magic
   bytes and show an offset/hex/ASCII dump of its start.
-- **Git** — status, log, diff, add, unstage, branch and commit in a local
-  pane's repository (no network commands, so it can't block on a prompt).
+- **Git** — a local pane's repository at a glance and the everyday workflow
+  over it. The pane opens on a summary — branch, upstream, how far ahead or
+  behind, what is staged, the last commit, the stash, and a warning when a
+  merge or rebase is half-finished — with the changed files listed under it,
+  and redraws after every command that can change it (Enter alone redraws).
+  On top of `log`, `diff`, `add`, `unstage`, `branch` and `commit` it has
+  `switch` (the F2 menu offers the branches), `stash`/`pop`, and the network
+  commands `fetch`, `pull` and `push`. `push` on a branch with no upstream
+  sets one rather than telling you to retype the command. Switching branches
+  or pulling reloads the file pane next door, which is otherwise showing a
+  tree that no longer exists.
 - **Provost data** — browse a [provost](https://pypi.org/project/provost/)
   store from the other pane's location: datasets as aligned, scrollable,
   filterable tables; the capture log (`l`), each capture with its metadata and
