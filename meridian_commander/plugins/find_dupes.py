@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Built-in plugin: find duplicate files under the other pane.
 
 Files are grouped first by size -- a cheap read of the directory listing -- and

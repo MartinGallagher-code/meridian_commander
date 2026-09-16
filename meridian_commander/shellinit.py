@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Shell integration: leave the shell in the directory you browsed to.
 
 A program cannot change its parent shell's directory -- nothing on Unix can

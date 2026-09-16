@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The menu bar: its layout, the keys that open it, and what it runs."""
 
 from __future__ import annotations

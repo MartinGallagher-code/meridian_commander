@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Shared test harness: screen stand-ins, scripted dialogs and fake backends.
 
 The guiding rule is that only the *terminal* and the *blocking dialogs* are

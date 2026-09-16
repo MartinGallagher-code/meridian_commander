@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Built-in plugin: show the tail of a file, once or as it grows.
 
 Play a log into the output area, from whichever pane it lives on:

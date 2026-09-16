@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The Markdown renderer and its viewer.
 
 Assertions are on the rendered *text and styles* together, because the styles

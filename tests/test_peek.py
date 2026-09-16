@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Head and tail of a file at once, inside a pane: reading, folding, drawing."""
 
 from __future__ import annotations

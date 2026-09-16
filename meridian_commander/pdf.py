@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Read the text out of a PDF, and its page images.
 
 A PDF page is a program, not a document: a content stream of operators that

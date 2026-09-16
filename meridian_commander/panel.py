@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """A single directory panel: listing, cursor, selection and scrolling.
 
 A panel owns a :class:`~meridian_commander.filesystems.FileSystem` and a current

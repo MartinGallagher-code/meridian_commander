@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Built-in plugin: compose datasets from files in the *other* pane.
 
 This leans on Meridian Commander's two-pane model: tag one or more CSV/TSV files

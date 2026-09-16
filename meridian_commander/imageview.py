@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Draw images in a terminal, as coloured half-blocks.
 
 A terminal cell is about twice as tall as it is wide, so treating one cell as

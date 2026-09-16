@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Meridian Commander -- a Midnight Commander style terminal file manager.
 
 Two panes, local and networked (SFTP/FTP) browsing, cross-location copy/move,

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Built-in plugin: recursively search the *other* pane's directory.
 
 This is the simplest useful demonstration of the plugin API: it reads the

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The terminal graphics protocols: detection, geometry, Sixel and kitty.
 
 The encoders are checked by decoding their output again rather than by

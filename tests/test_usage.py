@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Directory sizes: the resumable walk, the pane's totals, and the overlay."""
 
 from __future__ import annotations

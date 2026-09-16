@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Formatting helpers, config parsing, and the awkward corners of copy/sync."""
 
 from __future__ import annotations

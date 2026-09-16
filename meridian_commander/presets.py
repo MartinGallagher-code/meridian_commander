@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Saved locations ("presets") you can return to in one keystroke.
 
 A preset remembers *where* a pane was pointing -- the connection details and

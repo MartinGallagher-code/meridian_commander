@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The PDF object layer: lexing, cross-references, object streams, filters.
 
 Fixtures are written out byte by byte in ``support``.  The reader was checked

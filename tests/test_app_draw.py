@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The application's drawing: panes, status line, function bar, main loop."""
 
 from __future__ import annotations

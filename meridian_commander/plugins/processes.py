@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Built-in plugin: a process browser and killer for the pane's host.
 
 Like the terminal, the plugin follows the pane's location:

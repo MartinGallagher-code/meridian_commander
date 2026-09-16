@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Tests for the filesystem-agnostic core: copy, move and sync.
 
 These exercise the real code paths using the local filesystem backend and

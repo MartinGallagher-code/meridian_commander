@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The colour engine and the chrome it draws: roles, glyphs, frames, shadows."""
 
 from __future__ import annotations

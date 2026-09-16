@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """A full-screen, scrollable grid browser for spreadsheets.
 
 Why full screen rather than a pane plug-in: on an 80-column terminal a pane is

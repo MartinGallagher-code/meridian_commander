@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Decode image files to pixels using the standard library alone.
 
 Every format handled here decompresses with something already in Python:

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Bidirectional directory synchronization.
 
 The goal, in the user's words, is that *all of the latest versions of the files

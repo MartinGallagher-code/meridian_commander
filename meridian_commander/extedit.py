@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Handing a file to an outside program -- an editor for F4, a pager for F3.
 
 Editing with an outside editor -- vi, vim, or whatever ``[ui] editor`` names.

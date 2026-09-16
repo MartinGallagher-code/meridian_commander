@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Built-in plugin: a pseudo-terminal running *inside* the pane.
 
 The terminal appears in the pane's rectangle (the other pane keeps working

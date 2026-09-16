@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The stdlib .xlsx reader.
 
 Every fixture is a real zip archive with the part layout a spreadsheet

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Show a Markdown file roughly as it is meant to look, in a terminal.
 
 The other readers here throw formatting away, because a spreadsheet's meaning

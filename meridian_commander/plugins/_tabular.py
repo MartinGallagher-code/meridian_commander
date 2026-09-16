@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Shared helpers for the CSV/TSV/JSONL data plugins.
 
 Pure standard library (``csv``, ``json``, ``statistics``).  Everything here goes

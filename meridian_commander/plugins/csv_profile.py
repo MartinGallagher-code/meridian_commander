@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Built-in plugin: profile the tabular file selected in the *other* pane.
 
 Highlight (or tag) a CSV/TSV in the opposite pane, open this plugin, and it

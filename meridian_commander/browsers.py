@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Choosing which full-screen browser opens a file.
 
 Each browser knows one kind of content and nothing about the others; this is

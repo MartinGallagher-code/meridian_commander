@@ -14,7 +14,8 @@ description = "Two-pane terminal file manager (Midnight Commander style): local 
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "GPL-3.0-or-later" }
-authors = [{ name = "Martin Gallagher" }]
+authors = [{ name = "Martin J. Gallagher" }]
+maintainers = [{ name = "Martin J. Gallagher" }]
 keywords = [
     "file-manager", "tui", "curses", "terminal", "two-pane",
     "midnight-commander", "sftp", "ssh", "ftp", "sync",

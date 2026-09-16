@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The setup.py guard against a setuptools too old to read pyproject.toml.
 
 The failure it exists to prevent is a quiet one -- an old setuptools ignores

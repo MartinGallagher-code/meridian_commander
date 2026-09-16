@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The image browser: quantisation, half-block drawing, panning and zoom.
 
 Drawing is tested on a real curses screen over a pseudo-terminal, the same way

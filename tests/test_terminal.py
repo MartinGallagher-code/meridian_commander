@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The in-pane terminal: the vt100 emulator and the plug-in that drives it."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Two files side by side: the alignment, the drawing and the key loop."""
 
 from __future__ import annotations

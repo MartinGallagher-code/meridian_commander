@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Read ``.pptx`` / ``.pptm`` presentations using the standard library alone.
 
 A deck's text lives in DrawingML (``<a:p>`` paragraphs of ``<a:r>`` runs of

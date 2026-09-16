@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The Turbo Vision colour engine: sixteen colours, named roles, and chrome.
 
 Everything the application draws is expressed in the sixteen colours an EGA

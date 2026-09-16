@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """A scrollable read-only file viewer with optional line numbers and search.
 
 Works on any filesystem: the file is streamed through the backend's

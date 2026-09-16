@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Running files from the panels: Enter, the Run menu entry, and runner.py."""
 
 from __future__ import annotations

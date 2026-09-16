@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The provost store browser plug-in, over a real store built on disk."""
 
 from __future__ import annotations

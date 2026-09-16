@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The application's file operations: copy, move, delete, mkdir, sync, view."""
 
 from __future__ import annotations

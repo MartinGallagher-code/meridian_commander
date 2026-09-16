@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Browsing zip and tar archives as read-only filesystems.
 
 Every fixture is a real archive written by the standard library, so what is

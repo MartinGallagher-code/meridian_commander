@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The pane plugin API.
 
 A *pane plugin* takes over one of the two panes: it draws inside that pane's

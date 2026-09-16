@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The full-screen spreadsheet grid: layout, movement, search and drawing."""
 
 from __future__ import annotations

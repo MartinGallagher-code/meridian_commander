@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Browse a zip or tar archive as though it were a directory.
 
 An archive is not a document, so this is not a viewer: it is a read-only

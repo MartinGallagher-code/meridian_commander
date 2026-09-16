@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """SSH connection resolution and the SFTP backend, against paramiko fakes."""
 
 from __future__ import annotations

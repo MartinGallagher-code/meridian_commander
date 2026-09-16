@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Handing a file to an outside editor: the command, and the round trip."""
 
 from __future__ import annotations
