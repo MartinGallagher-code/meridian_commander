@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Filesystem I/O helpers shared by the built-in plug-ins.
 
 Everything goes through the :class:`~meridian_commander.filesystems.FileSystem`

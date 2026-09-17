@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The head and the tail of a file at once, shown inside a pane.
 
 What you usually want from a log or a data file is both ends: the header row

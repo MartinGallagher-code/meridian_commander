@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The PDF object layer: lexer, object graph, cross-references and filters.
 
 A PDF is not a document format so much as a small object database with a

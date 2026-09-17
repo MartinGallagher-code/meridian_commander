@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Build-time guard against a setuptools too old to read pyproject.toml.
 
 All of this project's packaging metadata lives in ``pyproject.toml`` under the

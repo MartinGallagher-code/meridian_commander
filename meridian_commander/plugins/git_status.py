@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Built-in plugin: a small git client for the other pane's working tree.
 
 Point the other pane at a git repository and drive the everyday workflow

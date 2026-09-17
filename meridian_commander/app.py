@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The Meridian Commander application: a two-pane terminal file manager.
 
 This module wires the pieces together -- two :class:`~meridian_commander.panel.Panel`
@@ -885,7 +887,9 @@ class App:
             "A two-pane terminal file manager: local, SFTP, SSH and FTP,\n"
             "with a viewer, an editor, archives and plug-ins.\n"
             "\n"
-            "Copyright (C) 2026 Martin J. Gallagher.  GPLv3 or later."
+            "Copyright (C) 2026 Martin J. Gallagher\n"
+            "License: GPL-3.0-or-later "
+            "<https://www.gnu.org/licenses/gpl-3.0.html>"
         ))
 
     def _activate_entry(self) -> None:

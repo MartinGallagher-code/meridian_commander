@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Built-in plugin: browse a provost store -- datasets, captures and sources.
 
 `provost <https://pypi.org/project/provost/>`_ turns command output into data:

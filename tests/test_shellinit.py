@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Leaving the shell where you browsed to: --printwd and --shell-init."""
 
 from __future__ import annotations

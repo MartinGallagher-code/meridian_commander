@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Deciding how to run a file: the ``#!`` line and the executable bit.
 
 The rule Enter follows in the panels, factored out so it can be tested on its

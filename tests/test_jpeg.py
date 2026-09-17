@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The DC-only JPEG decoder.
 
 Fixtures come from the miniature encoder in ``support``: every block carries a

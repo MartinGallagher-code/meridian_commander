@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Built-in plugin: pack the *other* pane's tagged files into an archive.
 
 ``archive.py`` lets a pane step *into* a ``.zip`` or ``.tar`` and browse it;

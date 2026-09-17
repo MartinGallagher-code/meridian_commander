@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Built-in plugin: identify a file and show a hex dump of its start.
 
 Point the other pane's cursor at a file (or tag one) and open this to see what

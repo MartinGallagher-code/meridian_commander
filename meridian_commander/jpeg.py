@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Decode JPEG to a 1/8-scale image, by reading DC coefficients only.
 
 A full JPEG decoder in pure Python is slow in a way a file manager cannot

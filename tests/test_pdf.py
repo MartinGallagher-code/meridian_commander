@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """PDF text extraction, page images and the browser.
 
 The extractor was checked against reportlab and qpdf output alongside pypdf's

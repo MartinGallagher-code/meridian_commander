@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The SSH-shell backend: ls parsing, the cat/dd/scp fallback chain, writes."""
 
 from __future__ import annotations

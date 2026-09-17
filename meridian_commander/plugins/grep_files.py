@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Built-in plugin: recursively search the *other* pane's files by content.
 
 The sibling of :mod:`find_files`: where that matches file *names*, this matches

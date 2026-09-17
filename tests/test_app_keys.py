@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Key dispatch, the mouse, the plug-in/config menus, find, and main()."""
 
 from __future__ import annotations

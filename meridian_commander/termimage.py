@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Real pixels in the terminal: the Sixel and kitty graphics protocols.
 
 :mod:`~meridian_commander.imageview` draws with half-block characters, which

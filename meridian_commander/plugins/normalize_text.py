@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Built-in plugin: tidy whitespace in the other pane's tagged text files.
 
 The batch-edit cousin of the CSV cleaners, for plain text: tag files in the

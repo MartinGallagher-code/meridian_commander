@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Read ``.docx`` / ``.docm`` documents using the standard library alone.
 
 A Word document is `word/document.xml` inside the OOXML package: a flat

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Built-in plugin: compare this pane's directory tree against the other's.
 
 The *seeing* half of synchronising: where the ``s`` sync copies differences,

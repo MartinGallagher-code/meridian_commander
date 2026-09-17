@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The built-in text editor: loading, editing, saving and drawing."""
 
 from __future__ import annotations

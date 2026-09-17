@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Two files side by side, aligned line for line and scrolled as one.
 
 The pane on the left of the screen shows the file picked in the left pane and

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Meridian Commander's configuration file.
 
 Everything lives in one INI file, created with commented defaults on first

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """A small but real modal-free text editor.
 
 It supports the operations one actually needs while file managing: moving the

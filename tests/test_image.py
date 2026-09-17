@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The image decoders: PNG, GIF, BMP, Netpbm, and the formats we only measure.
 
 Fixtures are built byte by byte in ``support`` rather than by an imaging

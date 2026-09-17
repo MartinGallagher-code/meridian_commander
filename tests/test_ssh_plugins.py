@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The two SSH-backed plug-ins, against a paramiko-shaped stand-in.
 
 No network and no paramiko: the plug-ins reach the server through

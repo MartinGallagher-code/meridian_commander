@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Measuring what is underneath a directory, a little at a time.
 
 A pane that shows how much each of its subdirectories holds cannot afford to

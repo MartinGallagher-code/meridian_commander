@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
+
 # Sphinx configuration for the Read the Docs manual.
 #
 # This directory is also the GitHub Pages site (index.html, style.css,
@@ -17,8 +20,8 @@ sys.path.insert(0, os.path.abspath(".."))
 from meridian_commander import __version__
 
 project = "Meridian Commander"
-author = "Martin Gallagher"
-copyright = "Martin Gallagher"
+author = "Martin J. Gallagher"
+copyright = "2026, Martin J. Gallagher"
 version = __version__
 release = __version__
 

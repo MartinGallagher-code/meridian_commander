@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Reusable curses dialogs: messages, prompts, menus, drop-downs, progress.
 
 These are deliberately self-contained helpers that draw a centred window over

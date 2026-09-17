@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Read ``.xlsx`` / ``.xlsm`` workbooks using the standard library alone.
 
 An OOXML spreadsheet is a zip archive of XML parts, so :mod:`zipfile` and

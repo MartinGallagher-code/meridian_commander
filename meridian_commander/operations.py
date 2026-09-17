@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """File transfer operations that work across any pair of filesystems.
 
 Because every location implements the :class:`~meridian_commander.filesystems.FileSystem`

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The stdlib .docx reader and the document viewer.
 
 Fixtures are real zip archives with the part layout Word writes, so what is

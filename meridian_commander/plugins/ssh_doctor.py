@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Built-in plugin: diagnose the SSH keys in ``~/.ssh`` and fix the legacy ones.
 
 This closes the loop on the connect failure the SFTP/SSH backends translate for

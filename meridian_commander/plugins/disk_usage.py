@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Built-in plugin: what is taking up the space under the other pane.
 
 An ``ncdu``-lite: it sums every file beneath each of the other pane's immediate

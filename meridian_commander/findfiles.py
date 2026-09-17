@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """Find files under a directory and browse the results.
 
 Works on any pane backend (local, SFTP, SSH, FTP): the scan walks the

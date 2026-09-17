@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Martin J. Gallagher
 """The Office Open XML package layer, shared by the .xlsx/.docx/.pptx readers.
 
 Every OOXML file -- a workbook, a document, a presentation -- is the same
