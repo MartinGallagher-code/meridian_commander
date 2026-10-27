@@ -1,20 +1,29 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Martin J. Gallagher
-"""Browsing zip and tar archives as read-only filesystems.
+"""Browsing zip and tar archives as filesystems, and writing into them.
 
 Every fixture is a real archive written by the standard library, so what is
-under test is the format and the backend, not a stand-in for either.
+under test is the format and the backend, not a stand-in for either -- and
+what a write is checked against is the archive file on disk, opened afresh.
 """
 
 from __future__ import annotations
 
 import curses
+import io
+import os
+import tarfile
 import zipfile
 
 import pytest
 
 from meridian_commander import archive
-from meridian_commander.archive import ArchiveFileSystem, is_archive, open_archive
+from meridian_commander.archive import (
+    ArchiveFileSystem,
+    archive_stem,
+    is_archive,
+    open_archive,
+)
 from meridian_commander.filesystems import FileSystemError, LocalFileSystem
 from meridian_commander.operations import copy_path
 
@@ -291,18 +300,14 @@ def test_a_member_that_cannot_be_read(bundle, monkeypatch):
         bundle.open_read("/readme.txt")
 
 
-# -- read-only -----------------------------------------------------------------
+# -- what is still refused ----------------------------------------------------
 @pytest.mark.parametrize("call", [
-    lambda fs: fs.open_write("/x"),
-    lambda fs: fs.mkdir("/x"),
-    lambda fs: fs.touch("/x"),
-    lambda fs: fs.touch("/readme.txt"),      # even one already in the archive
     lambda fs: fs.remove("/readme.txt"),
     lambda fs: fs.rmdir("/empty"),
     lambda fs: fs.rename("/readme.txt", "/other.txt"),
 ])
-def test_every_way_of_changing_an_archive_is_refused(bundle, call):
-    with pytest.raises(FileSystemError, match="read-only"):
+def test_deleting_or_renaming_inside_an_archive_is_refused(bundle, call):
+    with pytest.raises(FileSystemError, match="can be added to it, but not"):
         call(bundle)
 
 
@@ -395,7 +400,7 @@ def test_entering_an_archive_from_a_pane(app, tmp_path):
     assert isinstance(app.left.fs, ArchiveFileSystem)
     assert app.left.path == "/"
     assert [e.name for e in app.left.entries] == ["inside.txt"]
-    assert "read-only" in app.message
+    assert "F5/F6 from the other pane add to it" in app.message
 
 
 def test_leaving_an_archive_returns_to_the_directory_holding_it(app, tmp_path):
@@ -499,9 +504,437 @@ def test_copying_a_tree_out_of_an_archive(tmp_path):
     assert (out / "deep" / "also.txt").read_text() == "and this one"
 
 
-def test_copying_into_an_archive_is_refused(bundle, tmp_path):
+# -- writing into an archive --------------------------------------------------
+def _zip_members(path):
+    with zipfile.ZipFile(path) as zf:
+        return {i.filename: zf.read(i) for i in zf.infolist()}
+
+
+def _tar_members(path):
+    with tarfile.open(path) as tf:
+        return {m.name: m for m in tf.getmembers()}
+
+
+@pytest.fixture
+def rewrites(monkeypatch):
+    """Count how many times an archive is written out."""
+    calls = []
+    real = ArchiveFileSystem._rewrite
+
+    def counting(self, built):
+        calls.append(self.name)
+        return real(self, built)
+
+    monkeypatch.setattr(ArchiveFileSystem, "_rewrite", counting)
+    return calls
+
+
+def test_a_file_copied_into_a_zip_is_in_the_file_on_disk(bundle, tmp_path):
     write(str(tmp_path / "src.txt"), "payload")
-    with pytest.raises(FileSystemError, match="read-only"):
-        copy_path(LocalFileSystem(), str(tmp_path / "src.txt"),
-                  bundle, "/src.txt")
+    copy_path(LocalFileSystem(), str(tmp_path / "src.txt"), bundle,
+              "/src/new.txt")
+    members = _zip_members(bundle.archive_path)
+    assert members["src/new.txt"] == b"payload"
+    # Everything that was there before is still there.
+    assert members["readme.txt"] == b"hello from the archive\n"
+    assert members["src/deep/nested/mod.py"] == b"print('hi')\n"
+    assert "empty/" in members
+    # And the pane's own view is the archive as reread, not a guess at it.
+    assert bundle.open_read("/src/new.txt").read() == b"payload"
+    fresh = ArchiveFileSystem(LocalFileSystem(), bundle.archive_path)
+    assert fresh.stat("/src/new.txt").size == len("payload")
+
+
+@pytest.mark.parametrize("suffix, mode", [
+    (".tar", "r:"), (".tar.gz", "r:gz"), (".tgz", "r:gz"),
+    (".tar.bz2", "r:bz2"), (".tbz2", "r:bz2"), (".tar.xz", "r:xz"),
+])
+def test_a_tar_is_written_back_compressed_as_it_was(tmp_path, suffix, mode):
+    path = write_tar(str(tmp_path / f"a{suffix}"), {"old.txt": "old"},
+                     mode="w" + mode[1:])
+    fs = ArchiveFileSystem(LocalFileSystem(), path)
+    write(str(tmp_path / "new.txt"), "new")
+    copy_path(LocalFileSystem(), str(tmp_path / "new.txt"), fs, "/new.txt")
+    with tarfile.open(path, mode) as tf:
+        assert sorted(tf.getnames()) == ["new.txt", "old.txt"]
+        assert tf.extractfile("new.txt").read() == b"new"
+        assert tf.extractfile("old.txt").read() == b"old"
+
+
+def test_a_tar_compression_python_cannot_write_is_reported(tmp_path,
+                                                           monkeypatch):
+    path = write_tar(str(tmp_path / "a.tar.gz"), {"old.txt": "old"},
+                     mode="w:gz")
+    fs = ArchiveFileSystem(LocalFileSystem(), path)
+    monkeypatch.setattr(archive, "TAR_WRITE_MODES",
+                        (((".tar.gz",), "w:nonesuch"),))
+    with pytest.raises(FileSystemError, match="cannot write a.tar.gz"):
+        fs.touch("/new.txt")
+    assert sorted(_tar_members(path)) == ["old.txt"]
+
+
+def test_a_copy_in_a_batch_rewrites_the_archive_once(bundle, tmp_path,
+                                                    rewrites):
+    for name in ("a", "b", "c"):
+        write(str(tmp_path / "tree" / "sub" / name), name)
+    with bundle.batch():
+        copy_path(LocalFileSystem(), str(tmp_path / "tree"), bundle, "/tree")
+        # Listed already -- the copy has to see the directories it made --
+        # but nothing has been written to the archive yet.
+        assert sorted(e.name for e in bundle.listdir("/tree/sub")) == \
+            ["a", "b", "c"]
+        assert "tree/sub/a" not in _zip_members(bundle.archive_path)
+        assert rewrites == []
+    assert rewrites == ["bundle.zip"]
+    members = _zip_members(bundle.archive_path)
+    assert [members[f"tree/sub/{n}"] for n in "abc"] == [b"a", b"b", b"c"]
+
+
+def test_outside_a_batch_each_change_is_written_at_once(bundle, tmp_path,
+                                                       rewrites):
+    bundle.mkdir("/made")
+    assert "made/" in _zip_members(bundle.archive_path)
+    bundle.touch("/made/new.txt")
+    assert _zip_members(bundle.archive_path)["made/new.txt"] == b""
+    assert rewrites == ["bundle.zip", "bundle.zip"]
+
+
+def test_batches_nest_and_the_outermost_writes(bundle, rewrites):
+    with bundle.batch():
+        with bundle.batch():
+            bundle.mkdir("/inner")
+        assert rewrites == []
+    assert rewrites == ["bundle.zip"]
+
+
+def test_a_batch_with_nothing_in_it_writes_nothing(bundle, rewrites):
+    with bundle.batch():
+        pass
+    assert rewrites == []
+
+
+def test_a_batch_left_by_an_exception_still_writes_what_it_had(bundle):
+    with pytest.raises(RuntimeError):
+        with bundle.batch():
+            bundle.mkdir("/kept")
+            raise RuntimeError("the copy failed half way")
+    assert "kept/" in _zip_members(bundle.archive_path)
+
+
+def test_a_writer_closed_twice_writes_once(bundle, rewrites):
+    writer = bundle.open_write("/twice.txt")
+    writer.write(b"once")
+    writer.close()
+    writer.close()
+    assert rewrites == ["bundle.zip"]
+
+
+def test_a_member_written_over_is_replaced_not_duplicated(bundle, tmp_path):
+    write(str(tmp_path / "readme.txt"), "a new readme")
+    copy_path(LocalFileSystem(), str(tmp_path / "readme.txt"), bundle,
+              "/readme.txt")
+    with zipfile.ZipFile(bundle.archive_path) as zf:
+        assert [i.filename for i in zf.infolist()].count("readme.txt") == 1
+        assert zf.read("readme.txt") == b"a new readme"
+
+
+def test_a_member_stored_untidily_is_replaced_too(tmp_path):
+    # "tar czf out.tgz ." stores "./name"; writing "/name" is the same file.
+    path = write_tar(str(tmp_path / "dot.tar"), {"./a.txt": "old"})
+    fs = ArchiveFileSystem(LocalFileSystem(), path)
+    writer = fs.open_write("/a.txt")
+    writer.write(b"new")
+    writer.close()
+    assert list(_tar_members(path)) == ["a.txt"]
+    assert fs.open_read("/a.txt").read() == b"new"
+
+
+def test_written_twice_in_one_batch_the_last_one_wins(bundle):
+    with bundle.batch():
+        for body in (b"first", b"second"):
+            writer = bundle.open_write("/again.txt")
+            writer.write(body)
+            writer.close()
+        # The first copy is thrown away as soon as the second replaces it.
+        assert len(os.listdir(bundle._stage_dir)) == 1
+    assert _zip_members(bundle.archive_path)["again.txt"] == b"second"
+
+
+def test_an_empty_directory_copied_in_survives(tmp_path):
+    (tmp_path / "src" / "hollow").mkdir(parents=True)
+    zip_path = write_zip(str(tmp_path / "a.zip"), {"x": "y"})
+    tar_path = write_tar(str(tmp_path / "a.tar"), {"x": "y"})
+    for path in (zip_path, tar_path):
+        fs = ArchiveFileSystem(LocalFileSystem(), path)
+        copy_path(LocalFileSystem(), str(tmp_path / "src"), fs, "/src")
+        fresh = ArchiveFileSystem(LocalFileSystem(), path)
+        assert fresh.listdir("/src/hollow") == []
+    assert _tar_members(tar_path)["src/hollow"].isdir()
+    with zipfile.ZipFile(zip_path) as zf:
+        assert zf.getinfo("src/hollow/").is_dir()
+
+
+@pytest.mark.parametrize("call, problem", [
+    (lambda fs: fs.mkdir("/readme.txt"), "already exists"),
+    (lambda fs: fs.mkdir("/src"), "already exists"),
+    (lambda fs: fs.mkdir("/nowhere/new"), "no such directory"),
+    (lambda fs: fs.mkdir("/readme.txt/new"), "no such directory"),
+    (lambda fs: fs.open_write("/src"), "is a directory"),
+    (lambda fs: fs.open_write("/"), "is a directory"),
+    (lambda fs: fs.open_write("/nowhere/new.txt"), "no such directory"),
+])
+def test_a_write_that_has_nowhere_to_go_is_refused(bundle, call, problem):
+    with pytest.raises(FileSystemError, match=problem):
+        call(bundle)
+
+
+def test_members_it_does_not_show_are_carried_across(tmp_path):
+    """A rewrite must not be a way of losing part of an archive."""
+    zip_path = write_zip(str(tmp_path / "evil.zip"),
+                         {"ok.txt": "fine", "../escape.txt": "not shown"})
+    with zipfile.ZipFile(zip_path, "a") as zf:
+        zf.comment = b"kept"
+    fs = ArchiveFileSystem(LocalFileSystem(), zip_path)
+    fs.touch("/new.txt")
+    assert _zip_members(zip_path)["../escape.txt"] == b"not shown"
+    with zipfile.ZipFile(zip_path) as zf:
+        assert zf.comment == b"kept"
+
+    tar_path = write_tar(str(tmp_path / "odd.tar"),
+                         {"../escape.txt": "hidden"},
+                         symlinks={"link": "/etc/hostname"}, fifos=["pipe"],
+                         dirs=["dir/"])
+    fs = ArchiveFileSystem(LocalFileSystem(), tar_path)
+    fs.touch("/new.txt")
+    members = _tar_members(tar_path)
+    assert members["link"].issym()
+    assert members["link"].linkname == "/etc/hostname"
+    assert members["pipe"].isfifo()
+    assert members["dir"].isdir()
+    with tarfile.open(tar_path) as tf:
+        assert tf.extractfile("../escape.txt").read() == b"hidden"
+
+
+def test_a_mode_and_a_date_inside_a_tar_are_kept(tmp_path):
+    path = str(tmp_path / "m.tar")
+    with tarfile.open(path, "w") as tf:
+        info = tarfile.TarInfo("run.sh")
+        info.size, info.mode, info.mtime = 2, 0o755, 1600000000
+        tf.addfile(info, io.BytesIO(b"#!"))
+    fs = ArchiveFileSystem(LocalFileSystem(), path)
+    fs.touch("/other")
+    kept = _tar_members(path)["run.sh"]
+    assert (kept.mode, kept.mtime) == (0o755, 1600000000)
+
+
+def test_the_archive_keeps_its_permissions(bundle):
+    os.chmod(bundle.archive_path, 0o640)
+    bundle.touch("/new.txt")
+    assert os.stat(bundle.archive_path).st_mode & 0o777 == 0o640
+
+
+def test_an_archive_reached_through_a_symlink_stays_a_symlink(tmp_path):
+    real = write_zip(str(tmp_path / "real" / "a.zip"), {"x": "y"})
+    link = tmp_path / "link.zip"
+    link.symlink_to(real)
+    fs = ArchiveFileSystem(LocalFileSystem(), str(link))
+    fs.touch("/new.txt")
+    assert link.is_symlink()
+    assert "new.txt" in _zip_members(real)
+
+
+def test_nothing_is_left_behind_beside_the_archive(bundle):
+    bundle.touch("/new.txt")
+    assert os.listdir(os.path.dirname(bundle.archive_path)) == ["bundle.zip"]
+
+
+def test_an_archive_marked_read_only_is_not_replaced(bundle, monkeypatch):
+    before = _zip_members(bundle.archive_path)
+    monkeypatch.setattr(archive.os, "access", lambda path, how: False)
+    with pytest.raises(FileSystemError,
+                       match="cannot write bundle.zip: permission denied"):
+        bundle.touch("/new.txt")
+    assert _zip_members(bundle.archive_path) == before
+    # The tree is what the archive holds again, and the stage is gone.
+    assert "new.txt" not in [e.name for e in bundle.listdir("/")]
+    assert bundle._stage_dir is None
+
+
+def test_a_rewrite_that_fails_leaves_the_original_alone(bundle, tmp_path,
+                                                       monkeypatch):
+    before = _zip_members(bundle.archive_path)
+
+    def broken(self, source, built):
+        with open(built, "wb") as half:
+            half.write(b"PK half an archive")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ArchiveFileSystem, "_rewrite_zip", broken)
+    with pytest.raises(FileSystemError,
+                       match="cannot write bundle.zip: disk full"):
+        with bundle.batch():
+            copy_path(LocalFileSystem(), __file__, bundle, "/copied.py")
+    assert _zip_members(bundle.archive_path) == before
+    assert os.listdir(os.path.dirname(bundle.archive_path)) == ["bundle.zip"]
+    assert "copied.py" not in [e.name for e in bundle.listdir("/")]
+    # And it still works: the next write goes in as usual.
+    monkeypatch.undo()
+    bundle.touch("/after.txt")
+    assert "after.txt" in _zip_members(bundle.archive_path)
+
+
+def test_a_failure_to_even_start_the_rewrite_is_reported(bundle, monkeypatch):
+    def refuse(**kwargs):
+        raise PermissionError("directory is read-only")
+
+    with pytest.raises(FileSystemError,
+                       match="cannot write bundle.zip: directory is read-only"):
+        with bundle.batch():
+            bundle.touch("/new.txt")
+            # Only the rewrite is refused its file; staging already had one.
+            monkeypatch.setattr(archive.tempfile, "mkstemp", refuse)
+    assert "new.txt" not in [e.name for e in bundle.listdir("/")]
+
+
+def test_touching_a_file_restamps_its_member(tmp_path):
+    zip_path = write_zip(str(tmp_path / "a.zip"), {"x.txt": "body"})
+    tar_path = write_tar(str(tmp_path / "a.tar"), {"x.txt": "body"})
+    stamp = 1_500_000_000.0
+    for path in (zip_path, tar_path):
+        fs = ArchiveFileSystem(LocalFileSystem(), path)
+        fs.utime("/x.txt", stamp)
+        fresh = ArchiveFileSystem(LocalFileSystem(), path)
+        # A zip date has two-second resolution and no time zone.
+        assert abs(fresh.stat("/x.txt").mtime - stamp) <= 2
+        assert fresh.open_read("/x.txt").read() == b"body"
+
+
+def test_a_copy_that_keeps_dates_keeps_them_inside_a_batch(tmp_path):
+    path = write_tar(str(tmp_path / "a.tar"), {"x": "y"})
+    fs = ArchiveFileSystem(LocalFileSystem(), path)
+    write(str(tmp_path / "dated.txt"), "old news", mtime=1_400_000_000)
+    with fs.batch():
+        copy_path(LocalFileSystem(), str(tmp_path / "dated.txt"), fs,
+                  "/dated.txt", preserve_mtime=True)
+        assert fs.stat("/dated.txt").mtime == 1_400_000_000
+    assert _tar_members(path)["dated.txt"].mtime == 1_400_000_000
+
+
+def test_restamping_a_directory_writes_nothing(bundle, rewrites):
+    bundle.utime("/src", 1_500_000_000.0)
+    bundle.utime("/nowhere", 1_500_000_000.0)
+    assert rewrites == []
+
+
+def test_a_closed_archive_takes_no_writes(bundle):
+    bundle.close()
+    for call in (lambda: bundle.open_write("/x"), lambda: bundle.mkdir("/x"),
+                 lambda: bundle.utime("/readme.txt", 0.0)):
+        with pytest.raises(FileSystemError, match="has been closed"):
+            call()
+
+
+def test_closing_throws_away_what_was_never_written(bundle):
+    with pytest.raises(RuntimeError):
+        with bundle.batch():
+            bundle.touch("/new.txt")
+            stage = bundle._stage_dir
+            bundle.close()
+            raise RuntimeError("the application is going away")
+    assert not os.path.exists(stage)
+
+
+# -- writing into a remote archive ---------------------------------------------
+def test_a_remote_archive_is_built_here_and_uploaded(tmp_path):
+    path = write_zip(str(tmp_path / "a.zip"), {"x.txt": "y"})
+    fs = ArchiveFileSystem(_NoLocalPath(), path)
+    fs.touch("/new.txt")
+    assert sorted(_zip_members(path)) == ["new.txt", "x.txt"]
+    assert fs.open_read("/new.txt").read() == b""
+
+
+class _FailingUpload(_NoLocalPath):
+    """A remote host whose upload dies part way, as a dropped link does."""
+
+    def open_write(self, path):
+        stream = open(path, "wb")
+        real_write = stream.write
+
+        def write(data):
+            real_write(data[:10])
+            raise OSError("connection reset")
+
+        stream.write = write
+        return stream
+
+
+def test_a_failed_upload_keeps_the_finished_archive_here(tmp_path):
+    path = write_zip(str(tmp_path / "a.zip"), {"x.txt": "y"})
+    fs = ArchiveFileSystem(_FailingUpload(), path)
+    with pytest.raises(FileSystemError, match="kept at") as caught:
+        fs.touch("/new.txt")
+    kept = str(caught.value).rsplit("kept at ", 1)[1]
+    try:
+        assert sorted(_zip_members(kept)) == ["new.txt", "x.txt"]
+    finally:
+        os.remove(kept)
+    # The upload truncated the archive it was replacing, so there is nothing
+    # left to read, and the pane says so rather than listing a ghost.
+    assert fs.listdir("/") == []
+    with pytest.raises(FileSystemError, match="has been closed"):
+        fs.touch("/again.txt")
+
+
+def test_a_remote_archive_is_not_grown_past_what_can_be_opened(tmp_path,
+                                                               monkeypatch):
+    path = write_zip(str(tmp_path / "a.zip"), {"x.txt": "y"})
+    fs = ArchiveFileSystem(_NoLocalPath(), path)
+    before = _zip_members(path)
+    monkeypatch.setattr(archive, "MAX_BYTES", os.path.getsize(path) + 10)
+    with pytest.raises(FileSystemError, match="would grow past"):
+        with fs.batch():
+            writer = fs.open_write("/big.bin")
+            writer.write(os.urandom(4096))
+            writer.close()
+    assert _zip_members(path) == before
+    assert [e.name for e in fs.listdir("/")] == ["x.txt"]
+
+
+def test_an_upload_refused_outright_leaves_the_remote_archive_as_it_was(
+        tmp_path):
+    class _Refusing(_NoLocalPath):
+        def open_write(self, path):
+            raise OSError("permission denied")
+
+    path = write_zip(str(tmp_path / "a.zip"), {"x.txt": "y"})
+    fs = ArchiveFileSystem(_Refusing(), path)
+    with pytest.raises(FileSystemError, match="permission denied") as caught:
+        fs.touch("/new.txt")
+    os.remove(str(caught.value).rsplit("kept at ", 1)[1])
+    assert [e.name for e in fs.listdir("/")] == ["x.txt"]
+    assert fs.open_read("/x.txt").read() == b"y"
+
+
+def test_an_archive_inside_an_archive_writes_through_both(tmp_path):
+    inner = tmp_path / "inner.zip"
+    write_zip(str(inner), {"deep.txt": "deep"})
+    outer = write_zip(str(tmp_path / "outer.zip"), {})
+    with zipfile.ZipFile(outer, "w") as zf:
+        zf.write(inner, "inner.zip")
+    outer_fs = ArchiveFileSystem(LocalFileSystem(), outer)
+    inner_fs = ArchiveFileSystem(outer_fs, "/inner.zip")
+    inner_fs.touch("/added.txt")
+    with zipfile.ZipFile(outer) as zf:
+        nested = zipfile.ZipFile(io.BytesIO(zf.read("inner.zip")))
+    assert sorted(nested.namelist()) == ["added.txt", "deep.txt"]
+
+
+# -- names for what is unpacked ------------------------------------------------
+@pytest.mark.parametrize("name, stem", [
+    ("project.zip", "project"), ("project.tar.gz", "project"),
+    ("Project.TGZ", "Project"), ("v1.2.tar.xz", "v1.2"),
+    (".zip", ".zip"), ("notes.txt", "notes.txt"),
+])
+def test_the_folder_an_archive_unpacks_into(name, stem):
+    assert archive_stem(name) == stem
 

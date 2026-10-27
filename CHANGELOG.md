@@ -33,6 +33,28 @@ day the version was cut.
 
 ### Added
 
+- **Extract an archive in one key.** `x` on a `.zip` or `.tar` (or with
+  several tagged) unpacks it into the other pane — also **File ▸ Extract
+  archive** and the right-click menu. Each archive lands in a folder of its
+  own, named after it, unless everything in it is already inside one folder,
+  which is then the folder that lands: `project.zip` arrives as `project/`,
+  not `project/project/`, and a zip of loose files does not scatter them
+  through a directory that already has things in it. Files keep the dates the
+  archive gives them, and a member that will not come out — a tar's symlink to
+  somewhere outside it, a device node — is listed at the end instead of
+  stopping the rest.
+- **Copy and move into an archive.** With an archive open in the other pane,
+  `F5` and `F6` add to it, and a file of the same name is replaced; so do
+  `F7`, `n`, saving from the editor, and unpacking into it with `x`. Neither
+  format can be changed in place, so the archive is rewritten — once per
+  operation however many files it adds, built beside the original and renamed
+  over it, so a failure halfway leaves the original as it was. Its
+  compression, its permissions and members the pane does not show are kept. A
+  move deletes its sources only after the archive has been written, so a
+  write that fails loses nothing. A remote archive is rebuilt here and
+  uploaded, and if the upload fails the finished archive is kept locally and
+  the message says where. Deleting and renaming inside an archive are still
+  refused.
 - **The Git plug-in opens on a summary, and can push.** The pane used to be a
   prompt that echoed `git`: everything it knew, it knew because you had typed
   a command. It now leads with the state of the repository — branch, upstream,

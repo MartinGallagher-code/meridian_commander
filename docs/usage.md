@@ -138,20 +138,50 @@ Press **Enter** on an archive and the pane goes into it:
 | main.py               9  Jul 28  |                                  |
 | util.py               4  Jul 28  |                                  |
 +----------------------------------+----------------------------------+
- zip:project.zip -- read-only; Backspace to leave
+ zip:project.zip -- F5/F6 from the other pane add to it; Backspace to leave
 ```
 
-It is not a viewer but a **read-only filesystem**, so everything that already
-works between panes keeps working: list, sort, tag, and `F5` files or whole
-subtrees out to the other pane — local or remote. Backspace at the archive's
-root steps back out to the directory holding it, with the cursor on the file.
+It is not a viewer but a **filesystem**, so everything that already works
+between panes keeps working: list, sort, tag, and `F5` files or whole subtrees
+out to the other pane — local or remote. Backspace at the archive's root steps
+back out to the directory holding it, with the cursor on the file.
 
 `.zip`, `.jar`, `.whl`, `.egg`, and `.tar` with any of gzip, bzip2 or xz
 compression. A bare `.gz` is one compressed file rather than a tree, so it is
 left alone.
 
-**Writing is refused, not half-done.** Copying *into* an archive reports that
-it is read-only rather than appearing to work.
+**Extracting a whole archive** is `x` on it (or **File ▸ Extract archive**,
+or the right-click menu), with no need to go inside: it unpacks into the other
+pane, and with several archives tagged it unpacks them all. Each lands in a
+folder of its own under the directory you give, named after the archive —
+unless everything in it is already inside one folder, which is then the folder
+that lands, so `project.zip` holding `project/` arrives as `project/` and not
+`project/project/`. Files keep the dates the archive gives them. A member that
+will not come out — a symlink in a tar pointing somewhere outside it, a device
+node — is listed when the rest are done, rather than stopping them.
+
+**Copying and moving into an archive** works the same way as into a
+directory: open the archive in one pane and `F5`/`F6` from the other, and the
+files are added to it — a file of the same name is replaced. `F7` (new
+directory), `n` (new file), saving from the editor and extracting into the
+pane with `x` all add to it too. Neither format can be changed in place, so
+the archive is rewritten, and that is done carefully:
+
+- **Once per operation.** Copying a hundred files rewrites the archive once,
+  at the end, not a hundred times.
+- **Never half-done.** The new archive is built beside the old one and
+  renamed over it, so a failure leaves the original exactly as it was. It
+  keeps the original's permissions, its compression (a `.tar.gz` stays
+  gzipped), and members the pane does not show (below).
+- **A move waits for the write.** The sources of a move are deleted only once
+  the archive has been written, so a rewrite that fails loses nothing.
+- **A remote archive** is rebuilt on this machine and uploaded over the
+  original; if the upload fails, the finished archive is kept locally and the
+  message says where.
+
+Deleting and renaming *inside* an archive are refused, with a message saying
+so. A file on disk marked read-only is not rewritten either, though its
+directory would allow it.
 
 Two details worth knowing:
 
@@ -160,7 +190,9 @@ Two details worth knowing:
   reconstructed from the member names.
 - **Unsafe members are refused.** A member whose name contains `..` would
   escape the destination when copied out, so it is dropped — and *counted in
-  the pane header*, rather than disappearing quietly.
+  the pane header*, rather than disappearing quietly. It is still carried
+  across when the archive is rewritten: adding a file is not a way to lose
+  part of an archive.
 
 A local archive is opened in place, so browsing a multi-gigabyte tar costs
 nothing; one on a remote pane has to be fetched whole first (both formats need
@@ -508,9 +540,9 @@ with `:q` costs no upload. Two limits follow from that:
 
 - A file over 8 MB is refused rather than fetched, the same ceiling the
   built-in editor applies.
-- If the write-back fails — the connection dropped, or the pane is a read-only
-  archive — the temporary copy is deliberately **kept**, and the message tells
-  you where it is. Nothing you typed is thrown away.
+- If the write-back fails — the connection dropped, or an archive could not be
+  rewritten — the temporary copy is deliberately **kept**, and the message
+  tells you where it is. Nothing you typed is thrown away.
 
 ## Making, renaming and comparing files
 
@@ -621,6 +653,7 @@ where it should.)
 | `Backspace` / `←` | parent directory | `F6` | move to other pane |
 | `Insert` / `Space` | tag file | `F7` | make directory |
 | `n` | new (empty) file here | `r` | rename the file under the cursor |
+| `x` | extract the archive into the other pane | | |
 | `D` | compare both panes' files | `h` | head + tail of the other pane's file, in this pane |
 | `+` / `-` | tag all / untag all | `F8` | delete |
 | `Ctrl-U` | swap panes | `F9` | synchronize panes |

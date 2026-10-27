@@ -28,6 +28,7 @@ Key bindings (also shown in the F1 help screen)::
     Ctrl-R         reload both panes           F10  quit
     Ctrl-G         go to path                  Esc  the menu bar
     Ctrl-T         change sort order           Alt+F/C/O/H  a menu by name
+    x              extract archive -> other pane
     ~              home directory (this pane)
     =              other pane: same location as this one
     b              presets: saved locations to return to
@@ -57,12 +58,13 @@ from .filesystems import (
 )
 from .operations import (
     OperationCancelled,
+    copy_contents,
     copy_path,
     count_tree,
     move_path,
     overlapping,
 )
-from .archive import is_archive, open_archive
+from .archive import archive_stem, is_archive, open_archive
 from .browsers import has_own_browser, viewer_for
 from .compare import Comparison
 from .panel import Panel
@@ -113,6 +115,7 @@ MENUS: list[dict] = [
             {"label": "Ru~n~...", "name": "run", "key": "Enter"},
             {"label": "~C~opy", "name": "copy", "key": "F5"},
             {"label": "~M~ove", "name": "move", "key": "F6"},
+            {"label": "Extr~a~ct archive", "name": "extract", "key": "x"},
             {"label": "~R~ename", "name": "rename", "key": "r"},
             {"sep": True},
             {"label": "Make ~d~irectory", "name": "mkdir", "key": "F7"},
@@ -579,6 +582,7 @@ class App:
             "run": self._run_current,
             "copy": self._copy,
             "move": self._move,
+            "extract": self._extract,
             "rename": self._rename,
             "mkdir": self._mkdir,
             "touch": self._touch,
@@ -729,6 +733,8 @@ class App:
             self._touch()
         elif key == ord("r"):  # rename the entry under the cursor
             self._rename()
+        elif key == ord("x"):  # extract the archive into the other pane
+            self._extract()
         elif key == ord("D"):  # compare both panes' files side by side
             self._compare()
         elif key == ord("h"):  # head + tail of the other pane's file
@@ -996,7 +1002,8 @@ class App:
             return
         # Registered so it is closed with everything else on the way out.
         self._backends.append(fs)
-        self._set_message(f"{fs.label()} -- read-only; Backspace to leave")
+        self._set_message(f"{fs.label()} -- F5/F6 from the other pane add to "
+                          "it; Backspace to leave")
 
     def _leave_archive(self) -> None:
         """Step back out of an archive to the directory that holds it.
@@ -1367,15 +1374,17 @@ class App:
         header = name or panel.fs.basename(panel.path) or panel.path
 
         labels = ["View", "Edit", "Run...", "Copy to other pane",
-                  "Move to other pane", "Rename", "Delete", "Tag / untag",
+                  "Move to other pane", "Extract archive to other pane",
+                  "Rename", "Delete", "Tag / untag",
                   "New directory", "New file", "Compare with other pane",
                   "Head + tail in this pane", "Home directory",
                   "Same location in other pane", "Presets (go to / save)",
                   "Find files here", "Terminal in this pane",
                   "Full-screen shell", "Cancel"]
-        actions = ["view", "edit", "run", "copy", "move", "rename", "delete",
-                   "tag", "mkdir", "touch", "compare", "peek", "home",
-                   "mirror", "presets", "find", "terminal", "shell", None]
+        actions = ["view", "edit", "run", "copy", "move", "extract", "rename",
+                   "delete", "tag", "mkdir", "touch", "compare", "peek",
+                   "home", "mirror", "presets", "find", "terminal", "shell",
+                   None]
         choice = dialogs.menu(self.stdscr, header[:40], labels)
         if choice is None:
             return
@@ -1390,6 +1399,8 @@ class App:
             self._copy()
         elif action == "move":
             self._move()
+        elif action == "extract":
+            self._extract()
         elif action == "rename":
             self._rename()
         elif action == "delete":
@@ -1879,27 +1890,46 @@ class App:
         #: rather than left unmentioned: the alternative is a copy that looks
         #: complete and is not.
         skipped: list[str] = []
+        #: Moved sources, deleted only once the destination's batch has closed
+        #: cleanly: an archive has not written its copies until then.
+        moved: list[str] = []
         try:
-            for i, entry in enumerate(sources):
-                if dlg.cancelled():
-                    cancelled = True
-                    break
-                src = src_panel.fs.join(src_panel.path, entry.name)
-                target = dst_fs.join(dest, entry.name)
-                dlg.set_overall(f"{verb} {i + 1}/{len(sources)}: {entry.name}")
+            try:
+                with dst_fs.batch():
+                    for i, entry in enumerate(sources):
+                        if dlg.cancelled():
+                            cancelled = True
+                            break
+                        src = src_panel.fs.join(src_panel.path, entry.name)
+                        target = dst_fs.join(dest, entry.name)
+                        dlg.set_overall(
+                            f"{verb} {i + 1}/{len(sources)}: {entry.name}")
 
+                        try:
+                            if move:
+                                skipped += move_path(
+                                    src_panel.fs, src, dst_fs, target,
+                                    progress, dlg.cancelled, deferred=moved)
+                            else:
+                                skipped += copy_path(
+                                    src_panel.fs, src, dst_fs, target,
+                                    progress, dlg.cancelled)
+                        except OperationCancelled:
+                            cancelled = True
+                            break
+                        except Exception as exc:
+                            errors.append(f"{entry.name}: {exc}")
+            except Exception as exc:
+                # Every item's own failure is caught above, so this is the
+                # batch failing to write what was copied -- none of which has
+                # landed, so none of the sources can go.
+                errors.append(str(exc))
+                moved.clear()
+            for src in moved:
                 try:
-                    if move:
-                        skipped += move_path(src_panel.fs, src, dst_fs, target,
-                                             progress, dlg.cancelled)
-                    else:
-                        skipped += copy_path(src_panel.fs, src, dst_fs, target,
-                                             progress, dlg.cancelled)
-                except OperationCancelled:
-                    cancelled = True
-                    break
+                    src_panel.fs.delete_tree(src)
                 except Exception as exc:
-                    errors.append(f"{entry.name}: {exc}")
+                    errors.append(f"{src_panel.fs.basename(src)}: {exc}")
         finally:
             dlg.close()
 
@@ -1932,6 +1962,113 @@ class App:
         count = len(skipped)
         note = f" -- {count} symlinked director{'y' if count == 1 else 'ies'} skipped"
         return note + (", source kept" if move else "")
+
+    def _extract(self) -> None:
+        """Unpack the archive here, or the tagged ones, into the other pane.
+
+        Each archive lands in a folder of its own under the directory asked
+        for -- named after the archive, unless everything in it is already in
+        one folder, which is then the folder that lands.  That is the
+        difference between ``project.zip`` arriving as ``project/`` and as
+        ``project/project/``, and between a zip of loose files arriving in a
+        folder and scattering itself through a directory that already has
+        things in it.  Files keep the dates the archive gives them.
+        """
+        src_panel = self.active
+        dst_panel = self.other
+        archives = [e for e in src_panel.selected_entries()
+                    if not e.is_dir and is_archive(e.name)]
+        if not archives:
+            dialogs.message(self.stdscr, "Extract",
+                            "Point the cursor at a zip or tar archive to "
+                            "extract it, or tag several.")
+            return
+        if len(archives) == 1:
+            label = f"Extract '{archives[0].name}' into its own folder under:"
+        else:
+            label = (f"Extract {len(archives)} archives, each into its own "
+                     "folder, under:")
+        dest = dialogs.prompt(self.stdscr, "Extract", label,
+                              default=dst_panel.path)
+        if dest is None:
+            return
+        dst_fs = dst_panel.fs
+        dest = dst_fs.normpath(dst_panel.resolve(dest))
+
+        dlg = dialogs.ProgressDialog(self.stdscr, "Extract")
+        failed: list[str] = []
+        landed: list[str] = []
+        cancelled = False
+        try:
+            with dst_fs.batch():
+                for i, entry in enumerate(archives):
+                    if dlg.cancelled():
+                        cancelled = True
+                        break
+                    dlg.set_overall(
+                        f"Extract {i + 1}/{len(archives)}: {entry.name}")
+                    try:
+                        target, problems = self._extract_one(
+                            src_panel.fs,
+                            src_panel.fs.join(src_panel.path, entry.name),
+                            dst_fs, dest, dlg)
+                    except OperationCancelled:
+                        cancelled = True
+                        break
+                    except Exception as exc:
+                        failed.append(f"{entry.name}: {exc}")
+                        continue
+                    landed.append(target)
+                    failed += [f"{entry.name}: {p}" for p in problems]
+        except Exception as exc:
+            # The destination could not write what was unpacked into it.
+            failed.append(str(exc))
+            landed.clear()
+        finally:
+            dlg.close()
+
+        src_panel.clear_selection()
+        src_panel.refresh()
+        dst_panel.refresh()
+        if failed:
+            dialogs.message(self.stdscr, "Extract problems",
+                            "\n".join(failed[:8])
+                            + (f"\n... and {len(failed) - 8} more"
+                               if len(failed) > 8 else ""),
+                            error=True)
+        note = f" -- {len(failed)} problem(s)" if failed else ""
+        if cancelled:
+            self._set_message("Extract cancelled")
+        elif not landed:
+            self._set_message("Nothing extracted" + note)
+        elif len(archives) == 1:
+            self._set_message(f"Extracted to {landed[0]}" + note)
+        else:
+            self._set_message(f"Extracted {len(landed)} of {len(archives)} "
+                              f"archives into {dest}" + note)
+
+    @staticmethod
+    def _extract_one(src_fs: FileSystem, path: str, dst_fs: FileSystem,
+                     dest: str, dlg) -> tuple[str, list[str]]:
+        """Unpack one archive under ``dest``.
+
+        Returns the folder it landed in and the members that would not come
+        out -- the rest still come.  An archive that will not open raises.
+        """
+        source = open_archive(src_fs, path)
+        try:
+            top = source.listdir("/")
+            if len(top) == 1 and top[0].is_dir:
+                # It brings its own folder, so it goes straight into dest.
+                into, target = dest, dst_fs.join(dest, top[0].name)
+            else:
+                stem = archive_stem(src_fs.basename(path))
+                into = target = dst_fs.join(dest, stem)
+            problems = copy_contents(source, "/", dst_fs, into, dlg.update,
+                                     dlg.cancelled, preserve_mtime=True)
+        finally:
+            source.close()
+        return target, problems
 
     def _mkdir(self) -> None:
         panel = self.active
@@ -2121,10 +2258,15 @@ class App:
             dlg.set_overall(f"{index + 1}/{total}  {action.direction} {action.rel}")
 
         try:
-            copied = execute_sync_plan(
-                plan, left.fs, right.fs,
-                progress=dlg.update, cancel=dlg.cancelled, on_action=on_action,
-            )
+            # Batched, so a side that is an archive is rewritten once at the
+            # end rather than twice for every file (once for the file and
+            # once more for its timestamp).
+            with left.fs.batch(), right.fs.batch():
+                copied = execute_sync_plan(
+                    plan, left.fs, right.fs,
+                    progress=dlg.update, cancel=dlg.cancelled,
+                    on_action=on_action,
+                )
         except Exception as exc:
             dlg.close()
             dialogs.message(self.stdscr, "Sync error", str(exc), error=True)
@@ -2172,6 +2314,10 @@ class App:
             "  p / F11        plug-in mode: run a plug-in in this pane\n"
             "  f              find files: browsable results (view/edit/goto)\n"
             "  r              rename the file under the cursor\n"
+            "  x              extract the archive under the cursor (or the\n"
+            "                 tagged ones) into the other pane, each in a\n"
+            "                 folder of its own; F5/F6 into a pane that is\n"
+            "                 inside an archive add the files to it\n"
             "  n              new empty file here (an existing one is\n"
             "                 restamped, never emptied)\n"
             "  D              compare both panes' files side by side:\n"

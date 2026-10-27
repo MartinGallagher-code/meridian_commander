@@ -273,8 +273,8 @@ def test_an_editor_that_will_not_start_leaves_the_remote_file_alone():
 def test_a_failed_write_back_keeps_the_edit_and_says_where():
     """The one case where the working copy is deliberately not deleted.
 
-    A dropped connection or a read-only archive would otherwise throw away
-    everything the user typed.
+    A dropped connection or an archive that cannot be rewritten would otherwise
+    throw away everything the user typed.
     """
     fs = _Remote(write_error=OSError("connection lost"))
     result = extedit.edit(fs, "/srv/notes.txt", ["vim"], _editing(b"changed\n"))

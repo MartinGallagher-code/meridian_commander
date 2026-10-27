@@ -87,8 +87,10 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   line numbers (`l`) and horizontal scrolling; works on remote files too.
 - **Archives as directories** — press Enter on a `.zip`, `.tar`, `.tar.gz`
   (or `.jar`, `.whl`, `.tgz`, `.tar.bz2`, `.tar.xz`) and the pane goes *into*
-  it. Browse, tag and copy files out with `F5` exactly as from a directory;
-  Backspace at the top comes back out. Read-only, and stdlib-only.
+  it. Browse, tag and copy files out with `F5` exactly as from a directory,
+  or copy and move files *in* from the other pane; Backspace at the top comes
+  back out. `x` extracts a whole archive into the other pane in one go.
+  Stdlib-only.
 - **Run files** — press Enter on a shell script, a Python file, anything with
   a `#!` line, or any executable, and it *runs* (also **File ▸ Run…** and the
   right-click menu). A small dialog takes arguments — Esc there cancels, so

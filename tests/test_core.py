@@ -27,7 +27,9 @@ from meridian_commander.filesystems import (
 from meridian_commander import app as app_mod
 from meridian_commander import dialogs, presets
 from meridian_commander.operations import (
+    OperationCancelled,
     OperationRefused,
+    copy_contents,
     copy_path,
     count_tree,
     move_path,
@@ -43,6 +45,7 @@ from support import (
     read,
     run_menu,
     write,
+    write_tar,
 )
 
 
@@ -126,6 +129,71 @@ def test_a_move_that_skipped_something_keeps_the_source(tmp_path):
     assert read(str(dst / "real" / "a.txt")) == "A"
     assert (root / "link").is_symlink()      # still there to be dealt with
     assert (root / "real" / "a.txt").exists()
+
+
+def test_a_deferred_move_leaves_the_source_for_the_caller(tmp_path):
+    """Inside a batch the destination may not have the copy yet."""
+    left, right = LocalFileSystem(), LocalFileSystem()   # two: no rename
+    write(str(tmp_path / "src" / "a.txt"), "A")
+    deferred: list[str] = []
+    move_path(left, str(tmp_path / "src"), right, str(tmp_path / "dst"),
+              deferred=deferred)
+    assert read(str(tmp_path / "dst" / "a.txt")) == "A"
+    assert deferred == [str(tmp_path / "src")]
+    assert (tmp_path / "src" / "a.txt").exists()
+
+
+def test_a_deferred_move_that_skipped_something_defers_nothing(tmp_path):
+    left, right = LocalFileSystem(), LocalFileSystem()
+    root = tmp_path / "src"
+    write(str(root / "real" / "a.txt"), "A")
+    os.symlink(str(root / "real"), str(root / "link"))
+    deferred: list[str] = []
+    move_path(left, str(root), right, str(tmp_path / "dst"), deferred=deferred)
+    assert deferred == []
+
+
+# -- copying the contents of a tree, past what will not come -------------------
+
+def _unpackable(tmp_path):
+    """A tar holding a file, a directory, an empty one and a dangling link."""
+    from meridian_commander.archive import ArchiveFileSystem
+
+    path = write_tar(str(tmp_path / "t.tar"),
+                     {"top.txt": "T", "sub/deep.txt": "D"},
+                     symlinks={"sub/broken": "nowhere"}, dirs=["hollow/"])
+    return ArchiveFileSystem(LocalFileSystem(), path)
+
+
+def test_copy_contents_unpacks_everything_it_can(fs, tmp_path):
+    source = _unpackable(tmp_path)
+    out = tmp_path / "out"
+    problems = copy_contents(source, "/", fs, str(out), preserve_mtime=True)
+    assert read(str(out / "top.txt")) == "T"
+    assert read(str(out / "sub" / "deep.txt")) == "D"
+    assert (out / "hollow").is_dir()
+    # The member written after the broken one still came out.
+    assert len(problems) == 1 and problems[0].startswith("sub/broken: ")
+    assert os.path.getmtime(out / "top.txt") == 1700000000
+
+
+def test_copy_contents_can_be_cancelled(fs, tmp_path):
+    source = _unpackable(tmp_path)
+    with pytest.raises(OperationCancelled):
+        copy_contents(source, "/", fs, str(tmp_path / "out"),
+                      cancel=lambda: True)
+
+
+def test_copy_contents_does_not_swallow_a_cancel_inside_a_file(fs, tmp_path,
+                                                              monkeypatch):
+    from meridian_commander import operations
+
+    def cancelled_mid_file(*args, **kwargs):
+        raise OperationCancelled()
+
+    monkeypatch.setattr(operations, "copy_file", cancelled_mid_file)
+    with pytest.raises(OperationCancelled):
+        copy_contents(_unpackable(tmp_path), "/", fs, str(tmp_path / "out"))
 
 
 def test_copying_a_file_onto_itself_is_refused(tmp_path):

@@ -21,7 +21,7 @@ the sync engine are written once and work across any pair of backends.
 | `config.py` | `config.ini` handling (per-plug-in sections, plug-in dirs) |
 | `presets.py` | saved locations: `presets.ini` load/save, live-connection reuse |
 | `panel.py` | one pane's listing, cursor, selection, sorting |
-| `archive.py` | zip/tar archives as a read-only `FileSystem` |
+| `archive.py` | zip/tar archives as a `FileSystem`: browse, add to, rewrite |
 | `viewer.py` / `editor.py` | file viewer (scroll, search, wrap) and editor |
 | `browsers.py` | picks the browser for a file: grid, document, image or text |
 | `ooxml.py` | the Office Open XML package layer, shared by the readers |
