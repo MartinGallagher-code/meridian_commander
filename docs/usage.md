@@ -80,6 +80,21 @@ often is two keystrokes away instead of a trip through the connect dialog.
 Choosing one points the active pane at it; combine with `=` to bring the other
 pane along.
 
+**Going back** is `<`, and `>` goes forward again (also **Command ▸ Back**
+and **Forward**). Each pane keeps its own history of where it has been, so
+after `=` has pointed the other pane at this one, `Tab` and `<` put it back
+where it was — the message after `=` says so. Every change of place is a step:
+going into and out of a directory, `Ctrl-G`, a preset, `F2`, `=`, and going
+into an archive or back out of one. A step remembers the connection as well as
+the directory, and lands with the cursor on the entry it was on.
+
+A place that can no longer be opened — a directory deleted since, a
+connection that has dropped — is passed over for the one before it. An
+archive the pane left is closed when the last pane leaves it, and going back
+into it opens it again, as it is now. Going somewhere new after going back
+gives up the way forward, as in a browser; a pane remembers its last hundred
+places.
+
 - **Every preset has a letter**, shown down the left of the list. Pressing it
   opens that preset there and then — no arrowing down, no Enter — so a saved
   location really is `b` and one keystroke:
@@ -138,20 +153,58 @@ Press **Enter** on an archive and the pane goes into it:
 | main.py               9  Jul 28  |                                  |
 | util.py               4  Jul 28  |                                  |
 +----------------------------------+----------------------------------+
- zip:project.zip -- read-only; Backspace to leave
+ zip:project.zip -- change it like a directory; Backspace to leave
 ```
 
-It is not a viewer but a **read-only filesystem**, so everything that already
-works between panes keeps working: list, sort, tag, and `F5` files or whole
-subtrees out to the other pane — local or remote. Backspace at the archive's
-root steps back out to the directory holding it, with the cursor on the file.
+It is not a viewer but a **filesystem**, so everything that already works
+between panes keeps working: list, sort, tag, and `F5` files or whole subtrees
+out to the other pane — local or remote — and `F6` moves them out of it.
+Backspace at the archive's root steps back out to the directory holding it,
+with the cursor on the file.
 
 `.zip`, `.jar`, `.whl`, `.egg`, and `.tar` with any of gzip, bzip2 or xz
 compression. A bare `.gz` is one compressed file rather than a tree, so it is
 left alone.
 
-**Writing is refused, not half-done.** Copying *into* an archive reports that
-it is read-only rather than appearing to work.
+**Extracting a whole archive** is `x` on it (or **File ▸ Extract archive**,
+or the right-click menu), with no need to go inside: it unpacks into the other
+pane, and with several archives tagged it unpacks them all. Each lands in a
+folder of its own under the directory you give, named after the archive —
+unless everything in it is already inside one folder, which is then the folder
+that lands, so `project.zip` holding `project/` arrives as `project/` and not
+`project/project/`. Files keep the dates the archive gives them. A member that
+will not come out — a symlink in a tar pointing somewhere outside it, a device
+node — is listed when the rest are done, rather than stopping them.
+
+**Changing an archive** works the same way as changing a directory. Open the
+archive in one pane and `F5`/`F6` from the other add files to it — a file of
+the same name is replaced — and inside it `F8` deletes, `r` renames, and `F7`
+(new directory), `n` (new file), saving from the editor and extracting into
+the pane with `x` all work as they do anywhere else; so does the Multi-rename
+plug-in. Neither format can be changed in place, so the archive is rewritten,
+and that is done carefully:
+
+- **Once per operation.** Copying a hundred files in, or deleting a hundred
+  tagged ones, rewrites the archive once, at the end, not a hundred times.
+- **Never half-done.** The new archive is built beside the old one and
+  renamed over it, so a failure leaves the original exactly as it was. It
+  keeps the original's permissions, its compression (a `.tar.gz` stays
+  gzipped), and members the pane does not show (below).
+- **A move waits for the write.** The sources of a move are deleted only once
+  the archive has been written, so a rewrite that fails loses nothing. Moving
+  files *out* of an archive takes them out of it the same way, after they
+  have landed.
+- **Untouched members stay as they were.** A rename keeps a member's contents,
+  date and mode, and a member nothing happened to keeps even the name it was
+  stored under. A folder that a delete leaves empty stays in the archive as an
+  empty folder rather than vanishing with its last file.
+- **A remote archive** is rebuilt on this machine and uploaded over the
+  original; if the upload fails, the finished archive is kept locally and the
+  message says where.
+
+A rename onto a name that is already there is refused rather than deleting
+what was there. A file on disk marked read-only is not rewritten either,
+though its directory would allow it.
 
 Two details worth knowing:
 
@@ -160,7 +213,9 @@ Two details worth knowing:
   reconstructed from the member names.
 - **Unsafe members are refused.** A member whose name contains `..` would
   escape the destination when copied out, so it is dropped — and *counted in
-  the pane header*, rather than disappearing quietly.
+  the pane header*, rather than disappearing quietly. It is still carried
+  across when the archive is rewritten: adding a file is not a way to lose
+  part of an archive.
 
 A local archive is opened in place, so browsing a multi-gigabyte tar costs
 nothing; one on a remote pane has to be fetched whole first (both formats need
@@ -508,9 +563,9 @@ with `:q` costs no upload. Two limits follow from that:
 
 - A file over 8 MB is refused rather than fetched, the same ceiling the
   built-in editor applies.
-- If the write-back fails — the connection dropped, or the pane is a read-only
-  archive — the temporary copy is deliberately **kept**, and the message tells
-  you where it is. Nothing you typed is thrown away.
+- If the write-back fails — the connection dropped, or an archive could not be
+  rewritten — the temporary copy is deliberately **kept**, and the message
+  tells you where it is. Nothing you typed is thrown away.
 
 ## Making, renaming and comparing files
 
@@ -621,6 +676,7 @@ where it should.)
 | `Backspace` / `←` | parent directory | `F6` | move to other pane |
 | `Insert` / `Space` | tag file | `F7` | make directory |
 | `n` | new (empty) file here | `r` | rename the file under the cursor |
+| `x` | extract the archive into the other pane | | |
 | `D` | compare both panes' files | `h` | head + tail of the other pane's file, in this pane |
 | `+` / `-` | tag all / untag all | `F8` | delete |
 | `Ctrl-U` | swap panes | `F9` | synchronize panes |
@@ -628,6 +684,7 @@ where it should.)
 | `Ctrl-G` | go to path | `Ctrl-T` | change sort order |
 | `Esc` | the menu bar | `Alt+F`/`C`/`O`/`H` | a menu by name |
 | `~` | home directory (this pane) | `=` | other pane: same location |
+| `<` / `>` | back / forward through this pane's history | | |
 | `b` | presets: saved locations | | |
 | `.` | show/hide hidden files | `t` | terminal inside this pane |
 | `u` | directory sizes in this pane | | |

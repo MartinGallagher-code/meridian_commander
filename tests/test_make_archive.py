@@ -9,11 +9,8 @@ import zipfile
 
 import pytest
 
-from meridian_commander.plugins.make_archive import (
-    ZIP_EARLIEST,
-    ZIP_LATEST,
-    MakeArchive,
-)
+from meridian_commander.archive import ZIP_EARLIEST, ZIP_LATEST
+from meridian_commander.plugins.make_archive import MakeArchive
 
 
 def _run(ctx, command):

@@ -6,16 +6,19 @@ from __future__ import annotations
 
 import curses
 import os
+import shutil
+import zipfile
 
 import pytest
 
 from meridian_commander import app as app_mod
 from meridian_commander import dialogs
 from meridian_commander import sync as sync_mod
+from meridian_commander.archive import ArchiveFileSystem
 from meridian_commander.filesystems import LocalFileSystem
 from meridian_commander.operations import OperationCancelled
 
-from support import _ScriptedDialogs, read, write
+from support import _ScriptedDialogs, read, write, write_tar, write_zip
 
 
 @pytest.fixture(autouse=True)
@@ -402,6 +405,430 @@ def test_the_progress_window_reports_bytes(app, tmp_path, monkeypatch,
     assert _quiet_progress[0].updates
     assert "Copy 1/1: a" in _quiet_progress[0].overall
     assert _quiet_progress[0].closed is True
+
+
+# -- copy and move into an archive ---------------------------------------------
+
+def _into_archive(app, tmp_path, members=None):
+    """Put the right pane inside a zip, the way Enter on it does."""
+    path = write_zip(str(tmp_path / "right" / "bundle.zip"),
+                     members or {"old.txt": "old"})
+    app.right.refresh()
+    app.active = app.right
+    _point_at(app.right, "bundle.zip")
+    app._activate_entry()
+    app.active = app.left
+    return path
+
+
+def _zip_contents(path):
+    with zipfile.ZipFile(path) as zf:
+        return {name: zf.read(name) for name in zf.namelist()}
+
+
+@pytest.fixture
+def rewrites(monkeypatch):
+    calls = []
+    real = ArchiveFileSystem._rewrite
+
+    def counting(self, built):
+        calls.append(self.name)
+        return real(self, built)
+
+    monkeypatch.setattr(ArchiveFileSystem, "_rewrite", counting)
+    return calls
+
+
+def _rewrite_fails(monkeypatch):
+    def broken(self, source, built):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ArchiveFileSystem, "_rewrite_zip", broken)
+
+
+def test_copying_into_the_archive_in_the_other_pane(app, tmp_path, monkeypatch,
+                                                    rewrites):
+    path = _into_archive(app, tmp_path)
+    _files(app, tmp_path, a="one", b="two")
+    app.left.selected = {"a", "b"}
+    _ScriptedDialogs(monkeypatch, prompt=["/"])
+    app._copy()
+    contents = _zip_contents(path)
+    assert (contents["a"], contents["b"], contents["old.txt"]) == \
+        (b"one", b"two", b"old")
+    assert {"a", "b", "old.txt"} <= {e.name for e in app.right.entries}
+    assert "Copy complete: 2 item(s)" in app.message
+    # Two files, one rewrite of the archive.
+    assert rewrites == ["bundle.zip"]
+
+
+def test_a_relative_destination_lands_inside_the_archive(app, tmp_path,
+                                                        monkeypatch):
+    path = _into_archive(app, tmp_path)
+    _files(app, tmp_path, a="one")
+    _point_at(app.left, "a")
+    _ScriptedDialogs(monkeypatch, prompt=["kept"])
+    app._copy()
+    assert _zip_contents(path)["kept/a"] == b"one"
+
+
+def test_moving_into_an_archive_removes_the_sources_once_written(
+        app, tmp_path, monkeypatch):
+    path = _into_archive(app, tmp_path)
+    _files(app, tmp_path, a="one")
+    write(str(tmp_path / "left" / "tree" / "deep.txt"), "deep")
+    app.left.refresh()
+    app.left.selected = {"a", "tree"}
+    _ScriptedDialogs(monkeypatch, prompt=["/"])
+    app._move()
+    contents = _zip_contents(path)
+    assert (contents["a"], contents["tree/deep.txt"]) == (b"one", b"deep")
+    assert not (tmp_path / "left" / "a").exists()
+    assert not (tmp_path / "left" / "tree").exists()
+    assert "Move complete: 2 item(s)" in app.message
+
+
+def test_a_move_into_an_archive_that_cannot_be_written_keeps_the_sources(
+        app, tmp_path, monkeypatch):
+    """Deleting a source before its copy is in the archive would lose it."""
+    path = _into_archive(app, tmp_path)
+    _files(app, tmp_path, a="one")
+    _point_at(app.left, "a")
+    _rewrite_fails(monkeypatch)
+    scripted = _ScriptedDialogs(monkeypatch, prompt=["/"])
+    app._move()
+    assert read(str(tmp_path / "left" / "a")) == "one"
+    assert "cannot write bundle.zip: disk full" in scripted.last_message
+    assert sorted(_zip_contents(path)) == ["old.txt"]
+    assert "a" not in [e.name for e in app.right.entries]
+
+
+def test_a_moved_source_that_will_not_go_is_reported(app, tmp_path,
+                                                     monkeypatch):
+    _files(app, tmp_path, a="one")
+    _point_at(app.left, "a")
+
+    def busy(path):
+        raise OSError("device busy")
+
+    monkeypatch.setattr(app.left.fs, "delete_tree", busy)
+    scripted = _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+    app._move()
+    assert read(str(tmp_path / "right" / "a")) == "one"
+    assert "a: device busy" in scripted.last_message
+
+
+def test_sync_with_an_archive_rewrites_it_once(app, tmp_path, monkeypatch,
+                                               rewrites):
+    path = _into_archive(app, tmp_path, {"only_archive.txt": "from the zip"})
+    _files(app, tmp_path, only_left="payload", also_left="more")
+    _ScriptedDialogs(monkeypatch, confirm=[True])
+    app._sync()
+    contents = _zip_contents(path)
+    assert (contents["only_left"], contents["also_left"]) == \
+        (b"payload", b"more")
+    assert read(str(tmp_path / "left" / "only_archive.txt")) == "from the zip"
+    assert rewrites == ["bundle.zip"]
+
+
+def _archive_on_the_left(app, tmp_path, members):
+    """Put the *left* (active) pane inside a zip, as Enter on it does."""
+    path = write_zip(str(tmp_path / "left" / "bundle.zip"), members)
+    app.left.refresh()
+    _point_at(app.left, "bundle.zip")
+    app._activate_entry()
+    return path
+
+
+def test_deleting_tagged_files_inside_an_archive(app, tmp_path, monkeypatch,
+                                                 rewrites):
+    path = _archive_on_the_left(app, tmp_path,
+                                {"a": "1", "b": "2", "keep": "3", "d/x": "4"})
+    app.left.selected = {"a", "b", "d"}
+    _ScriptedDialogs(monkeypatch, confirm=[True])
+    app._delete()
+    assert sorted(_zip_contents(path)) == ["keep"]
+    assert [e.name for e in app.left.entries] == ["keep"]
+    assert "Deleted 3 item(s)" in app.message
+    assert rewrites == ["bundle.zip"]
+
+
+def test_a_delete_from_an_archive_that_cannot_be_written(app, tmp_path,
+                                                         monkeypatch):
+    path = _archive_on_the_left(app, tmp_path, {"a": "1", "b": "2"})
+    _point_at(app.left, "a")
+    _rewrite_fails(monkeypatch)
+    scripted = _ScriptedDialogs(monkeypatch, confirm=[True])
+    app._delete()
+    assert "cannot write bundle.zip: disk full" in scripted.last_message
+    assert sorted(_zip_contents(path)) == ["a", "b"]
+    assert sorted(e.name for e in app.left.entries) == ["a", "b"]
+
+
+def test_renaming_inside_an_archive(app, tmp_path, monkeypatch):
+    path = _archive_on_the_left(app, tmp_path, {"old.txt": "body"})
+    _point_at(app.left, "old.txt")
+    _ScriptedDialogs(monkeypatch, prompt=["new.txt"])
+    app._rename()
+    assert _zip_contents(path) == {"new.txt": b"body"}
+    assert app.left.current().name == "new.txt"
+
+
+def test_moving_out_of_an_archive_takes_the_files_out_of_it(
+        app, tmp_path, monkeypatch, rewrites):
+    path = _archive_on_the_left(app, tmp_path,
+                                {"a": "1", "b": "2", "keep": "3"})
+    app.left.selected = {"a", "b"}
+    _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+    app._move()
+    assert read(str(tmp_path / "right" / "a")) == "1"
+    assert read(str(tmp_path / "right" / "b")) == "2"
+    assert sorted(_zip_contents(path)) == ["keep"]
+    assert rewrites == ["bundle.zip"]
+    assert "Move complete: 2 item(s)" in app.message
+
+
+def test_a_move_out_of_an_archive_that_cannot_be_rewritten_keeps_both(
+        app, tmp_path, monkeypatch):
+    path = _archive_on_the_left(app, tmp_path, {"a": "1"})
+    _point_at(app.left, "a")
+    _rewrite_fails(monkeypatch)
+    scripted = _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+    app._move()
+    assert read(str(tmp_path / "right" / "a")) == "1"
+    assert sorted(_zip_contents(path)) == ["a"]
+    assert "cannot write bundle.zip: disk full" in scripted.last_message
+
+
+def test_moving_between_two_places_in_one_archive_is_a_rename(
+        app, tmp_path, monkeypatch, rewrites):
+    path = _archive_on_the_left(app, tmp_path, {"a": "1", "dest/": ""})
+    app._mirror_to_other_pane()
+    app.right.chdir("/dest")
+    _point_at(app.left, "a")
+    _ScriptedDialogs(monkeypatch, prompt=["/dest"])
+    app._move()
+    assert _zip_contents(path) == {"dest/": b"", "dest/a": b"1"}
+    assert rewrites == ["bundle.zip"]
+
+
+def test_multi_rename_inside_an_archive_rewrites_it_once(app, tmp_path,
+                                                         rewrites):
+    from meridian_commander.plugin_api import PluginContext
+    from meridian_commander.plugins.multi_rename import MultiRename
+
+    path = _into_archive(app, tmp_path, {"a.txt": "1", "b.txt": "2"})
+    app.right.selected = {"a.txt", "b.txt"}
+    ctx = PluginContext(app=app, own_panel=app.left, other_panel=app.right)
+    assert MultiRename(ctx).process("prefix x-") == "Renamed 2 file(s)."
+    assert sorted(_zip_contents(path)) == ["x-a.txt", "x-b.txt"]
+    assert rewrites == ["bundle.zip"]
+
+
+def test_multi_rename_says_when_the_archive_could_not_be_written(
+        app, tmp_path, monkeypatch):
+    from meridian_commander.plugin_api import PluginContext
+    from meridian_commander.plugins.multi_rename import MultiRename
+
+    path = _into_archive(app, tmp_path, {"a.txt": "1"})
+    app.right.selected = {"a.txt"}
+    _rewrite_fails(monkeypatch)
+    plugin = MultiRename(PluginContext(app=app, own_panel=app.left,
+                                       other_panel=app.right))
+    assert plugin.process("prefix x-") == "Renamed 0 file(s)."
+    assert any("none of it was saved" in line for line in plugin.output)
+    assert sorted(_zip_contents(path)) == ["a.txt"]
+
+
+# -- extract -------------------------------------------------------------------
+
+def test_an_archive_extracts_into_a_folder_of_its_own(app, tmp_path,
+                                                      monkeypatch):
+    write_zip(str(tmp_path / "left" / "loose.zip"),
+              {"a.txt": "A", "b/c.txt": "C"})
+    app.left.refresh()
+    _point_at(app.left, "loose.zip")
+    scripted = _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+    app._extract()
+    assert "into its own folder" in scripted.prompts[0]
+    assert read(str(tmp_path / "right" / "loose" / "a.txt")) == "A"
+    assert read(str(tmp_path / "right" / "loose" / "b" / "c.txt")) == "C"
+    assert app.message == f"Extracted to {tmp_path / 'right' / 'loose'}"
+    assert "loose" in [e.name for e in app.right.entries]
+
+
+def test_an_archive_that_brings_its_own_folder_is_not_nested(app, tmp_path,
+                                                             monkeypatch):
+    write_tar(str(tmp_path / "left" / "project.tar.gz"),
+              {"project/README": "R", "project/src/a.py": "x = 1"},
+              mode="w:gz")
+    app.left.refresh()
+    _point_at(app.left, "project.tar.gz")
+    _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+    app._extract()
+    assert read(str(tmp_path / "right" / "project" / "README")) == "R"
+    assert not (tmp_path / "right" / "project" / "project").exists()
+    assert app.message == f"Extracted to {tmp_path / 'right' / 'project'}"
+
+
+def test_extracted_files_keep_the_dates_in_the_archive(app, tmp_path,
+                                                       monkeypatch):
+    write_tar(str(tmp_path / "left" / "dated.tar"), {"old.txt": "x"})
+    app.left.refresh()
+    _point_at(app.left, "dated.tar")
+    _ScriptedDialogs(monkeypatch, prompt=["unpacked"])   # relative: right pane
+    app._extract()
+    unpacked = tmp_path / "right" / "unpacked" / "dated" / "old.txt"
+    assert os.path.getmtime(unpacked) == 1700000000
+
+
+def test_several_tagged_archives_each_get_a_folder(app, tmp_path, monkeypatch):
+    write_zip(str(tmp_path / "left" / "a.zip"), {"x": "from a"})
+    write_tar(str(tmp_path / "left" / "b.tar"), {"x": "from b"})
+    app.left.refresh()
+    # The tagged directory and plain file are not archives: passed over.
+    app.left.selected = {"a.zip", "b.tar", "file.txt", "sub"}
+    scripted = _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+    app._extract()
+    assert "Extract 2 archives" in scripted.prompts[0]
+    assert read(str(tmp_path / "right" / "a" / "x")) == "from a"
+    assert read(str(tmp_path / "right" / "b" / "x")) == "from b"
+    assert app.message == \
+        f"Extracted 2 of 2 archives into {tmp_path / 'right'}"
+    assert app.left.selected == set()
+
+
+def test_extract_with_no_archive_says_what_it_needs(app, monkeypatch):
+    _point_at(app.left, "file.txt")
+    scripted = _ScriptedDialogs(monkeypatch)
+    app._extract()
+    assert "Point the cursor at a zip or tar archive" in scripted.last_message
+
+
+def test_extract_can_be_cancelled_at_the_prompt(app, tmp_path, monkeypatch):
+    write_zip(str(tmp_path / "left" / "a.zip"), {"x": "y"})
+    app.left.refresh()
+    _point_at(app.left, "a.zip")
+    _ScriptedDialogs(monkeypatch, prompt=[None])
+    app._extract()
+    assert not (tmp_path / "right" / "a").exists()
+
+
+def test_an_archive_that_will_not_open_does_not_stop_the_rest(app, tmp_path,
+                                                              monkeypatch):
+    write(str(tmp_path / "left" / "broken.zip"), "not a zip")
+    write_zip(str(tmp_path / "left" / "good.zip"), {"x": "y"})
+    app.left.refresh()
+    app.left.selected = {"broken.zip", "good.zip"}
+    scripted = _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+    app._extract()
+    assert read(str(tmp_path / "right" / "good" / "x")) == "y"
+    assert "broken.zip: cannot open broken.zip" in scripted.last_message
+    assert app.message.endswith("Extracted 1 of 2 archives into "
+                                f"{tmp_path / 'right'} -- 1 problem(s)")
+
+
+def test_members_that_will_not_come_out_are_listed(app, tmp_path, monkeypatch):
+    write_tar(str(tmp_path / "left" / "links.tar"), {"real.txt": "R"},
+              symlinks={f"gone{i}": f"/nowhere/{i}" for i in range(10)})
+    app.left.refresh()
+    _point_at(app.left, "links.tar")
+    scripted = _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+    app._extract()
+    assert read(str(tmp_path / "right" / "links" / "real.txt")) == "R"
+    title, text, error = scripted.messages[-1]
+    assert (title, error) == ("Extract problems", True)
+    assert text.count("links.tar: gone") == 8
+    assert text.endswith("... and 2 more")
+    assert app.message.endswith("-- 10 problem(s)")
+
+
+def test_an_extract_cancelled_part_way_says_so(app, tmp_path, monkeypatch,
+                                               _quiet_progress):
+    write_zip(str(tmp_path / "left" / "a.zip"), {"x": "y"})
+    app.left.refresh()
+    _point_at(app.left, "a.zip")
+    real_factory = dialogs.ProgressDialog
+
+    def cancelling(stdscr, title):
+        dlg = real_factory(stdscr, title)
+        dlg.cancel_after = 0          # cancels inside the first archive
+        return dlg
+
+    monkeypatch.setattr(dialogs, "ProgressDialog", cancelling)
+    _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+    app._extract()
+    assert app.message == "Extract cancelled"
+
+
+def test_an_extract_cancelled_between_archives(app, tmp_path, monkeypatch,
+                                               _quiet_progress):
+    write_zip(str(tmp_path / "left" / "a.zip"), {"x": "y"})
+    write_zip(str(tmp_path / "left" / "b.zip"), {"x": "y"})
+    app.left.refresh()
+    app.left.selected = {"a.zip", "b.zip"}
+    unpacked = []
+
+    # An unpack that ignores the cancel callback, so the only place the run
+    # can stop is the check at the top of the loop.
+    def fake_unpack(source, root, dst_fs, into, *args, **kwargs):
+        unpacked.append(into)
+        return []
+
+    monkeypatch.setattr(app_mod, "copy_contents", fake_unpack)
+    real_factory = dialogs.ProgressDialog
+
+    def cancelling(stdscr, title):
+        dlg = real_factory(stdscr, title)
+        dlg.cancel_after = 0
+        return dlg
+
+    monkeypatch.setattr(dialogs, "ProgressDialog", cancelling)
+    _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+    app._extract()
+    assert len(unpacked) == 1
+    assert app.message == "Extract cancelled"
+
+
+def test_extracting_into_an_archive_in_the_other_pane(app, tmp_path,
+                                                      monkeypatch, rewrites):
+    path = _into_archive(app, tmp_path)
+    write_tar(str(tmp_path / "left" / "src.tar"), {"a": "A", "b/c": "C"})
+    app.left.refresh()
+    _point_at(app.left, "src.tar")
+    _ScriptedDialogs(monkeypatch, prompt=["/"])
+    app._extract()
+    contents = _zip_contents(path)
+    assert (contents["src/a"], contents["src/b/c"]) == (b"A", b"C")
+    assert rewrites == ["bundle.zip"]
+    assert app.message == "Extracted to /src"
+
+
+def test_extracting_into_an_archive_that_cannot_be_written(app, tmp_path,
+                                                           monkeypatch):
+    _into_archive(app, tmp_path)
+    write_tar(str(tmp_path / "left" / "src.tar"), {"a": "A"})
+    app.left.refresh()
+    _point_at(app.left, "src.tar")
+    _rewrite_fails(monkeypatch)
+    scripted = _ScriptedDialogs(monkeypatch, prompt=["/"])
+    app._extract()
+    assert "cannot write bundle.zip: disk full" in scripted.last_message
+    assert app.message == "Nothing extracted -- 1 problem(s)"
+
+
+def test_x_extracts_and_so_do_the_menus(app, tmp_path, monkeypatch):
+    write_zip(str(tmp_path / "left" / "a.zip"), {"x": "y"})
+    app.left.refresh()
+    _point_at(app.left, "a.zip")
+    for go in (lambda: app.handle_key(ord("x")),
+               lambda: app._dispatch("extract"),
+               app._context_menu):
+        shutil.rmtree(tmp_path / "right" / "a", ignore_errors=True)
+        _ScriptedDialogs(monkeypatch, menu=["Extract archive"],
+                         prompt=[str(tmp_path / "right")])
+        go()
+        assert read(str(tmp_path / "right" / "a" / "x")) == "y"
 
 
 # -- mkdir ---------------------------------------------------------------------

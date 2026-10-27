@@ -241,6 +241,7 @@ def move_path(
     dst: str,
     progress: ProgressCB = _noop_progress,
     cancel: CancelCB = _noop_cancel,
+    deferred: list[str] | None = None,
 ) -> list[str]:
     """Move a file or directory tree.
 
@@ -253,6 +254,12 @@ def move_path(
     naming it rather than dropping it silently is that it is still there to be
     dealt with.  A rename within one filesystem moves links intact and so has
     nothing to skip.
+
+    ``deferred``, when given, collects the source instead of deleting it.
+    Inside a :meth:`~FileSystem.batch` the destination may not hold the copy
+    yet -- an archive writes it when the batch ends -- and a source deleted
+    before then is lost if that write fails.  The caller deletes what was
+    collected once the batch has closed without error.
     """
     if overlapping(src_fs, src, dst_fs, dst):
         raise OperationRefused(
@@ -269,8 +276,53 @@ def move_path(
 
     skipped = copy_path(src_fs, src, dst_fs, dst, progress, cancel)
     if not skipped:
-        src_fs.delete_tree(src)
+        if deferred is None:
+            src_fs.delete_tree(src)
+        else:
+            deferred.append(src)
     return skipped
+
+
+def copy_contents(
+    src_fs: FileSystem,
+    src: str,
+    dst_fs: FileSystem,
+    dst: str,
+    progress: ProgressCB = _noop_progress,
+    cancel: CancelCB = _noop_cancel,
+    preserve_mtime: bool = False,
+) -> list[str]:
+    """Copy everything inside directory ``src`` into ``dst``, past failures.
+
+    This is unpacking an archive, and the difference from :func:`copy_path`
+    is what happens when one file will not come: it is named in the result,
+    as ``"relative/path: reason"``, and the walk carries on.  An archive holds
+    plenty that is not a file at all -- a tar's symlinks to places outside it,
+    its device nodes, a zip's encrypted members -- and with ``copy_path`` the
+    first of them ended the unpacking with everything after it left behind.
+
+    Cancelling still stops the whole run: it raises
+    :class:`OperationCancelled` as every other routine here does.
+    """
+    failed: list[str] = []
+    dst_fs.makedirs(dst)
+    for rel, node in _iter_tree(src_fs, src):
+        if cancel():
+            raise OperationCancelled()
+        if rel == "":
+            continue
+        target = dst_fs.join(dst, *_split_rel(src_fs, rel))
+        try:
+            if node.is_dir and not node.is_symlink:
+                dst_fs.makedirs(target)
+            else:
+                copy_file(src_fs, src_fs.join(src, rel), dst_fs, target,
+                          progress, cancel, preserve_mtime=preserve_mtime)
+        except OperationCancelled:
+            raise
+        except Exception as exc:
+            failed.append(f"{rel}: {exc}")
+    return failed
 
 
 def count_tree(fs: FileSystem, path: str) -> tuple[int, int]:

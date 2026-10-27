@@ -17,10 +17,10 @@ connection.  So a remote file is fetched to a private temporary directory,
 edited there, and written back -- and only when it actually changed, so
 quitting vim with ``:q`` costs no upload.
 
-*An upload can fail after the editing is done.*  A dropped connection or a
-read-only archive would otherwise throw the work away, so when the write-back
-fails the temporary copy is deliberately **not** deleted and the message says
-where it is.
+*An upload can fail after the editing is done.*  A dropped connection or an
+archive that cannot be rewritten would otherwise throw the work away, so when
+the write-back fails the temporary copy is deliberately **not** deleted and the
+message says where it is.
 
 Viewing with an outside pager -- ``less``, or whatever ``[ui] viewer`` names --
 is the same errand with the second half removed: fetch the same way, run the

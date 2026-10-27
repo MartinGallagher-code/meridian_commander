@@ -23,6 +23,7 @@ these primitives in :mod:`meridian_commander.operations` and
 from __future__ import annotations
 
 import abc
+import contextlib
 import os
 import posixpath
 import shutil
@@ -203,6 +204,20 @@ class FileSystem(abc.ABC):
     @abc.abstractmethod
     def rename(self, src: str, dst: str) -> None:
         """Rename within the same filesystem (used for same-fs moves)."""
+
+    @contextlib.contextmanager
+    def batch(self):
+        """Group a run of writes so the backend can finish them in one go.
+
+        Most backends have finished a write when the call that made it
+        returns, and for them this does nothing.  An archive cannot do that
+        cheaply -- adding one file to it means writing the whole archive out
+        again -- so it holds what is written inside a batch and rewrites once
+        when the batch ends, which is also where a failure to do that is
+        raised.  Anything that writes many files at once wraps them in this,
+        and none of it needs to know which backend it is writing to.
+        """
+        yield
 
     def close(self) -> None:  # noqa: B027
         """Release any resources (network connections).

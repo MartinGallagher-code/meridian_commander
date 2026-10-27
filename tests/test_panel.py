@@ -330,3 +330,84 @@ def test_set_location_onto_a_second_backend(fs, tmp_path):
     assert panel.set_location(other, str(tmp_path / "there")) is True
     assert panel.fs is other
     assert panel.top == 0
+
+
+# -- history ------------------------------------------------------------------
+
+def test_back_returns_to_the_directory_left_with_the_cursor_on_it(fs, tree):
+    panel = Panel(fs, str(tree))
+    panel.move_to(names(panel).index("zdir"))
+    assert panel.enter()
+    assert panel.back() is True
+    assert panel.path == str(tree)
+    assert panel.current_name() == "zdir"
+    # And forward goes in again, to where the cursor was in there.
+    assert panel.forward() is True
+    assert panel.path == str(tree / "zdir")
+    assert panel.current_name() == ".."
+
+
+def test_going_up_is_a_step_in_the_history_too(fs, tree):
+    panel = Panel(fs, str(tree / "adir"))
+    assert panel.go_parent()
+    assert panel.back()
+    assert panel.path == str(tree / "adir")
+
+
+def test_a_move_that_fails_or_goes_nowhere_is_not_recorded(fs, tree):
+    panel = Panel(fs, str(tree))
+    assert panel.chdir(str(tree / "missing")) is False
+    assert panel.chdir(str(tree)) is True          # already there
+    assert panel.set_location(fs, str(tree)) is True
+    assert panel.history == []
+
+
+def test_a_new_backend_is_part_of_the_place(fs, tree, tmp_path):
+    other = LocalFileSystem()
+    panel = Panel(fs, str(tree))
+    assert panel.set_location(other, str(tmp_path))
+    assert panel.back()
+    assert panel.fs is fs and panel.path == str(tree)
+    assert panel.forward()
+    assert panel.fs is other and panel.path == str(tmp_path)
+
+
+def test_going_somewhere_new_gives_up_the_way_forward(fs, tree):
+    panel = Panel(fs, str(tree))
+    panel.chdir(str(tree / "adir"))
+    panel.back()
+    assert panel.future
+    panel.chdir(str(tree / "zdir"))
+    assert panel.future == []
+    assert panel.forward() is False
+    assert panel.path == str(tree / "zdir")
+
+
+def test_the_history_is_bounded(fs, tree, monkeypatch):
+    from meridian_commander import panel as panel_mod
+
+    monkeypatch.setattr(panel_mod, "HISTORY_LIMIT", 3)
+    panel = Panel(fs, str(tree))
+    for _ in range(5):
+        panel.chdir(str(tree / "adir"))
+        panel.go_parent()
+    assert len(panel.history) == 3
+
+
+def test_a_place_that_has_gone_is_passed_over(fs, tree):
+    panel = Panel(fs, str(tree))
+    panel.chdir(str(tree / "adir"))
+    panel.chdir(str(tree / "zdir"))
+    (tree / "adir").rmdir()
+    assert panel.back() is True                    # adir is gone: skipped
+    assert panel.path == str(tree)
+    assert panel.back() is False                   # nothing earlier
+    assert panel.path == str(tree)
+
+
+def test_a_backend_that_cannot_be_revived_is_passed_over(fs, tree):
+    panel = Panel(fs, str(tree))
+    panel.chdir(str(tree / "adir"))
+    assert panel.back(lambda backend: None) is False
+    assert panel.path == str(tree / "adir")
+    assert panel.history == []

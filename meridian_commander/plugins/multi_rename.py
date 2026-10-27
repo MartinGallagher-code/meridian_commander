@@ -199,15 +199,22 @@ class MultiRename(InputOutputPlugin):
         done = 0
         steps = order_renames(changed,
                               lambda name: fs.exists(fs.join(root, name)))
-        for source, target, shown in steps:
-            try:
-                fs.rename(fs.join(root, source), fs.join(root, target))
-            except Exception as exc:
-                self.print(f"  ! {shown or source}: {exc}")
-                continue
-            if shown is not None:
-                self.print(f"  {shown} -> {target}")
-                done += 1
+        try:
+            # One change, so renaming a set inside an archive rewrites it
+            # once rather than once per rename.
+            with fs.batch():
+                for source, target, shown in steps:
+                    try:
+                        fs.rename(fs.join(root, source), fs.join(root, target))
+                    except Exception as exc:
+                        self.print(f"  ! {shown or source}: {exc}")
+                        continue
+                    if shown is not None:
+                        self.print(f"  {shown} -> {target}")
+                        done += 1
+        except Exception as exc:
+            done = 0
+            self.print(f"  ! none of it was saved: {exc}")
         try:
             self.ctx.refresh_other()
         except Exception:

@@ -20,7 +20,7 @@ from meridian_commander.filesystems import (
     SFTPFileSystem,
 )
 
-from support import _ScriptedDialogs, _StubScreen, write
+from support import _ScriptedDialogs, _StubScreen, write, write_zip
 
 
 class _RemoteLike:
@@ -121,6 +121,110 @@ def _names(panel):
 
 def _point_at(panel, name):
     panel.move_to(_names(panel).index(name))
+
+
+# -- pane history --------------------------------------------------------------
+
+def test_after_making_the_panes_equal_the_other_one_can_go_back(app, tmp_path):
+    """Set the panes equal to do something, then return to where it was."""
+    app.right.chdir(str(tmp_path / "right" / "sub"))
+    _point_at(app.right, "..")
+    app.handle_key(ord("="))                 # right pane: same as the left
+    assert app.right.path == str(tmp_path / "left")
+    assert "'<' there goes back" in app.message
+    app.handle_key(9)                        # Tab to it
+    app.handle_key(ord("<"))
+    assert app.right.path == str(tmp_path / "right" / "sub")
+    assert app.message.startswith("Back: local:")
+    app.handle_key(ord(">"))
+    assert app.right.path == str(tmp_path / "left")
+    assert app.message.startswith("Forward: local:")
+
+
+def test_with_no_history_back_and_forward_say_so(app):
+    app.handle_key(ord("<"))
+    assert app.message == "Nothing further back in this pane's history"
+    app.handle_key(ord(">"))
+    assert app.message == "Nothing further forward in this pane's history"
+
+
+def test_back_and_forward_are_on_the_command_menu(app, tmp_path):
+    app.left.chdir(str(tmp_path / "left" / "sub"))
+    app._dispatch("back")
+    assert app.left.path == str(tmp_path / "left")
+    app._dispatch("forward")
+    assert app.left.path == str(tmp_path / "left" / "sub")
+
+
+def test_back_goes_into_an_archive_the_pane_has_left(app, tmp_path):
+    """Leaving it closed the archive; going back opens it again."""
+    write_zip(str(tmp_path / "left" / "bundle.zip"), {"inside.txt": "x"})
+    app.left.refresh()
+    _point_at(app.left, "bundle.zip")
+    app._activate_entry()
+    archive = app.left.fs
+    app.handle_key(curses.KEY_BACKSPACE)     # out again: the archive closes
+    assert archive.closed and archive not in app._backends
+    app.handle_key(ord("<"))
+    assert app.left.fs is archive and not archive.closed
+    assert archive.open_read("/inside.txt").read() == b"x"
+    assert archive in app._backends
+
+
+def test_an_archive_deleted_since_is_passed_over(app, tmp_path):
+    write_zip(str(tmp_path / "left" / "bundle.zip"), {"inside.txt": "x"})
+    app.left.refresh()
+    _point_at(app.left, "bundle.zip")
+    app._activate_entry()
+    app.handle_key(curses.KEY_BACKSPACE)
+    os.remove(tmp_path / "left" / "bundle.zip")
+    app.handle_key(ord("<"))                 # the archive is gone ...
+    # ... so back lands on the place before it: the directory it was in.
+    assert isinstance(app.left.fs, LocalFileSystem)
+    assert app.left.path == str(tmp_path / "left")
+
+
+def test_a_still_open_archive_is_gone_back_into_as_it_is(app, tmp_path):
+    write_zip(str(tmp_path / "left" / "bundle.zip"), {"a/inside.txt": "x"})
+    app.left.refresh()
+    _point_at(app.left, "bundle.zip")
+    app._activate_entry()
+    app.left.enter()                         # into a/
+    archive = app.left.fs
+    app.handle_key(ord("<"))
+    assert app.left.fs is archive and app.left.path == "/"
+    assert app._backends.count(archive) == 1
+
+
+def test_connecting_with_f2_can_be_gone_back_from(app, tmp_path, monkeypatch):
+    from support import _FakeRemoteBackend
+
+    backend = _FakeRemoteBackend()
+    backend.home = lambda: str(tmp_path / "right")
+    monkeypatch.setattr(dialogs, "connect_dialog",
+                        lambda stdscr: {"scheme": "sftp"})
+    monkeypatch.setattr(app, "_connect", lambda info: backend)
+    before = app.left.fs
+    app.handle_key(ord("o"))
+    assert app.left.fs is backend
+    app.handle_key(ord("<"))
+    assert app.left.fs is before and app.left.path == str(tmp_path / "left")
+
+
+def test_a_connection_whose_home_cannot_be_listed(app, tmp_path, monkeypatch):
+    from support import _FakeRemoteBackend
+
+    backend = _FakeRemoteBackend()
+    backend.home = lambda: str(tmp_path / "nowhere")
+    monkeypatch.setattr(dialogs, "connect_dialog",
+                        lambda stdscr: {"scheme": "sftp"})
+    monkeypatch.setattr(app, "_connect", lambda info: backend)
+    scripted = _ScriptedDialogs(monkeypatch)
+    before = app.left.fs
+    app.handle_key(ord("o"))
+    assert "home directory cannot be listed" in scripted.last_message
+    assert app.left.fs is before
+    assert backend in app._backends            # still closed on the way out
 
 
 # -- navigation keys -----------------------------------------------------------

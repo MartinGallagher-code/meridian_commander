@@ -12,9 +12,20 @@ offset.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Callable, Optional
 
 from .filesystems import DirEntry, FileSystem
 from .usage import TreeSizer
+
+#: One place a pane has been: the backend, the directory, and the entry the
+#: cursor was on, so going back lands on it rather than at the top.
+#: (A runtime alias, so ``Optional`` rather than ``|``: Python 3.9 has no
+#: union operator for types.)
+Place = tuple[FileSystem, str, Optional[str]]
+
+#: How far back a pane remembers.  Walking down a tree records every step, so
+#: this is a few sessions' wandering rather than a few jumps.
+HISTORY_LIMIT = 100
 
 
 @dataclass
@@ -49,6 +60,12 @@ class Panel:
     #: hold tens of thousands of entries, while the answer only moves when a
     #: total does.
     _scale: int = 0
+    #: Where this pane has been, oldest first, and -- after going back --
+    #: where it can go forward to again, nearest first at the end.  Every
+    #: change of location records one, on any backend: "=" pointing the pane
+    #: elsewhere, F2 connecting it, Enter going into an archive.
+    history: list[Place] = field(default_factory=list)
+    future: list[Place] = field(default_factory=list)
 
     # ".." pseudo-entry so the user can always step up a directory.
     PARENT = ".."
@@ -273,6 +290,7 @@ class Panel:
         leaving = self.fs.basename(self.path)
         if parent == self.path:
             return False
+        self._left(self._here())
         self.path = parent
         self.selected.clear()
         # An index into the directory being left means nothing in its parent,
@@ -298,6 +316,7 @@ class Panel:
         return self.fs.join(self.path, path)
 
     def chdir(self, path: str, keep_name: str | None = None) -> bool:
+        here = self._here()
         old = self.path
         self.path = self.fs.normpath(self.resolve(path))
         self.selected.clear()
@@ -311,6 +330,8 @@ class Panel:
             self.path = old
             self.refresh()
             return False
+        if self.path != old:
+            self._left(here)
         return True
 
     def go_home(self) -> bool:
@@ -329,19 +350,69 @@ class Panel:
         dialled -- or authenticated -- twice.  As with :meth:`chdir` the
         previous location is restored if the new one cannot be listed.
         """
+        here = self._here()
+        if not self._point(fs, path):
+            return False
+        if (self.fs, self.path) != here[:2]:
+            self._left(here)
+        return True
+
+    def _point(self, fs: FileSystem, path: str,
+               keep_name: str | None = None) -> bool:
         old_fs, old_path = self.fs, self.path
         self.fs = fs
         self.path = fs.normpath(path)
         self.selected.clear()
         self.cursor = 0
         self.top = 0
-        self.refresh()
+        self.refresh(keep_name=keep_name)
         if self.error:
             self.fs = old_fs
             self.path = old_path
             self.refresh()
             return False
         return True
+
+    # -- history ------------------------------------------------------------
+    def _here(self) -> Place:
+        return (self.fs, self.path, self.current_name())
+
+    def _left(self, place: Place) -> None:
+        """``place`` has just been left for somewhere new."""
+        self.history.append(place)
+        del self.history[:-HISTORY_LIMIT]
+        # As in a browser: going somewhere new from the middle of the history
+        # gives up the way forward.
+        self.future.clear()
+
+    def back(self, revive: Callable[[FileSystem], FileSystem | None]
+             = lambda fs: fs) -> bool:
+        """Return to the last place this pane left; ``False`` if none is left.
+
+        A place that can no longer be opened -- a directory since deleted, a
+        connection since dropped -- is passed over for the one before it, so
+        going back means going somewhere that is still there.  ``revive``
+        gets each place's backend first and answers the one to use, or
+        ``None`` for a backend that is gone: it is how an archive that was
+        closed after the pane left it is opened again.
+        """
+        return self._travel(self.history, self.future, revive)
+
+    def forward(self, revive: Callable[[FileSystem], FileSystem | None]
+                = lambda fs: fs) -> bool:
+        """Undo a :meth:`back`, on the same terms."""
+        return self._travel(self.future, self.history, revive)
+
+    def _travel(self, source: list[Place], other: list[Place],
+                revive: Callable[[FileSystem], FileSystem | None]) -> bool:
+        here = self._here()
+        while source:
+            fs, path, name = source.pop()
+            live = revive(fs)
+            if live is not None and self._point(live, path, keep_name=name):
+                other.append(here)
+                return True
+        return False
 
     def move(self, delta: int) -> None:
         self.cursor += delta

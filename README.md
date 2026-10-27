@@ -58,6 +58,11 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   (the *remote* account's home on a remote pane), and `=` points the **other
   pane at this pane's directory and connection**, reusing the same live session
   so a remote location is never dialled — or authenticated — twice.
+- **Back and forward** — each pane remembers where it has been, and `<` / `>`
+  step back and forth through it like a browser: make the panes equal with
+  `=` to do something, then `<` in that pane puts it back where it was. A step
+  is a place on any backend — a remote connection, the inside of an archive —
+  and lands with the cursor on the entry it was on.
 - **The cursor stays put** — after deleting (`F8`) the highlight settles on the
   next entry down, stepping over a whole tagged block rather than springing back
   to the top of the listing. The same holds whenever an entry disappears from
@@ -87,8 +92,10 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   line numbers (`l`) and horizontal scrolling; works on remote files too.
 - **Archives as directories** — press Enter on a `.zip`, `.tar`, `.tar.gz`
   (or `.jar`, `.whl`, `.tgz`, `.tar.bz2`, `.tar.xz`) and the pane goes *into*
-  it. Browse, tag and copy files out with `F5` exactly as from a directory;
-  Backspace at the top comes back out. Read-only, and stdlib-only.
+  it. Browse, tag and copy files out with `F5` exactly as from a directory,
+  copy and move files *in* from the other pane, and delete or rename inside
+  it; Backspace at the top comes back out. `x` extracts a whole archive into
+  the other pane in one go. Stdlib-only.
 - **Run files** — press Enter on a shell script, a Python file, anything with
   a `#!` line, or any executable, and it *runs* (also **File ▸ Run…** and the
   right-click menu). A small dialog takes arguments — Esc there cancels, so
