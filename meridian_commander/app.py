@@ -29,6 +29,7 @@ Key bindings (also shown in the F1 help screen)::
     Ctrl-G         go to path                  Esc  the menu bar
     Ctrl-T         change sort order           Alt+F/C/O/H  a menu by name
     x              extract archive -> other pane
+    < / >          back / forward through this pane's history
     ~              home directory (this pane)
     =              other pane: same location as this one
     b              presets: saved locations to return to
@@ -64,7 +65,7 @@ from .operations import (
     move_path,
     overlapping,
 )
-from .archive import archive_stem, is_archive, open_archive
+from .archive import ArchiveFileSystem, archive_stem, is_archive, open_archive
 from .browsers import has_own_browser, viewer_for
 from .compare import Comparison
 from .panel import Panel
@@ -134,6 +135,8 @@ MENUS: list[dict] = [
             {"label": "~P~resets...", "name": "presets", "key": "b"},
             {"label": "~G~o to path...", "name": "goto", "key": "Ctrl+G"},
             {"label": "~H~ome directory", "name": "home", "key": "~"},
+            {"label": "~B~ack", "name": "back", "key": "<"},
+            {"label": "~F~orward", "name": "forward", "key": ">"},
             {"sep": True},
             {"label": "~S~wap panes", "name": "swap", "key": "Ctrl+U"},
             {"label": "~R~eload panes", "name": "reload", "key": "Ctrl+R"},
@@ -593,6 +596,8 @@ class App:
             "presets": self._presets_menu,
             "goto": self._go_to_path,
             "home": self._go_home,
+            "back": self._back,
+            "forward": self._forward,
             "swap": self._swap_panes,
             "reload": self._reload,
             "mirror": self._mirror_to_other_pane,
@@ -709,6 +714,10 @@ class App:
             self._go_to_path()
         elif key == ord("~"):  # home directory of this pane's filesystem
             self._go_home()
+        elif key == ord("<"):  # back through this pane's history
+            self._back()
+        elif key == ord(">"):  # and forward again
+            self._forward()
         elif key == ord("="):  # other pane: same location as this one
             self._mirror_to_other_pane()
         elif key == ord("b"):  # presets: saved locations
@@ -1002,8 +1011,8 @@ class App:
             return
         # Registered so it is closed with everything else on the way out.
         self._backends.append(fs)
-        self._set_message(f"{fs.label()} -- F5/F6 from the other pane add to "
-                          "it; Backspace to leave")
+        self._set_message(f"{fs.label()} -- change it like a directory; "
+                          "Backspace to leave")
 
     def _leave_archive(self) -> None:
         """Step back out of an archive to the directory that holds it.
@@ -1224,10 +1233,11 @@ class App:
             udir = user_plugin_dir()
             os.makedirs(udir, exist_ok=True)
             panel = self.active
-            if not isinstance(panel.fs, LocalFileSystem):
-                panel.fs = local
+            fs = panel.fs
+            if not isinstance(fs, LocalFileSystem):
+                fs = local
                 self._backends.append(local)
-            panel.chdir(udir)
+            panel.set_location(fs, udir)
             self._set_message(
                 "User plug-in folder -- drop .py files here to add plug-ins")
 
@@ -1519,6 +1529,37 @@ class App:
             dialogs.message(self.stdscr, "Error",
                             f"Cannot open home directory:\n{home}", error=True)
 
+    def _back(self) -> None:
+        panel = self.active
+        if panel.back(self._revive):
+            self._set_message(f"Back: {panel.fs.label()}:{panel.path}")
+        else:
+            self._set_message("Nothing further back in this pane's history")
+
+    def _forward(self) -> None:
+        panel = self.active
+        if panel.forward(self._revive):
+            self._set_message(f"Forward: {panel.fs.label()}:{panel.path}")
+        else:
+            self._set_message("Nothing further forward in this pane's history")
+
+    def _revive(self, fs: FileSystem) -> FileSystem | None:
+        """The backend a step through history uses: ``fs``, open again.
+
+        The last pane out of an archive closes it, but the history still has
+        its places, so going back into one reopens it -- from the file as it
+        now is, which may have changed.  An archive that will not reopen (it
+        was deleted) answers ``None``, and that step is passed over.
+        """
+        if isinstance(fs, ArchiveFileSystem) and fs.closed:
+            try:
+                fs.reopen()
+            except Exception:
+                return None
+            # Closed with everything else on the way out, as when entered.
+            self._backends.append(fs)
+        return fs
+
     def _mirror_to_other_pane(self) -> None:
         """Show this pane's location in the other pane as well.
 
@@ -1541,7 +1582,8 @@ class App:
                             f"Cannot open in the other pane:\n{panel.path}",
                             error=True)
             return
-        self._set_message(f"Other pane: {other.fs.label()}:{other.path}")
+        self._set_message(f"Other pane: {other.fs.label()}:{other.path} "
+                          "-- '<' there goes back")
 
     def _sort_menu(self) -> None:
         options = ["Name", "Extension", "Size", "Modify time"]
@@ -1591,13 +1633,13 @@ class App:
             return
 
         self._backends.append(fs)
-        # Replace the panel's filesystem and jump to its home directory.
-        panel.fs = fs
-        panel.path = fs.normpath(fs.home())
-        panel.cursor = 0
-        panel.top = 0
-        panel.clear_selection()
-        panel.refresh()
+        # Through set_location, like every other change of place, so that
+        # "<" comes back from a connection as it does from anywhere else.
+        if not panel.set_location(fs, fs.home()):
+            dialogs.message(self.stdscr, "Open location",
+                            f"Connected to {fs.label()}, but its home "
+                            "directory cannot be listed.", error=True)
+            return
         self._set_message(f"Connected: {fs.label()}")
 
     # -- presets (saved locations) ------------------------------------------
@@ -1925,11 +1967,7 @@ class App:
                 # landed, so none of the sources can go.
                 errors.append(str(exc))
                 moved.clear()
-            for src in moved:
-                try:
-                    src_panel.fs.delete_tree(src)
-                except Exception as exc:
-                    errors.append(f"{src_panel.fs.basename(src)}: {exc}")
+            self._delete_sources(src_panel.fs, moved, errors)
         finally:
             dlg.close()
 
@@ -1953,6 +1991,26 @@ class App:
                 "make a link on the other side, so they were left alone:\n"
                 + "\n".join(skipped[:8])
                 + ("\n\nThe source was kept." if move else ""))
+
+    @staticmethod
+    def _delete_sources(fs: FileSystem, paths: list[str],
+                        errors: list[str]) -> None:
+        """Delete what a move has copied, as one change to ``fs``.
+
+        Batched because the sources can be in an archive, which would
+        otherwise be rewritten once for every item moved out of it.
+        """
+        try:
+            with fs.batch():
+                for path in paths:
+                    try:
+                        fs.delete_tree(path)
+                    except Exception as exc:
+                        errors.append(f"{fs.basename(path)}: {exc}")
+        except Exception as exc:
+            # The deletes could not be written: the sources are all still
+            # there, beside their copies.
+            errors.append(str(exc))
 
     @staticmethod
     def _skipped_note(skipped: list[str], move: bool) -> str:
@@ -2133,19 +2191,27 @@ class App:
         cancelled = False
         dlg = dialogs.ProgressDialog(self.stdscr, "Delete")
         try:
-            for i, entry in enumerate(targets):
-                if dlg.cancelled():
-                    cancelled = True
-                    break
-                dlg.set_overall(f"Deleting {i + 1}/{len(targets)}: {entry.name}")
-                dlg.update(i, len(targets), entry.name)
-                target = panel.fs.join(panel.path, entry.name)
-                try:
-                    panel.fs.delete_tree(target)
-                except Exception as exc:
-                    errors.append(f"{entry.name}: {exc}")
-                    continue
-                removed.append(target)
+            # Batched, so deleting tagged files from an archive rewrites it
+            # once rather than once per file.
+            with panel.fs.batch():
+                for i, entry in enumerate(targets):
+                    if dlg.cancelled():
+                        cancelled = True
+                        break
+                    dlg.set_overall(
+                        f"Deleting {i + 1}/{len(targets)}: {entry.name}")
+                    dlg.update(i, len(targets), entry.name)
+                    target = panel.fs.join(panel.path, entry.name)
+                    try:
+                        panel.fs.delete_tree(target)
+                    except Exception as exc:
+                        errors.append(f"{entry.name}: {exc}")
+                        continue
+                    removed.append(target)
+        except Exception as exc:
+            # The archive could not be written, so nothing went after all.
+            errors.append(str(exc))
+            removed.clear()
         finally:
             dlg.close()
 
@@ -2303,6 +2369,8 @@ class App:
             "  Esc            the menu bar (Alt+F, Alt+C, Alt+O, Alt+H\n"
             "                 open a menu by name; click one to open it)\n"
             "  ~              home directory of this pane's location\n"
+            "  < / >          back / forward through the places this pane\n"
+            "                 has been: '=', F2 and archives included\n"
             "  =              other pane: same directory and connection\n"
             "  b              presets: go to / save / delete a location\n"
             "  .              show/hide hidden files (this pane)\n"

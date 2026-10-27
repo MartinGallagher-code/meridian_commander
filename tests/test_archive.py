@@ -300,17 +300,6 @@ def test_a_member_that_cannot_be_read(bundle, monkeypatch):
         bundle.open_read("/readme.txt")
 
 
-# -- what is still refused ----------------------------------------------------
-@pytest.mark.parametrize("call", [
-    lambda fs: fs.remove("/readme.txt"),
-    lambda fs: fs.rmdir("/empty"),
-    lambda fs: fs.rename("/readme.txt", "/other.txt"),
-])
-def test_deleting_or_renaming_inside_an_archive_is_refused(bundle, call):
-    with pytest.raises(FileSystemError, match="can be added to it, but not"):
-        call(bundle)
-
-
 # -- opening -------------------------------------------------------------------
 def test_a_local_archive_is_opened_in_place(tmp_path, monkeypatch):
     path = write_zip(str(tmp_path / "a.zip"), {"x.txt": "y"})
@@ -400,7 +389,7 @@ def test_entering_an_archive_from_a_pane(app, tmp_path):
     assert isinstance(app.left.fs, ArchiveFileSystem)
     assert app.left.path == "/"
     assert [e.name for e in app.left.entries] == ["inside.txt"]
-    assert "F5/F6 from the other pane add to it" in app.message
+    assert "change it like a directory" in app.message
 
 
 def test_leaving_an_archive_returns_to_the_directory_holding_it(app, tmp_path):
@@ -842,6 +831,209 @@ def test_closing_throws_away_what_was_never_written(bundle):
             bundle.close()
             raise RuntimeError("the application is going away")
     assert not os.path.exists(stage)
+
+
+# -- deleting and renaming inside an archive ----------------------------------
+def test_a_deleted_file_is_gone_from_the_file_on_disk(bundle, rewrites):
+    bundle.remove("/src/top.py")
+    members = _zip_members(bundle.archive_path)
+    assert "src/top.py" not in members
+    assert members["src/deep/nested/mod.py"] == b"print('hi')\n"
+    assert "top.py" not in [e.name for e in bundle.listdir("/src")]
+    assert rewrites == ["bundle.zip"]
+
+
+def test_a_directory_is_deleted_whole_in_one_change(bundle, rewrites):
+    bundle.delete_tree("/src")
+    assert sorted(_zip_members(bundle.archive_path)) == ["empty/", "readme.txt"]
+    assert sorted(e.name for e in bundle.listdir("/")) == \
+        ["empty", "readme.txt"]
+    with pytest.raises(FileSystemError, match="no such directory"):
+        bundle.listdir("/src/deep")
+    assert rewrites == ["bundle.zip"]
+
+
+def test_deleting_something_that_is_not_there_does_nothing(bundle, rewrites):
+    bundle.delete_tree("/nowhere")
+    assert rewrites == []
+
+
+def test_an_empty_directory_can_be_removed(bundle):
+    bundle.rmdir("/empty")
+    assert "empty/" not in _zip_members(bundle.archive_path)
+
+
+@pytest.mark.parametrize("call, problem", [
+    (lambda fs: fs.remove("/src"), "is a directory"),
+    (lambda fs: fs.remove("/nowhere.txt"), "no such entry"),
+    (lambda fs: fs.rmdir("/src"), "is not empty"),
+    (lambda fs: fs.rmdir("/readme.txt"), "no such directory"),
+    (lambda fs: fs.delete_tree("/"), "cannot delete the root"),
+    (lambda fs: fs.rename("/", "/x"), "cannot rename the root"),
+    (lambda fs: fs.rename("/nowhere", "/x"), "no such entry"),
+    (lambda fs: fs.rename("/src", "/src/deep/src"), "into itself"),
+    (lambda fs: fs.rename("/readme.txt", "/src/top.py"), "already exists"),
+    (lambda fs: fs.rename("/readme.txt", "/nowhere/r.txt"),
+     "no such directory"),
+])
+def test_a_delete_or_rename_that_cannot_be_done_is_refused(bundle, call,
+                                                           problem):
+    before = _zip_members(bundle.archive_path)
+    with pytest.raises(FileSystemError, match=problem):
+        call(bundle)
+    assert _zip_members(bundle.archive_path) == before
+
+
+def test_a_directory_emptied_by_a_delete_does_not_vanish(tmp_path):
+    """An archive stores paths: "a/" was only ever implied by "a/b.txt"."""
+    for path in (write_zip(str(tmp_path / "a.zip"), {"a/b.txt": "x"}),
+                 write_tar(str(tmp_path / "a.tar"), {"a/b.txt": "x"})):
+        fs = ArchiveFileSystem(LocalFileSystem(), path)
+        fs.remove("/a/b.txt")
+        fresh = ArchiveFileSystem(LocalFileSystem(), path)
+        assert fresh.listdir("/a") == []
+
+
+def test_a_renamed_file_keeps_its_contents_and_date(tmp_path):
+    path = write_tar(str(tmp_path / "a.tar.gz"), {"old.txt": "body"},
+                     mode="w:gz")
+    fs = ArchiveFileSystem(LocalFileSystem(), path)
+    fs.rename("/old.txt", "/new.txt")
+    member = _tar_members(path)["new.txt"]
+    assert member.mtime == 1700000000
+    assert "old.txt" not in _tar_members(path)
+    assert fs.open_read("/new.txt").read() == b"body"
+
+
+def test_a_renamed_directory_takes_everything_under_it(bundle):
+    bundle.rename("/src", "/source")
+    members = _zip_members(bundle.archive_path)
+    assert members["source/deep/nested/mod.py"] == b"print('hi')\n"
+    assert members["source/top.py"] == b"x = 1\n"
+    assert not [n for n in members if n.startswith("src/")]
+    assert sorted(e.name for e in bundle.listdir("/")) == \
+        ["empty", "readme.txt", "source"]
+
+
+def test_an_explicit_directory_entry_is_renamed_too(tmp_path):
+    zip_path = write_zip(str(tmp_path / "d.zip"), {"d/": "", "d/f": "x"})
+    tar_path = write_tar(str(tmp_path / "d.tar"), {"d/f": "x"}, dirs=["d/"])
+    ArchiveFileSystem(LocalFileSystem(), zip_path).rename("/d", "/e")
+    ArchiveFileSystem(LocalFileSystem(), tar_path).rename("/d", "/e")
+    assert sorted(_zip_members(zip_path)) == ["e/", "e/f"]
+    assert _tar_members(tar_path)["e"].isdir()
+
+
+def test_an_untouched_member_keeps_its_stored_name(tmp_path):
+    path = write_tar(str(tmp_path / "dot.tar"),
+                     {"./keep.txt": "k", "./go.txt": "g"})
+    fs = ArchiveFileSystem(LocalFileSystem(), path)
+    fs.rename("/go.txt", "/went.txt")
+    assert sorted(_tar_members(path)) == ["./keep.txt", "went.txt"]
+
+
+def test_changes_in_a_batch_are_replayed_in_order(bundle, tmp_path):
+    """Rename, then write a new file where the old one was, then delete."""
+    write(str(tmp_path / "fresh.txt"), "fresh")
+    with bundle.batch():
+        bundle.rename("/readme.txt", "/README")
+        copy_path(LocalFileSystem(), str(tmp_path / "fresh.txt"), bundle,
+                  "/readme.txt")
+        bundle.rename("/src", "/lib")
+        bundle.remove("/lib/top.py")
+        bundle.utime("/README", 1_500_000_000.0)
+    members = _zip_members(bundle.archive_path)
+    assert members["README"] == b"hello from the archive\n"
+    assert members["readme.txt"] == b"fresh"
+    assert "lib/top.py" not in members and "src/top.py" not in members
+    assert members["lib/deep/nested/mod.py"] == b"print('hi')\n"
+    fresh = ArchiveFileSystem(LocalFileSystem(), bundle.archive_path)
+    assert abs(fresh.stat("/README").mtime - 1_500_000_000) <= 2
+
+
+def test_a_staged_file_can_be_renamed_and_deleted_before_it_is_written(
+        bundle):
+    with bundle.batch():
+        bundle.touch("/draft.txt")
+        bundle.rename("/draft.txt", "/final.txt")
+        bundle.touch("/scrap.txt")
+        stage = bundle._stage_dir
+        bundle.remove("/scrap.txt")
+        assert len(os.listdir(stage)) == 1      # scrap's copy went with it
+    members = _zip_members(bundle.archive_path)
+    assert "final.txt" in members
+    assert "draft.txt" not in members and "scrap.txt" not in members
+
+
+def test_a_file_written_over_and_then_renamed_leaves_no_old_copy(bundle):
+    with bundle.batch():
+        writer = bundle.open_write("/readme.txt")
+        writer.write(b"replaced")
+        writer.close()
+        bundle.rename("/readme.txt", "/moved.txt")
+    members = _zip_members(bundle.archive_path)
+    assert members["moved.txt"] == b"replaced"
+    assert "readme.txt" not in members
+
+
+def test_several_deletes_in_a_row_share_one_record(bundle):
+    with bundle.batch():
+        bundle.remove("/readme.txt")
+        bundle.remove("/src/top.py")
+        assert len(bundle._moves) == 1
+        bundle.rename("/empty", "/hollow")
+        bundle.rmdir("/hollow")
+        assert len(bundle._moves) == 3
+    assert sorted(_zip_members(bundle.archive_path)) == \
+        ["src/deep/nested/mod.py"]
+
+
+def test_a_hard_link_follows_its_renamed_target(tmp_path):
+    path = str(tmp_path / "links.tar")
+    with tarfile.open(path, "w") as tf:
+        info = tarfile.TarInfo("data/real")
+        info.size = 4
+        tf.addfile(info, io.BytesIO(b"real"))
+        link = tarfile.TarInfo("alias")
+        link.type = tarfile.LNKTYPE
+        link.linkname = "data/real"
+        tf.addfile(link)
+        other = tarfile.TarInfo("other")
+        other.type = tarfile.LNKTYPE
+        other.linkname = "elsewhere"
+        tf.addfile(other)
+    fs = ArchiveFileSystem(LocalFileSystem(), path)
+    fs.rename("/data", "/kept")
+    members = _tar_members(path)
+    assert members["alias"].linkname == "kept/real"
+    assert members["other"].linkname == "elsewhere"
+    with tarfile.open(path) as tf:
+        assert tf.extractfile("alias").read() == b"real"
+
+
+def test_a_member_it_does_not_show_survives_a_rename(tmp_path):
+    path = write_zip(str(tmp_path / "evil.zip"),
+                     {"ok.txt": "fine", "../escape.txt": "not shown"})
+    ArchiveFileSystem(LocalFileSystem(), path).rename("/ok.txt", "/ok2.txt")
+    assert sorted(_zip_members(path)) == ["../escape.txt", "ok2.txt"]
+
+
+def test_a_closed_archive_takes_no_deletes_or_renames(bundle):
+    bundle.close()
+    for call in (lambda: bundle.remove("/readme.txt"),
+                 lambda: bundle.rmdir("/empty"),
+                 lambda: bundle.delete_tree("/src"),
+                 lambda: bundle.rename("/readme.txt", "/x")):
+        with pytest.raises(FileSystemError, match="has been closed"):
+            call()
+
+
+def test_a_closed_archive_can_be_reopened(bundle):
+    bundle.close()
+    assert bundle.closed
+    bundle.reopen()
+    assert not bundle.closed
+    assert bundle.open_read("/readme.txt").read() == b"hello from the archive\n"
 
 
 # -- writing into a remote archive ---------------------------------------------

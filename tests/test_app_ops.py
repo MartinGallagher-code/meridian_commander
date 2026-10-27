@@ -531,6 +531,115 @@ def test_sync_with_an_archive_rewrites_it_once(app, tmp_path, monkeypatch,
     assert rewrites == ["bundle.zip"]
 
 
+def _archive_on_the_left(app, tmp_path, members):
+    """Put the *left* (active) pane inside a zip, as Enter on it does."""
+    path = write_zip(str(tmp_path / "left" / "bundle.zip"), members)
+    app.left.refresh()
+    _point_at(app.left, "bundle.zip")
+    app._activate_entry()
+    return path
+
+
+def test_deleting_tagged_files_inside_an_archive(app, tmp_path, monkeypatch,
+                                                 rewrites):
+    path = _archive_on_the_left(app, tmp_path,
+                                {"a": "1", "b": "2", "keep": "3", "d/x": "4"})
+    app.left.selected = {"a", "b", "d"}
+    _ScriptedDialogs(monkeypatch, confirm=[True])
+    app._delete()
+    assert sorted(_zip_contents(path)) == ["keep"]
+    assert [e.name for e in app.left.entries] == ["keep"]
+    assert "Deleted 3 item(s)" in app.message
+    assert rewrites == ["bundle.zip"]
+
+
+def test_a_delete_from_an_archive_that_cannot_be_written(app, tmp_path,
+                                                         monkeypatch):
+    path = _archive_on_the_left(app, tmp_path, {"a": "1", "b": "2"})
+    _point_at(app.left, "a")
+    _rewrite_fails(monkeypatch)
+    scripted = _ScriptedDialogs(monkeypatch, confirm=[True])
+    app._delete()
+    assert "cannot write bundle.zip: disk full" in scripted.last_message
+    assert sorted(_zip_contents(path)) == ["a", "b"]
+    assert sorted(e.name for e in app.left.entries) == ["a", "b"]
+
+
+def test_renaming_inside_an_archive(app, tmp_path, monkeypatch):
+    path = _archive_on_the_left(app, tmp_path, {"old.txt": "body"})
+    _point_at(app.left, "old.txt")
+    _ScriptedDialogs(monkeypatch, prompt=["new.txt"])
+    app._rename()
+    assert _zip_contents(path) == {"new.txt": b"body"}
+    assert app.left.current().name == "new.txt"
+
+
+def test_moving_out_of_an_archive_takes_the_files_out_of_it(
+        app, tmp_path, monkeypatch, rewrites):
+    path = _archive_on_the_left(app, tmp_path,
+                                {"a": "1", "b": "2", "keep": "3"})
+    app.left.selected = {"a", "b"}
+    _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+    app._move()
+    assert read(str(tmp_path / "right" / "a")) == "1"
+    assert read(str(tmp_path / "right" / "b")) == "2"
+    assert sorted(_zip_contents(path)) == ["keep"]
+    assert rewrites == ["bundle.zip"]
+    assert "Move complete: 2 item(s)" in app.message
+
+
+def test_a_move_out_of_an_archive_that_cannot_be_rewritten_keeps_both(
+        app, tmp_path, monkeypatch):
+    path = _archive_on_the_left(app, tmp_path, {"a": "1"})
+    _point_at(app.left, "a")
+    _rewrite_fails(monkeypatch)
+    scripted = _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+    app._move()
+    assert read(str(tmp_path / "right" / "a")) == "1"
+    assert sorted(_zip_contents(path)) == ["a"]
+    assert "cannot write bundle.zip: disk full" in scripted.last_message
+
+
+def test_moving_between_two_places_in_one_archive_is_a_rename(
+        app, tmp_path, monkeypatch, rewrites):
+    path = _archive_on_the_left(app, tmp_path, {"a": "1", "dest/": ""})
+    app._mirror_to_other_pane()
+    app.right.chdir("/dest")
+    _point_at(app.left, "a")
+    _ScriptedDialogs(monkeypatch, prompt=["/dest"])
+    app._move()
+    assert _zip_contents(path) == {"dest/": b"", "dest/a": b"1"}
+    assert rewrites == ["bundle.zip"]
+
+
+def test_multi_rename_inside_an_archive_rewrites_it_once(app, tmp_path,
+                                                         rewrites):
+    from meridian_commander.plugin_api import PluginContext
+    from meridian_commander.plugins.multi_rename import MultiRename
+
+    path = _into_archive(app, tmp_path, {"a.txt": "1", "b.txt": "2"})
+    app.right.selected = {"a.txt", "b.txt"}
+    ctx = PluginContext(app=app, own_panel=app.left, other_panel=app.right)
+    assert MultiRename(ctx).process("prefix x-") == "Renamed 2 file(s)."
+    assert sorted(_zip_contents(path)) == ["x-a.txt", "x-b.txt"]
+    assert rewrites == ["bundle.zip"]
+
+
+def test_multi_rename_says_when_the_archive_could_not_be_written(
+        app, tmp_path, monkeypatch):
+    from meridian_commander.plugin_api import PluginContext
+    from meridian_commander.plugins.multi_rename import MultiRename
+
+    path = _into_archive(app, tmp_path, {"a.txt": "1"})
+    app.right.selected = {"a.txt"}
+    _rewrite_fails(monkeypatch)
+    plugin = MultiRename(PluginContext(app=app, own_panel=app.left,
+                                       other_panel=app.right))
+    assert plugin.process("prefix x-") == "Renamed 0 file(s)."
+    assert any("none of it was saved" in line for line in plugin.output)
+    assert sorted(_zip_contents(path)) == ["a.txt"]
+
+
 # -- extract -------------------------------------------------------------------
 
 def test_an_archive_extracts_into_a_folder_of_its_own(app, tmp_path,

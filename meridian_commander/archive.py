@@ -8,22 +8,26 @@ An archive is not a document, so this is not a viewer: it is a
 exactly like a directory, because copy, move and sync are already written
 against that interface and know nothing about where a pane happens to point.
 
-That goes for copying *into* one as well: files and directories can be added,
-and a file already there can be replaced.  Neither format can be changed in
-place -- a zip's index sits at the end, and a compressed tar is one stream --
-so a change means writing the whole archive out again.  Two rules follow:
+That goes for changing one as well: files and directories can be added,
+replaced, deleted and renamed.  Neither format can be changed in place -- a
+zip's index sits at the end, and a compressed tar is one stream -- so a change
+means writing the whole archive out again.  Two rules follow:
 
-* **What is written is staged first.**  Each file lands in a private temporary
-  directory, and the archive is rewritten from that once, when the operation
-  ends -- :meth:`FileSystem.batch` is how a copy of a hundred files says
-  "ends", and asks for one rewrite rather than a hundred.  Outside a batch a
-  change is written as soon as it is made.
+* **Changes are staged first.**  A file written lands in a private temporary
+  directory, a delete or rename is noted, and the listing shows the result at
+  once; the archive is rewritten from all of it when the operation ends.
+  :meth:`FileSystem.batch` is how a copy of a hundred files says "ends", and
+  asks for one rewrite rather than a hundred.  Outside a batch a change is
+  written as soon as it is made.
 * **The archive is replaced, never edited.**  The new one is built beside the
   old and renamed over it, so a failure halfway leaves the original as it was.
   Members this module does not show -- the unsafe ones below -- are carried
   across too: rewriting an archive must not be a way of losing part of it.
 
-Deleting and renaming inside an archive are refused, and say so.
+The rewrite walks the members the archive already holds, in their order, and
+asks of each where the changes since have taken it -- renamed, deleted,
+written over, or untouched -- so a member keeps its stored name, its mode and
+its date unless something actually happened to it.
 
 Two things about archives that shape the implementation:
 
@@ -39,6 +43,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import dataclasses
 import io
 import os
 import posixpath
@@ -48,6 +53,7 @@ import tarfile
 import tempfile
 import time
 import zipfile
+from typing import Any
 
 from .filesystems import CHUNK_SIZE, DirEntry, FileSystem, FileSystemError
 
@@ -183,12 +189,18 @@ class ArchiveFileSystem(FileSystem):
         #: file path -> the member name to read it back by
         self._members: dict[str, str] = {}
         #: What has been written and not yet put into the archive: file path
-        #: -> (its staged copy on this machine, mtime), and the directories
-        #: made, path -> mtime.  See :meth:`commit`.
+        #: -> (its staged copy on this machine, mtime).  See :meth:`commit`.
         self._staged: dict[str, tuple[str, float]] = {}
-        self._made: dict[str, float] = {}
         #: New times for files already in the archive, from :meth:`utime`.
         self._stamps: dict[str, float] = {}
+        #: Renames and deletes since the archive was read, oldest first, for
+        #: the rewrite to replay over the members it holds.  Each is a map of
+        #: path -> where it went, ``None`` for gone; consecutive deletes share
+        #: one, so emptying a directory of a thousand files is one lookup per
+        #: member rather than a thousand.
+        self._moves: list[dict[str, str | None]] = []
+        #: Whether anything has changed since the archive was last written.
+        self._dirty = False
         self._stage_dir: str | None = None
         #: How many :meth:`batch` blocks are open; nothing is committed
         #: while any is.
@@ -240,8 +252,16 @@ class ArchiveFileSystem(FileSystem):
             self._close_handles()
             raise FileSystemError(f"cannot open {self.name}: {exc}") from exc
 
-    def _reload(self) -> None:
-        """Read the archive again, as it now is, and rebuild the tree."""
+    @property
+    def closed(self) -> bool:
+        return self._zip is None and self._tar is None
+
+    def reopen(self) -> None:
+        """Read the archive again, as it now is, and rebuild the tree.
+
+        Also how a closed archive is brought back -- a pane's history can
+        return to one it left, after the last pane in it let it go.
+        """
         self._close_handles()
         self.skipped = 0
         self.truncated = False
@@ -350,7 +370,7 @@ class ArchiveFileSystem(FileSystem):
 
     # -- reading ----------------------------------------------------------
     def _require_open(self) -> None:
-        if self._zip is None and self._tar is None:
+        if self.closed:
             # The tree is still in memory, so the listing goes on working after
             # close() -- but there is nothing left to read the bytes from or to
             # write them back into, and saying so beats the AttributeError that
@@ -394,6 +414,7 @@ class ArchiveFileSystem(FileSystem):
                 self.commit()
 
     def _changed(self) -> None:
+        self._dirty = True
         if not self._depth:
             self.commit()
 
@@ -436,10 +457,8 @@ class ArchiveFileSystem(FileSystem):
         if self.exists(key):
             raise FileSystemError(f"{path} already exists in {self.name}")
         parent, name = self._parent_dir(key)
-        now = time.time()
         self._dirs[key] = {}
-        self._dirs[parent][name] = DirEntry(name, True, mtime=now)
-        self._made[key] = now
+        self._dirs[parent][name] = DirEntry(name, True, mtime=time.time())
         self._changed()
 
     def utime(self, path: str, mtime: float) -> None:
@@ -481,7 +500,7 @@ class ArchiveFileSystem(FileSystem):
         from what the archive actually holds, so the pane does not go on
         listing files that never arrived.
         """
-        if not (self._staged or self._made or self._stamps):
+        if not self._dirty:
             return
         local = self._local_file()
         if local is not None:
@@ -519,7 +538,7 @@ class ArchiveFileSystem(FileSystem):
                     os.remove(built)
                 problem = f"cannot write {self.name}: {exc}"
             try:
-                self._reload()
+                self.reopen()
             except FileSystemError:
                 # The upload broke the archive it was replacing.  The tree is
                 # empty and reads say the archive is closed, which is true.
@@ -528,7 +547,7 @@ class ArchiveFileSystem(FileSystem):
         if local is None:
             os.remove(built)
         self._discard()
-        self._reload()
+        self.reopen()
 
     def _upload(self, built: str) -> None:
         with open(built, "rb") as reader:
@@ -541,8 +560,9 @@ class ArchiveFileSystem(FileSystem):
     def _discard(self) -> None:
         """Forget every staged change and the files that held them."""
         self._staged = {}
-        self._made = {}
         self._stamps = {}
+        self._moves = []
+        self._dirty = False
         if self._stage_dir is not None:
             shutil.rmtree(self._stage_dir, ignore_errors=True)
             self._stage_dir = None
@@ -551,11 +571,66 @@ class ArchiveFileSystem(FileSystem):
     def _shown_at(stored: str) -> str | None:
         """The tree path a stored member is listed at, or ``None`` if none.
 
-        A member refused at the door has no path, so nothing written can
-        replace it, and it is carried into the new archive as it was.
+        A member refused at the door has no path, so nothing done in the
+        pane can have touched it, and it is carried into the new archive as
+        it was.
         """
         rel = clean_member(stored)
         return None if rel is None else "/" + rel
+
+    def _now_at(self, shown: str) -> str | None:
+        """Where renames and deletes have taken ``shown``; ``None``: gone."""
+        path = shown
+        for moves in self._moves:
+            moved = _nearest(path, moves)
+            if moved is None:
+                continue
+            target = moves[moved]
+            if target is None:
+                return None
+            path = target + path[len(moved):]
+        return path
+
+    def _destination(self, stored: str, is_dir: bool,
+                     present: set[str]) -> tuple[str, str | None] | None:
+        """The name a member is written under, and its tree path.
+
+        ``None`` leaves the member out: deleted, or written over.  A member
+        nothing happened to keeps exactly the name it was stored under,
+        ``./`` and all.  Every directory the member puts in the new archive,
+        itself included if it is one, is added to ``present``.
+        """
+        shown = self._shown_at(stored)
+        if shown is None:
+            return stored, None
+        now = self._now_at(shown)
+        if now is None or now in self._staged:
+            return None
+        self._note(now, is_dir, present)
+        if now == shown:
+            return stored, now
+        return now[1:], now
+
+    @staticmethod
+    def _note(path: str, is_dir: bool, present: set[str]) -> None:
+        """Add the directories ``path`` implies (and itself, if one)."""
+        probe = path if is_dir else posixpath.dirname(path)
+        while probe != "/" and probe not in present:
+            present.add(probe)
+            probe = posixpath.dirname(probe)
+
+    def _missing_dirs(self, present: set[str]) -> list[tuple[str, float]]:
+        """Directories in the listing that nothing written would recreate.
+
+        One that was made empty, or emptied by a delete, has no member to
+        imply it -- and an archive stores paths, not a tree, so it would
+        quietly vanish.  These are written as directory entries of their own.
+        """
+        missing = []
+        for key in sorted(self._dirs):
+            if key != "/" and key not in present:
+                missing.append((key, self.stat(key).mtime or time.time()))
+        return missing
 
     def _rewrite(self, built: str) -> None:
         if self._zip is not None:
@@ -564,18 +639,22 @@ class ArchiveFileSystem(FileSystem):
             self._rewrite_tar(self._tar, built)
 
     def _rewrite_zip(self, source: zipfile.ZipFile, built: str) -> None:
+        present: set[str] = set()
         with zipfile.ZipFile(built, "w") as out:
             out.comment = source.comment
             for info in source.infolist():
-                key = self._shown_at(info.filename)
-                if key in self._staged:
+                where = self._destination(info.filename, info.is_dir(), present)
+                if where is None:
                     continue
+                name, key = where
+                if info.is_dir() and not name.endswith("/"):
+                    name += "/"
                 # The extra field is left behind.  It can hold a zip64 record
                 # describing the old layout, which would contradict the one
                 # written for the new, and the rest of what it carries --
                 # finer timestamps, Unix owners -- is not worth an archive
                 # that will not open.
-                kept = zipfile.ZipInfo(info.filename, info.date_time)
+                kept = zipfile.ZipInfo(name, info.date_time)
                 if key in self._stamps:
                     kept.date_time = zip_date_time(self._stamps[key])
                 kept.compress_type = info.compress_type
@@ -587,13 +666,8 @@ class ArchiveFileSystem(FileSystem):
                 with source.open(info) as reader, \
                         out.open(kept, "w") as writer:
                     shutil.copyfileobj(reader, writer, CHUNK_SIZE)
-            for key, mtime in sorted(self._made.items()):
-                made = zipfile.ZipInfo(key[1:] + "/", zip_date_time(mtime))
-                # The Unix mode in the high half; 0x10 is the MS-DOS flag
-                # that a Windows tool reads to know it is a directory.
-                made.external_attr = (stat.S_IFDIR | 0o755) << 16 | 0x10
-                out.writestr(made, b"")
             for key, (staged, mtime) in sorted(self._staged.items()):
+                self._note(key, False, present)
                 added = zipfile.ZipInfo(key[1:], zip_date_time(mtime))
                 added.compress_type = zipfile.ZIP_DEFLATED
                 added.external_attr = (stat.S_IFREG | 0o644) << 16
@@ -601,48 +675,139 @@ class ArchiveFileSystem(FileSystem):
                 with open(staged, "rb") as reader, \
                         out.open(added, "w") as writer:
                     shutil.copyfileobj(reader, writer, CHUNK_SIZE)
+            for key, mtime in self._missing_dirs(present):
+                made = zipfile.ZipInfo(key[1:] + "/", zip_date_time(mtime))
+                # The Unix mode in the high half; 0x10 is the MS-DOS flag
+                # that a Windows tool reads to know it is a directory.
+                made.external_attr = (stat.S_IFDIR | 0o755) << 16 | 0x10
+                out.writestr(made, b"")
 
     def _rewrite_tar(self, source: tarfile.TarFile, built: str) -> None:
+        present: set[str] = set()
         with tarfile.open(built, _tar_write_mode(self.name)) as out:
             for member in source.getmembers():
-                key = self._shown_at(member.name)
-                if key in self._staged:
+                where = self._destination(member.name, member.isdir(), present)
+                if where is None:
                     continue
-                if key in self._stamps:
-                    member = copy.copy(member)
-                    member.mtime = int(self._stamps[key])
+                name, key = where
                 # Only a regular file has data of its own; a link, a
                 # directory or a device is all header, and copied as one.
                 data = source.extractfile(member) if member.isreg() else None
+                member = copy.copy(member)
+                member.name = name
+                if key in self._stamps:
+                    member.mtime = int(self._stamps[key])
+                if member.islnk():
+                    # A hard link names its target by stored name, so it has
+                    # to follow the target if that was renamed.
+                    target = self._shown_at(member.linkname)
+                    moved = None if target is None else self._now_at(target)
+                    if moved is not None and moved != target:
+                        member.linkname = moved[1:]
                 out.addfile(member, data)
-            for key, mtime in sorted(self._made.items()):
-                made = tarfile.TarInfo(key[1:])
-                made.type = tarfile.DIRTYPE
-                made.mode = 0o755
-                made.mtime = int(mtime)
-                out.addfile(made)
             for key, (staged, mtime) in sorted(self._staged.items()):
+                self._note(key, False, present)
                 added = tarfile.TarInfo(key[1:])
                 added.size = os.path.getsize(staged)
                 added.mode = 0o644
                 added.mtime = int(mtime)
                 with open(staged, "rb") as reader:
                     out.addfile(added, reader)
+            for key, mtime in self._missing_dirs(present):
+                made = tarfile.TarInfo(key[1:])
+                made.type = tarfile.DIRTYPE
+                made.mode = 0o755
+                made.mtime = int(mtime)
+                out.addfile(made)
 
-    # -- what is still refused -----------------------------------------------
-    def _refused(self, what: str):
-        raise FileSystemError(
-            f"{self.name} is an archive: files can be added to it, "
-            f"but not {what}")
-
+    # -- deleting and renaming ----------------------------------------------
     def remove(self, path: str) -> None:
-        self._refused("deleted from it")
+        self._require_open()
+        key = self.normpath(path)
+        if key in self._dirs:
+            raise FileSystemError(f"{path} is a directory in {self.name}")
+        self.stat(key)
+        self._drop(key)
 
     def rmdir(self, path: str) -> None:
-        self._refused("deleted from it")
+        self._require_open()
+        key = self.normpath(path)
+        if key not in self._dirs:
+            raise FileSystemError(f"no such directory in {self.name}: {path}")
+        if self._dirs[key]:
+            raise FileSystemError(f"{path} is not empty")
+        self._drop(key)
+
+    def delete_tree(self, path: str) -> None:
+        """Delete a file or a whole directory as one change.
+
+        The inherited walk would delete a directory one entry at a time,
+        and outside a batch that is one rewrite of the archive per file.
+        """
+        self._require_open()
+        key = self.normpath(path)
+        if not self.exists(key):
+            return
+        self._drop(key)
+
+    def _drop(self, key: str) -> None:
+        if key == "/":
+            raise FileSystemError(f"cannot delete the root of {self.name}")
+        parent, name = posixpath.split(key)
+        entry = self._dirs[parent].pop(name)
+        self._carry(key, None, entry.is_dir)
+        if self._moves and None in self._moves[-1].values():
+            # The last change was a delete too: share its map.
+            self._moves[-1][key] = None
+        else:
+            self._moves.append({key: None})
+        self._changed()
+
+    def _carry(self, old: str, new: str | None, is_dir: bool) -> None:
+        """Move what is recorded at ``old`` to ``new``, or forget it for None.
+
+        A directory takes everything under it along; a file is one lookup per
+        table, which is what keeps deleting a thousand tagged files from
+        scanning the whole archive a thousand times.  A staged file that is
+        forgotten has its temporary copy removed with it.
+        """
+        tables: tuple[dict[str, Any], ...] = (
+            self._dirs, self._members, self._staged, self._stamps)
+        for table in tables:
+            if is_dir:
+                keys = [k for k in table
+                        if k == old or k.startswith(old + "/")]
+            else:
+                keys = [old] if old in table else []
+            for key in keys:
+                value = table.pop(key)
+                if new is not None:
+                    table[new + key[len(old):]] = value
+                elif table is self._staged:
+                    os.remove(value[0])
 
     def rename(self, src: str, dst: str) -> None:
-        self._refused("renamed inside it")
+        """Rename a file or directory, refusing a name that is already taken.
+
+        A rename over an existing entry would have to delete it first, and a
+        file manager's rename is not the place to do that unasked.
+        """
+        self._require_open()
+        old = self.normpath(src)
+        new = self.normpath(dst)
+        if old == "/":
+            raise FileSystemError(f"cannot rename the root of {self.name}")
+        entry = self.stat(old)
+        if new.startswith(old + "/"):
+            raise FileSystemError(f"cannot move {src} into itself")
+        if self.exists(new):
+            raise FileSystemError(f"{dst} already exists in {self.name}")
+        parent, name = self._parent_dir(new)
+        del self._dirs[posixpath.dirname(old)][posixpath.basename(old)]
+        self._dirs[parent][name] = dataclasses.replace(entry, name=name)
+        self._carry(old, new, entry.is_dir)
+        self._moves.append({old: new})
+        self._changed()
 
     def _close_handles(self) -> None:
         for handle in (self._zip, self._tar):
@@ -656,6 +821,15 @@ class ArchiveFileSystem(FileSystem):
     def close(self) -> None:
         self._close_handles()
         self._discard()
+
+
+def _nearest(path: str, moves: dict[str, str | None]) -> str | None:
+    """``path`` or its nearest ancestor that ``moves`` names, or ``None``."""
+    while path not in moves:
+        if path == "/":
+            return None
+        path = posixpath.dirname(path)
+    return path
 
 
 class _StagedFile(io.FileIO):
