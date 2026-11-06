@@ -75,6 +75,9 @@ from .peek import PeekPane
 from .sync import build_sync_plan, execute_sync_plan, survey_directory
 from .util import human_size, human_time, ljust, read_key, rjust
 
+#: How long curses waits after Esc for the rest of a key's sequence, in ms.
+ESCDELAY_MS = 25
+
 
 def _cwd(fs: FileSystem) -> str:
     """The directory the command was run from, or the backend's home.
@@ -634,6 +637,13 @@ class App:
                         tick()
                     except Exception as exc:
                         self._set_message(f"Plugin error: {exc}")
+                # A plug-in that is busy -- the terminal while output flows or
+                # a key has just gone to the shell -- may ask for a quicker
+                # poll, so an echo shows at once rather than on the next
+                # idle one.
+                wanted = getattr(plugin, "poll_ms", None)
+                if isinstance(wanted, int) and wanted < poll:
+                    poll = wanted
         return poll
 
     def run(self) -> None:
@@ -1179,12 +1189,13 @@ class App:
         self._set_message("Panes swapped")
 
     def _open_terminal_pane(self) -> None:
-        """Open a pseudo-terminal *inside* the active pane.
+        """Open a terminal *inside* the active pane.
 
         The shell runs in the pane's rectangle and follows the pane's
         location: a local pty for local panes, an interactive channel on the
-        pane's existing SSH connection for SFTP/SSH panes.  Ctrl-] switches
-        focus to the other pane (the shell keeps running); F10 closes it.
+        pane's existing SSH connection for SFTP/SSH panes.  Every key goes to
+        the program; Ctrl-] opens the terminal's menu (Tab: the other pane,
+        q: close, PgUp: scroll back).
         """
         from .plugin_api import PluginContext
         from .plugins.terminal import TerminalPlugin
@@ -1198,13 +1209,15 @@ class App:
             panel.plugin = None
             dialogs.message(self.stdscr, "Terminal", str(exc), error=True)
             return
-        self._set_message("Terminal opened -- Ctrl-] switches pane, F10 closes")
+        self._set_message("Terminal opened -- Ctrl-] then Tab: other pane, "
+                          "q: close, PgUp: scroll back")
 
     def _open_terminal(self) -> None:
         """Suspend the TUI and drop the user into a full-screen shell.
 
-        The in-pane terminal (`t`) is line-oriented; this full-screen variant
-        exists for programs that need a real terminal (vim, htop, ...).
+        The in-pane terminal (`t`) runs vim and htop too, in half the screen;
+        this gives a program the whole real terminal instead -- its full
+        width, its true colour and its own mouse handling.
         For a local pane this is a shell with the working directory set to the
         pane's path.  For an SFTP pane it opens an interactive ``ssh`` session
         into the same remote directory.  FTP has no shell, so it is declined.
@@ -1486,12 +1499,22 @@ class App:
 
         # A pane owned by a plugin: focus it, and let the wheel scroll its
         # output; clicks otherwise stay with the plugin's own key handling.
+        # A plug-in with a wheel() of its own gets the wheel itself: in the
+        # terminal PgUp and PgDn belong to the program, so sending those
+        # would page through less instead of scrolling the history.
         if panel.plugin is not None:
+            wheel = getattr(panel.plugin, "wheel", None)
             try:
                 if wheel_up and bstate & wheel_up:
-                    panel.plugin.handle_key(curses.KEY_PPAGE)
+                    if wheel is not None:
+                        wheel(3)
+                    else:
+                        panel.plugin.handle_key(curses.KEY_PPAGE)
                 elif wheel_down and bstate & wheel_down:
-                    panel.plugin.handle_key(curses.KEY_NPAGE)
+                    if wheel is not None:
+                        wheel(-3)
+                    else:
+                        panel.plugin.handle_key(curses.KEY_NPAGE)
             except Exception:
                 pass
             return
@@ -2537,10 +2560,13 @@ class App:
             "  z              single pane: this pane at full width, the other\n"
             "                 kept as it was (Tab flips to it, Ctrl-U brings\n"
             "                 it out); copy, move, extract and sync name it.\n"
-            "                 h, Ctrl-] and plug-ins that use the other pane\n"
-            "                 show both while they run.  z again: two panes\n"
-            "  t              terminal in this pane (Ctrl-] switch, F10 close)\n"
-            "  !              full-screen shell (for vim/htop etc.)\n"
+            "                 h, Ctrl-] Tab in the terminal and plug-ins that\n"
+            "                 use the other pane show both while they run.\n"
+            "                 z again: two panes\n"
+            "  t              terminal in this pane: every key goes to the\n"
+            "                 program; Ctrl-] then Tab other pane, q close,\n"
+            "                 PgUp scroll back (or the mouse wheel)\n"
+            "  !              full-screen shell: the whole real terminal\n"
             "  p / F11        plug-in mode: run a plug-in in this pane\n"
             "  f              find files: browsable results (view/edit/goto)\n"
             "  r              rename the file under the cursor\n"
@@ -2630,6 +2656,16 @@ def _main(stdscr, args) -> str | None:
     # drawn later has to ask whether it may have any.
     theme.init(config_mod.colour_scheme())
     stdscr.keypad(True)
+    # How long curses waits after Esc to see whether a key sequence follows.
+    # Its default is a whole second, so Esc -- leaving insert mode in vim in
+    # the terminal pane, or closing a dialog -- lagged that long.  A terminal
+    # sends a key's sequence in one write, so 25 ms is ample; an ESCDELAY in
+    # the environment is the user's own choice and is left alone.
+    if "ESCDELAY" not in os.environ:
+        try:
+            curses.set_escdelay(ESCDELAY_MS)
+        except curses.error:
+            pass
     # Raw mode: without it the tty's XON/XOFF flow control eats Ctrl-S (the
     # editor's save key!) and Ctrl-Q, and Ctrl-S can freeze the display.
     # Ctrl-C consequently arrives as key 3, handled as quit in handle_key.

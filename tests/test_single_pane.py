@@ -23,7 +23,7 @@ from meridian_commander.plugin_api import (
     PanePlugin,
     PluginContext,
 )
-from meridian_commander.plugins.terminal import TerminalPlugin
+from meridian_commander.plugins.terminal import MENU_KEY, TerminalPlugin
 
 from support import _ScriptedDialogs, read, with_curses_screen, write, write_zip
 
@@ -530,7 +530,7 @@ def test_a_plugin_with_no_name_is_still_described(app):
     assert app.message.endswith("while a plug-in works on the other pane")
 
 
-# -- the terminal: Ctrl-] keeps it beside the pane it hands over to ---------------
+# -- the terminal: Ctrl-] Tab keeps it beside the pane it hands over to -----------
 
 def test_a_terminal_takes_the_whole_width(single, monkeypatch):
     monkeypatch.setenv("SHELL", "/bin/sh")
@@ -548,7 +548,8 @@ def test_ctrl_bracket_from_a_terminal_shows_both_until_it_is_back(
     single.handle_key(ord("t"))
     terminal = single.left
     try:
-        single.handle_key(TerminalPlugin.SWITCH_KEY)
+        single.handle_key(MENU_KEY)            # Ctrl-] then Tab
+        single.handle_key(9)
         assert single.active is single.right
         assert _shown(single) == [single.left, single.right]
         # Work in the listing goes on with the shell in sight...

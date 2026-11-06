@@ -268,6 +268,8 @@ _attrs: dict[str, int] = {}
 #: The lowest pair number this module has not claimed, so other code that
 #: allocates pairs of its own (the image viewer) can start above us.
 _next_pair: int = 1
+#: The allocator for every pair above the theme's, made on first use.
+_shared: Pairs | None = None
 #: The scheme currently in force.
 current: str = DEFAULT_SCHEME
 #: Whether the roles are being drawn in colour rather than from the mono column.
@@ -309,7 +311,7 @@ def init(scheme: str | None = None) -> str:
     leaves more roles on their monochrome fallback.  Callers do not have to
     check -- that is the point of routing every attribute through :func:`attr`.
     """
-    global _attrs, _next_pair, current, _in_colour, GLYPHS
+    global _attrs, _next_pair, current, _in_colour, GLYPHS, _shared
 
     GLYPHS = UNICODE_GLYPHS if _encoding_handles_box_characters() \
         else ASCII_GLYPHS
@@ -318,6 +320,9 @@ def init(scheme: str | None = None) -> str:
     table = SCHEMES[name]
     _attrs = {}
     _next_pair = 1
+    # Every pair is about to be handed out again from the start, so whatever
+    # the old allocator remembers would name pairs that now hold other colours.
+    _shared = None
 
     try:
         colour = bool(curses.has_colors())
@@ -380,6 +385,89 @@ def next_free_pair() -> int:
     above ours is what stops a photograph from repainting the desktop.
     """
     return _next_pair
+
+
+#: How many pairs a curses attribute can name.  ``COLOR_PAIRS`` is 65536 on
+#: ncurses 6 and ``init_pair`` accepts numbers that high, but the attribute
+#: keeps only eight bits of pair number: ``color_pair(300)`` is silently pair
+#: 44, and a cell drawn with it shows whatever pair 44 holds.
+ATTR_PAIRS = 256
+
+
+class Pairs:
+    """Lazily allocated curses colour pairs, keyed by (foreground, background).
+
+    curses has a fixed number of pairs and no way to free one, so they are
+    handed out on demand and reused.  :meth:`get` never fails -- when the
+    pairs run out it reuses the first one, since a slightly wrong shade in the
+    corner of a photograph is not worth refusing to draw over -- while
+    :meth:`find` says so, for a caller with a better fallback of its own.
+    """
+
+    def __init__(self, limit: int | None = None, start: int = 1) -> None:
+        if limit is None:
+            limit = min(getattr(curses, "COLOR_PAIRS", ATTR_PAIRS) or ATTR_PAIRS,
+                        ATTR_PAIRS)
+        self.limit = limit
+        self.start = start
+        self._pairs: dict[tuple[int, int], int] = {}
+        self._next = start
+        self.exhausted = False
+
+    def find(self, fg: int, bg: int) -> int | None:
+        """The pair for these colours, allocating it if need be; None when
+        there are none left or curses refuses the colours."""
+        key = (fg, bg)
+        found = self._pairs.get(key)
+        if found is not None:
+            return found
+        if self._next >= self.limit:
+            self.exhausted = True
+            return None
+        index = self._next
+        try:
+            curses.init_pair(index, fg, bg)
+        except (curses.error, ValueError, OverflowError):
+            # Which of these a colour number past the terminal's range raises
+            # depends on the Python version -- 3.9 gives curses.error, later
+            # versions ValueError, and a very large number OverflowError.
+            return None
+        self._next += 1
+        self._pairs[key] = index
+        return index
+
+    def get(self, fg: int, bg: int) -> int:
+        """The pair for these colours, or the first one handed out (or the
+        terminal's own, 0) when there is no pair for them."""
+        found = self.find(fg, bg)
+        if found is not None:
+            return found
+        # Reuse whatever was allocated first; the alternative is not drawing,
+        # and one wrong cell beats a blank screen.
+        self.exhausted = True
+        return self.start if self._pairs else 0
+
+    def allocated(self) -> list[tuple[tuple[int, int], int]]:
+        """Every ((foreground, background), pair) handed out so far."""
+        return list(self._pairs.items())
+
+    def __len__(self) -> int:
+        return len(self._pairs)
+
+
+def shared_pairs() -> Pairs:
+    """The allocator every pair above the theme's own comes from.
+
+    One for the whole application, because two would both start at
+    :func:`next_free_pair` and ``init_pair`` the same numbers: an image opened
+    over the in-pane terminal would re-colour the terminal's cells, and keep
+    them that way after it closed.  :func:`init` starts a new one, since it
+    hands every pair out again.
+    """
+    global _shared
+    if _shared is None:
+        _shared = Pairs(start=_next_pair)
+    return _shared
 
 
 def names() -> list[str]:

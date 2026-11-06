@@ -30,6 +30,19 @@ day the version was cut.
   - **README:** the same licence badge and the same `## License` section.
   - **REUSE:** a `REUSE.toml` of the same shape in every repo; `reuse lint`
     passes in all of them.
+- **The in-pane terminal's keys belong to the program.** F10 used to close
+  the terminal and PgUp/PgDn to scroll it, so htop and mc could not be quit
+  and less, vim and man could not page. Now every key goes to the program,
+  and **`Ctrl-]`** opens the terminal's own menu in the pane's footer: `Tab`
+  switches to the other pane (until now `Ctrl-]` did that on its own), `q`
+  closes the terminal, `PgUp` scrolls back, and `Ctrl-]` again sends a
+  literal `Ctrl-]`. The mouse wheel scrolls the history rather than sending
+  PgUp/PgDn. Shown in the pane's footer, the in-app help, the README and
+  the manual.
+- **`Esc` no longer lags.** curses waits a whole second after `Esc` by
+  default to see whether a key's sequence follows; Meridian now sets 25 ms,
+  so leaving insert mode in vim in the terminal pane, or closing a dialog,
+  is immediate. An `ESCDELAY` in the environment is left as the user set it.
 
 ### Added
 
@@ -42,12 +55,35 @@ day the version was cut.
   `x` name it in their prompt (*Copy 'notes.txt' to the hidden pane, local:*),
   `F9` marks it `(hidden pane)` in its confirmation, and `=` says where it
   sent it. Anything that works in both panes shows both while it runs, then
-  goes back to one: `h`, `Ctrl-]` from a terminal, and every plug-in that
-  works on the other pane. A plug-in can set `uses_other_pane = False` to
-  have the single pane to itself, as Processes, SSH doctor, JSON push, Run
-  remote script and the terminal do; one that does not say gets both panes,
-  so user plug-ins work unchanged. `[ui] panes = 1` in `config.ini` starts
-  in single mode. (MC-003)
+  goes back to one: `h`, `Ctrl-]` then `Tab` from a terminal, and every
+  plug-in that works on the other pane. A plug-in can set
+  `uses_other_pane = False` to have the single pane to itself, as Processes,
+  SSH doctor, JSON push, Run remote script and the terminal do; one that
+  does not say gets both panes, so user plug-ins work unchanged.
+  `[ui] panes = 1` in `config.ini` starts in single mode. (MC-003)
+
+- **The terminal in a pane is a real terminal.** `t` used to give a
+  line-printer that dropped colours and cursor movement, so `ls --color`
+  lost its colours and vim, less, man, top and htop came out garbled — the
+  manual sent you to `!` for them. It now runs a terminal emulator
+  (`meridian_commander/vt.py`, standard library only) that implements what
+  `xterm-256color` promises: cursor addressing, scroll regions, insert and
+  delete of characters and lines, every erase, the sixteen, 256 and 24-bit
+  colours with bold, dim, italic, underline, blink and reverse, the
+  alternate screen (so vim and less leave the shell's screen as it was), DEC
+  line drawing, wide and combining characters, application cursor and keypad
+  modes, and the replies programs wait for (cursor position, device
+  attributes). The shell is told `TERM=xterm-256color`, locally and over
+  SSH. F1–F12, PgUp/PgDn, Home/End, Insert/Delete and Shift-Tab reach the
+  program as xterm sends them. The terminal is drawn on the outer terminal's
+  own background (usually black), not the pane's blue, on which `ls`
+  directories were invisible. Recorded vim, less and top sessions render as
+  tmux renders them, and the protections against a `cat` of a binary file
+  stay: unterminated sequences are bounded, an unterminated OSC is abandoned
+  at a control character, and a flood of output is taken a slice per poll so
+  Ctrl-C still gets through. While output flows the pane polls every 10 ms
+  instead of 120, so typing echoes at once. (MC-002)
+
 - **Extract an archive in one key.** `x` on a `.zip` or `.tar` (or with
   several tagged) unpacks it into the other pane — also **File ▸ Extract
   archive** and the right-click menu. Each archive lands in a folder of its
@@ -102,6 +138,14 @@ day the version was cut.
 
 ### Fixed
 
+- **An image with many colours was drawn partly in the wrong ones.** On
+  ncurses 6 `COLOR_PAIRS` is 65,536 and the image viewer handed out pair
+  numbers that high, but a curses attribute holds only eight bits of pair:
+  `color_pair(300)` is pair 44, so cells past the 255th pair showed whatever
+  an earlier pair held. Pairs now stop at 255, and the image viewer and the
+  terminal pane draw from one shared allocator, so neither re-colours the
+  other's cells; when they run out the viewer reuses its own first pair, not
+  the theme's pair 1.
 - **A typed relative path was measured from the wrong directory.** "Go to
   directory" and the `F5`/`F6` destination resolved what you typed against the
   *process's* working directory — wherever the shell that started the

@@ -342,6 +342,29 @@ def test_a_plugin_with_no_tick_still_asks_for_polling(loop_app):
     assert app._tick_plugins() == app.PLUGIN_POLL_MS
 
 
+def test_a_busy_plugin_can_ask_for_a_quicker_poll(loop_app):
+    """The terminal while output flows: an echo should not wait 120 ms."""
+    class _Busy:
+        wants_timer = True
+        poll_ms = 10
+
+    app, _ = loop_app([])
+    app.left.plugin = _Busy()
+    assert app._tick_plugins() == 10
+
+
+@pytest.mark.parametrize("wanted", [None, 500, "10"])
+def test_a_plugin_asking_for_no_quicker_poll_keeps_the_usual_one(loop_app,
+                                                                 wanted):
+    class _Idle:
+        wants_timer = True
+        poll_ms = wanted
+
+    app, _ = loop_app([])
+    app.left.plugin = _Idle()
+    assert app._tick_plugins() == app.PLUGIN_POLL_MS
+
+
 def test_ctrl_c_offers_to_quit(loop_app, monkeypatch):
     from meridian_commander import dialogs
 

@@ -57,8 +57,8 @@ accelerator letters, green buttons and drop shadows under every dialog — the
 - **Or one, at full width** — `z` (or **Options ▸ Single pane**) gives the
   active pane the whole desktop and keeps the other in reserve, exactly as it
   was: `Tab` flips to it, copy, move, extract and sync name it before using
-  it, and `h`, `Ctrl-]` and plug-ins that work on the other pane bring both
-  back while they run. `[ui] panes = 1` starts that way.
+  it, and `h`, `Ctrl-]` `Tab` from a terminal and plug-ins that work on the
+  other pane bring both back while they run. `[ui] panes = 1` starts that way.
 - **Home and mirror shortcuts** — `~` jumps a pane to its own home directory
   (the *remote* account's home on a remote pane), and `=` points the **other
   pane at this pane's directory and connection**, reusing the same live session
@@ -180,14 +180,18 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   counts — remote panes included.
 - **Per-pane hidden-file toggle** (`.`) — show or hide dotfiles independently in
   each pane.
-- **Terminal inside the pane** (`t`) — the pane itself becomes a
-  pseudo-terminal running a shell in the pane's directory, while the other pane
-  keeps working normally. Works for **local panes** (a real pty) and for
-  **SFTP/SSH panes** (an interactive shell on the pane's existing SSH
-  connection). `Ctrl-]` switches to the other pane while the shell keeps
-  running (Tab back to return); `F10` or exiting the shell closes it. For
-  full-screen programs (vim, htop) use
-  `!`, which suspends the UI into a real terminal instead.
+- **Terminal inside the pane** (`t`) — the pane itself becomes a terminal
+  running a shell in the pane's directory, while the other pane keeps working
+  normally. Works for **local panes** (a real pty) and for **SFTP/SSH panes**
+  (an interactive shell on the pane's existing SSH connection). It is a real
+  terminal emulator: colours, `ls --color`, `git diff`, and full-screen
+  programs — **vim, less, man, top, htop** — run in the pane and leave it as it
+  was when they exit. Every key goes to the program, F-keys and PgUp/PgDn
+  included; **`Ctrl-]`** opens the terminal's menu: `Tab` switches to the
+  other pane while the shell keeps running (Tab back to return), `q` closes
+  it, `PgUp` scrolls back through what went off the top (so does the mouse
+  wheel). Exiting the shell closes it too. `!` still hands a program the
+  whole real terminal instead.
 - **Mouse support** — click to select, double-click to open, wheel to scroll,
   and **right-click for a context menu** of actions (view, edit, copy, move,
   rename, delete, tag, mkdir, new file, compare, head+tail, terminal).

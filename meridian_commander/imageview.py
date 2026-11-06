@@ -10,9 +10,10 @@ foreground paints the top half and its background paints the bottom.  An
 
 Colour comes from the xterm 256-colour palette -- the 6x6x6 cube plus its
 24 greys -- because that is what terminals agree on.  Pairs are allocated
-lazily as they are needed and cached: a full screen uses at most a few
-thousand distinct (top, bottom) combinations, far fewer after quantisation,
-while every possible pair would be 65536 and not all terminals have room.
+lazily as they are needed, from the application's one allocator
+(:func:`theme.shared_pairs`), and cached.  A curses attribute can name only
+255 of them, fewer than the distinct (top, bottom) combinations a photograph
+can use, so a busy picture runs out and reuses one -- and the footer says so.
 
 Without colour there is still the luminance ramp, which is worth more than it
 sounds: line art, diagrams and screenshots read perfectly well in twelve
@@ -24,6 +25,7 @@ from __future__ import annotations
 import curses
 
 from . import termimage, theme
+from .theme import Pairs
 from .filesystems import FileSystem
 from .image import Image, ImageError, MAX_BYTES, decode
 from .util import read_key, truncate
@@ -103,50 +105,6 @@ def palette_rgb(index: int) -> tuple[int, int, int]:
 def luminance(r: int, g: int, b: int) -> int:
     """Perceived brightness, 0-255, on the usual Rec. 601 weights."""
     return (r * 299 + g * 587 + b * 114) // 1000
-
-
-class Pairs:
-    """Lazily allocated curses colour pairs, keyed by (foreground, background).
-
-    curses has a fixed number of pairs and no way to free one, so they are
-    handed out on demand and reused.  When they run out the last colour is
-    reused rather than failing: a slightly wrong shade in the corner of a
-    photograph is not worth refusing to draw over.
-    """
-
-    def __init__(self, limit: int | None = None, start: int = 1) -> None:
-        self.limit = limit if limit is not None else getattr(
-            curses, "COLOR_PAIRS", 256)
-        self._pairs: dict[tuple[int, int], int] = {}
-        self._next = start
-        self.exhausted = False
-
-    def get(self, fg: int, bg: int) -> int:
-        key = (fg, bg)
-        found = self._pairs.get(key)
-        if found is not None:
-            return found
-        if self._next >= self.limit:
-            self.exhausted = True
-            # Reuse whatever was allocated first; the alternative is not
-            # drawing, and one wrong cell beats a blank screen.
-            return 1 if self._pairs else 0
-        index = self._next
-        self._next += 1
-        try:
-            curses.init_pair(index, fg, bg)
-        except (curses.error, ValueError, OverflowError):
-            # Which of these a colour number past the terminal's range raises
-            # depends on the Python version -- 3.9 gives curses.error, later
-            # versions ValueError, and a very large number OverflowError.
-            # None of them is a reason to stop drawing.
-            self.exhausted = True
-            return 0
-        self._pairs[key] = index
-        return index
-
-    def __len__(self) -> int:
-        return len(self._pairs)
 
 
 def sample(image: Image, frame: int, scale_w: int, scale_h: int,
@@ -349,9 +307,11 @@ class ImageView:
             self._plan_graphics(width, body)
             return
         if self.pairs is None:
-            # Above the pairs the theme has already claimed: a photograph must
-            # not repaint the desktop it is being shown on.
-            self.pairs = Pairs(start=theme.next_free_pair())
+            # The application's one allocator, which starts above the theme's
+            # pairs -- a photograph must not repaint the desktop it is shown
+            # on -- and which the in-pane terminal draws from too, so neither
+            # re-colours the other's cells.
+            self.pairs = theme.shared_pairs()
         self.clamp(width, body)
         scale_w, scale_h = self.scaled(width, body)
         rows = sample(self.image, self.frame, scale_w, scale_h,

@@ -1106,50 +1106,48 @@ def test_ssh_config_missing_file_uses_defaults(tmp_path):
 
 
 # -- in-pane terminal ---------------------------------------------------------
-def test_term_emulator_basics():
-    from meridian_commander.plugins.terminal import TermEmulator
+def test_the_terminal_screen_basics():
+    from meridian_commander.vt import Screen
 
-    t = TermEmulator()
+    t = Screen(5, 20)
     t.feed(b"hello\r\nworld")
-    assert t.lines == ["hello"]
-    assert t.cur == "world"
+    assert t.display()[:2] == ["hello", "world"]
 
     # \r + overwrite (how shells redraw a prompt line)
     t.feed(b"\rWORLD")
-    assert t.cur == "WORLD"
+    assert t.display()[1] == "WORLD"
 
     # backspace + erase to end of line (CSI K)
     t.feed(b"\b\b\x1b[K")
-    assert t.cur == "WOR"
+    assert t.display()[1] == "WOR"
 
-    # SGR colours and OSC titles are stripped
+    # SGR colours colour the text; OSC titles never reach the screen
     t.feed(b"\x1b[1;32mgreen\x1b[0m")
-    assert t.cur == "WORgreen"
+    assert t.display()[1] == "WORgreen"
+    assert t.lines[1].attrs[3] == (2, -1, 1)
     t.feed(b"\x1b]0;window title\x07!")
-    assert t.cur == "WORgreen!"
+    assert t.display()[1] == "WORgreen!"
 
 
-def test_term_emulator_clear_and_tabs():
-    from meridian_commander.plugins.terminal import TermEmulator
+def test_the_terminal_screen_clears_and_tabs():
+    from meridian_commander.vt import Screen
 
-    t = TermEmulator()
-    t.feed(b"junk\r\nmore\x1b[2J")
-    assert t.lines == [] and t.cur == ""
+    t = Screen(5, 20)
+    t.feed(b"junk\r\nmore\x1b[2J\x1b[H")
+    assert t.display() == [""] * 5
     t.feed(b"a\tb")
-    assert t.cur == "a       b"
+    assert t.display()[0] == "a       b"
 
 
-def test_term_emulator_visible_window():
-    from meridian_commander.plugins.terminal import TermEmulator
+def test_the_terminal_screen_keeps_what_scrolls_off():
+    from meridian_commander.vt import Screen
 
-    t = TermEmulator()
+    t = Screen(5, 20)
     for i in range(30):
-        t.feed(f"line{i}\n".encode())
-    vis = t.visible(5)
-    assert vis[-1] == ""          # current (empty) line
-    assert vis[0] == "line26"
-    back = t.visible(5, scroll=10)
-    assert back[-1] == "line20"
+        t.feed(f"line{i}\r\n".encode())
+    assert t.display()[-1] == ""          # the cursor's (empty) line
+    assert t.display()[0] == "line26"
+    assert t.scrollback[-1].text() == "line25"
 
 
 def test_terminal_plugin_local_shell_roundtrip(fs, tmp_path):
@@ -1157,6 +1155,7 @@ def test_terminal_plugin_local_shell_roundtrip(fs, tmp_path):
     from types import SimpleNamespace
 
     from meridian_commander.plugins.terminal import TerminalPlugin
+    from support import terminal_text
 
     workdir = tmp_path / "termwork"
     workdir.mkdir()
@@ -1175,7 +1174,7 @@ def test_terminal_plugin_local_shell_roundtrip(fs, tmp_path):
         joined = ""
         while time.time() < deadline:
             plug.tick()
-            joined = "\n".join(plug.term.lines + [plug.term.cur])
+            joined = terminal_text(plug.screen)
             if "MARKER_42" in joined:
                 break
             time.sleep(0.05)
@@ -1187,19 +1186,20 @@ def test_terminal_plugin_local_shell_roundtrip(fs, tmp_path):
         deadline = time.time() + 10
         while time.time() < deadline:
             plug.tick()
-            joined = "\n".join(plug.term.lines + [plug.term.cur])
+            joined = terminal_text(plug.screen)
             if str(workdir) in joined:
                 break
             time.sleep(0.05)
         assert str(workdir) in joined
-        # Ctrl-] switches focus to the other pane; the shell keeps running.
+        # Ctrl-] then Tab switches focus to the other pane; the shell keeps
+        # running.
         assert plug.handle_key(29) is True
+        assert plug.handle_key(9) is True
         assert switched == [True]
         assert not plug.done
-        # F10 closes the terminal.
-        import curses
-
-        assert plug.handle_key(curses.KEY_F10) is False
+        # Ctrl-] then q closes the terminal.
+        assert plug.handle_key(29) is True
+        assert plug.handle_key(ord("q")) is False
     finally:
         plug.on_exit()
 

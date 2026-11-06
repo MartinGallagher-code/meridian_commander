@@ -989,6 +989,22 @@ def test_the_wheel_scrolls_a_plugins_output(boxed, monkeypatch):
     assert plugin.keys == [curses.KEY_PPAGE, curses.KEY_NPAGE]
 
 
+def test_the_wheel_goes_to_a_plugins_own_wheel_when_it_has_one(boxed,
+                                                               monkeypatch):
+    """In the terminal PgUp and PgDn belong to the program: the wheel must
+    scroll the history rather than page through less."""
+    plugin = _Plugin(None)
+    turns = []
+    plugin.wheel = turns.append
+    boxed.left.plugin = plugin
+    _mouse(monkeypatch, 5, 5, _WHEEL_UP)
+    boxed._handle_mouse()
+    _mouse(monkeypatch, 5, 5, _WHEEL_DOWN)
+    boxed._handle_mouse()
+    assert turns == [3, -3]
+    assert plugin.keys == []
+
+
 def test_a_click_on_a_plugin_pane_only_focuses_it(boxed, monkeypatch):
     plugin = _Plugin(None)
     boxed.right.plugin = plugin
@@ -1058,6 +1074,62 @@ def test_main_wires_up_curses_and_runs_the_app(monkeypatch, tmp_path):
     assert started["paths"] == (str(tmp_path), str(tmp_path))
     # No config.ini: two panes, as always.
     assert started["single"] is False
+
+
+def _run_main_for_escdelay(monkeypatch):
+    """Run main() far enough to see what it does with ESCDELAY."""
+    def fake_wrapper(fn, args):
+        class _Screen:
+            def keypad(self, flag):
+                pass
+
+        fn(_Screen(), args)
+
+    class _FakeApp:
+        def __init__(self, stdscr, **kwargs):
+            pass
+
+        def run(self):
+            pass
+
+        def printwd_path(self):
+            return None
+
+    monkeypatch.setattr(curses, "wrapper", fake_wrapper)
+    monkeypatch.setattr(app_mod, "App", _FakeApp)
+    for name in ("use_default_colors", "raw"):
+        monkeypatch.setattr(curses, name, lambda: None)
+    monkeypatch.setattr(curses, "has_colors", lambda: False)
+    monkeypatch.setattr(curses, "mousemask", lambda mask: None)
+    monkeypatch.setattr(curses, "mouseinterval", lambda ms: None)
+    return main([])
+
+
+def test_main_shortens_the_escape_delay(monkeypatch):
+    """curses waits a whole second after Esc by default, so leaving insert
+    mode in vim in the terminal pane lagged that long."""
+    delays = []
+    monkeypatch.delenv("ESCDELAY", raising=False)
+    monkeypatch.setattr(curses, "set_escdelay", delays.append)
+    assert _run_main_for_escdelay(monkeypatch) == 0
+    assert delays == [app_mod.ESCDELAY_MS]
+
+
+def test_main_leaves_an_escape_delay_the_user_set(monkeypatch):
+    delays = []
+    monkeypatch.setenv("ESCDELAY", "200")
+    monkeypatch.setattr(curses, "set_escdelay", delays.append)
+    assert _run_main_for_escdelay(monkeypatch) == 0
+    assert delays == []
+
+
+def test_main_copes_with_a_curses_that_refuses_the_escape_delay(monkeypatch):
+    def refuse(ms):
+        raise curses.error("set_escdelay() returned ERR")
+
+    monkeypatch.delenv("ESCDELAY", raising=False)
+    monkeypatch.setattr(curses, "set_escdelay", refuse)
+    assert _run_main_for_escdelay(monkeypatch) == 0
 
 
 def test_main_copes_with_a_terminal_that_refuses_colour_and_mouse(monkeypatch):
