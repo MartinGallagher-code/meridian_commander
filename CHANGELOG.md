@@ -429,6 +429,12 @@ day the version was cut.
   0.06 s, in two poll cycles. A time box also retires the guess: a fixed
   count cannot suit both a local listing (microseconds) and an SFTP one (a
   network round trip), while a slice fits whatever the backend can do in it.
+- **The coverage gate failed every November and December.** The test for an
+  `ls -l` time that must be last year's built its stamp two months ahead of
+  the real clock, which from November is next January: that parses as a date
+  already past, so the branch it is named for never ran and coverage fell to
+  99.9%. The test now pins the clock and checks the exact year it gets back,
+  so it covers the branch on any date and fails if the branch is wrong.
 
 ### Added
 

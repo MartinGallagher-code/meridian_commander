@@ -435,13 +435,21 @@ def test_unix_ls_parser_reads_a_year_instead_of_a_time():
     assert entry.mtime is not None
 
 
-def test_unix_ls_parser_treats_a_future_time_as_last_year():
+def test_unix_ls_parser_treats_a_future_time_as_last_year(monkeypatch):
     # A "Mon DD HH:MM" stamp has no year; one far in the future was last year.
-    future = time.localtime(time.time() + 60 * 24 * 3600)
-    stamp = time.strftime("%b %d %H:%M", future)
-    entry = _parse_unix_ls_line(f"-rw-r--r-- 1 o g 10 {stamp} soon.txt")
-    assert entry.mtime is not None
-    assert entry.mtime < time.time() + 86400
+    # The clock is pinned to mid-June.  With the real one, a stamp two months
+    # ahead is next January from November on: it parses as a date already
+    # past, the last-year branch never runs, and the coverage gate fails
+    # every November and December.  time.localtime() with no argument reads
+    # the C clock rather than time.time(), so both are pinned.
+    now = time.mktime((2026, 6, 15, 12, 0, 0, 0, 0, -1))
+    real_localtime = time.localtime
+    monkeypatch.setattr(time, "time", lambda: now)
+    monkeypatch.setattr(
+        time, "localtime",
+        lambda secs=None: real_localtime(now if secs is None else secs))
+    entry = _parse_unix_ls_line("-rw-r--r-- 1 o g 10 Aug 14 12:00 soon.txt")
+    assert entry.mtime == time.mktime((2025, 8, 14, 12, 0, 0, 0, 0, -1))
 
 
 def test_unix_ls_parser_copes_with_a_size_that_is_not_a_number():
