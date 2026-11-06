@@ -5,7 +5,8 @@ Press **`C`** for the configuration menu:
 - **Edit configuration** opens `~/.config/meridian-commander/config.ini` in the
   built-in editor (created with commented defaults on first use). `[ui] scheme`
   is the colour scheme; `[ui] editor` is the external editor `F4` should use
-  (blank for the built-in one — see below); plug-ins read their settings from
+  (blank for the built-in one — see below); `[ui] panes` is how many panes
+  are on screen at start (below); plug-ins read their settings from
   `[plugin:<name>]` sections; `[plugins] dirs` adds extra plug-in directories.
 - **Edit a plug-in file** lists every discovered plug-in file (built-in and
   user) and opens the chosen one in the editor.
@@ -17,6 +18,21 @@ Saved locations are kept separately, in
 `~/.config/meridian-commander/presets.ini` — see
 [Presets](usage.md#presets--saved-locations). They are written by the app (`b`) rather
 than by hand, which is why they are not part of `config.ini`.
+
+## `[ui] panes` — starting with one pane
+
+`2`, the default, starts with the two panes side by side. `1` starts with the
+active pane at full width and the other kept out of sight, as **`z`** gives
+you while running — see [One pane at a time](usage.md#one-pane-at-a-time):
+
+```ini
+[ui]
+panes = 1
+```
+
+Only `1` does this; anything else, blank included, is two panes. `z` and
+**Options ▸ Single pane** change it for the session and do not write the file,
+the way the hidden-files toggle does not.
 
 ## `[ui] editor` — using vi, vim or your own editor
 

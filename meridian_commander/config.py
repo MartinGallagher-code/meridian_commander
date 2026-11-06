@@ -40,6 +40,10 @@ editor =
 ; remote pane is fetched to a private temporary copy and read there.
 ; Also switchable while running, from Options > Viewer.
 viewer =
+; Panes on screen at start: 2, or 1 for the active pane at full width with
+; the other kept out of sight (Tab flips to it).  z switches between the two
+; while running, as does Options > Single pane.
+panes = 2
 
 [plugins]
 ; Extra directories to search for plug-ins, colon-separated.
@@ -252,6 +256,17 @@ def save_viewer(command: str) -> bool:
     if external_viewer() == command:
         return True
     return _save_ui("viewer", command)
+
+
+def single_pane() -> bool:
+    """Whether ``[ui] panes`` asks to start with one pane on screen.
+
+    Only ``1`` does.  Anything else -- blank, ``2``, a typo -- is the usual
+    two: a pane out of sight is the setting that surprises someone, so it
+    is the one that has to be asked for in so many words.
+    """
+    parser = load()
+    return (parser.get("ui", "panes", fallback="") or "").strip() == "1"
 
 
 def extra_plugin_dirs() -> list[str]:

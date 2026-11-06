@@ -174,6 +174,9 @@ class TermEmulator:
 class TerminalPlugin(PanePlugin):
     name = "Terminal"
     description = "Shell inside this pane (local pty, or SSH for remote panes)"
+    # A shell wants the whole width.  Its one use of the other pane, Ctrl-],
+    # goes through focus_other, which keeps it in view beside that pane.
+    uses_other_pane = False
     wants_timer = True     # the app polls tick() so output flows while idle
 
     SWITCH_KEY = 29        # Ctrl-]: focus the other pane, keep the shell alive
