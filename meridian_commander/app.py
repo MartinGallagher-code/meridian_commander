@@ -34,6 +34,7 @@ Key bindings (also shown in the F1 help screen)::
     =              other pane: same location as this one
     b              presets: saved locations to return to
     z              single pane: one pane at full width, the other kept
+    /              search this pane: type a name, the cursor jumps to it
 """
 
 from __future__ import annotations
@@ -69,11 +70,11 @@ from .operations import (
 from .archive import ArchiveFileSystem, archive_stem, is_archive, open_archive
 from .browsers import has_own_browser, viewer_for
 from .compare import Comparison
-from .panel import Panel
+from .panel import Panel, Search
 from . import usage
 from .peek import PeekPane
 from .sync import build_sync_plan, execute_sync_plan, survey_directory
-from .util import human_size, human_time, ljust, read_key, rjust
+from .util import human_size, human_time, ljust, read_key, rjust, typed_char
 
 #: How long curses waits after Esc for the rest of a key's sequence, in ms.
 ESCDELAY_MS = 25
@@ -141,6 +142,7 @@ MENUS: list[dict] = [
             {"label": "~H~ome directory", "name": "home", "key": "~"},
             {"label": "~B~ack", "name": "back", "key": "<"},
             {"label": "~F~orward", "name": "forward", "key": ">"},
+            {"label": "Search by ~n~ame", "name": "search", "key": "/"},
             {"sep": True},
             {"label": "~S~wap panes", "name": "swap", "key": "Ctrl+U"},
             {"label": "~R~eload panes", "name": "reload", "key": "Ctrl+R"},
@@ -252,6 +254,12 @@ class App:
         # terminal that handed the keyboard over with Ctrl-], until the
         # keyboard comes back to it.  See _panes_on_screen.
         self._beside: Panel | None = None
+        # The search mode "/" turns on, or None.  Only the active pane can be
+        # searching, and every key that is not the mode's own ends it before
+        # doing what it always does, so it never outlives the pane's focus.
+        self.search: Search | None = None
+        # The hint line from before the search, put back when it ends.
+        self._message_before_search = ""
 
     # -- helpers ----------------------------------------------------------
     @property
@@ -494,12 +502,19 @@ class App:
         if len(header) > room:
             header = "~" + header[-(room - 1):]
 
+        search = self.search
+        if search is not None and search.panel is panel:
+            # The frame writes the footer between two caps and a space either
+            # side, from two columns in, so this is what fits inside it.
+            footer, footer_role = self._search_footer(search, w - 7)
+        else:
+            footer = self._panel_footer(panel)
+            footer_role = "panelerror" if panel.error else "panelinfo"
         theme.frame(stdscr, y, x, h, w,
                     "frame" if active else "framenc",
                     title=header, title_role="title" if active else "titlenc",
                     double=active, close=False,
-                    footer=self._panel_footer(panel),
-                    footer_role="panelerror" if panel.error else "panelinfo")
+                    footer=footer, footer_role=footer_role)
 
         name_w = max(4, inner_w - 20)
         # With sizes on, the Modify column gives its room to a bar: hunting
@@ -584,6 +599,33 @@ class App:
         if cur and cur.name != Panel.PARENT and not cur.is_dir:
             return f"{cur.name}  {human_size(cur.size).strip()}"
         return f"{len(panel.entries) - (0 if panel._at_root() else 1)} items"
+
+    @staticmethod
+    def _search_footer(search: Search, room: int) -> tuple[str, str]:
+        """The pane's footer while it is being searched, and its colour.
+
+        The pattern and where the cursor stands among its matches, or that
+        there are none.  Too long for the pane, the pattern loses its start
+        rather than its end -- the end is what was just typed, and the count
+        after it is the answer -- as a caption keeps the deepest directory.
+        In a pane too narrow even for that, the end of the pattern alone.
+        """
+        pattern = search.pattern
+        which, count = search.position()
+        if not pattern:
+            status, role = "type a name", "panelinfo"
+        elif count:
+            status, role = f"{which} of {count}", "panelinfo"
+        else:
+            status, role = "not found", "panelerror"
+        text = f"/ {pattern}  {status}"
+        if len(text) > room:
+            keep = room - len(status) - 5         # "/ ~" and the two spaces
+            if keep > 0:
+                text = f"/ ~{pattern[-keep:]}  {status}"
+            else:
+                text = ("/" + pattern)[-room:]
+        return text, role
 
     def _draw_function_bar(self, y: int, width: int) -> None:
         keys = [
@@ -728,6 +770,7 @@ class App:
             "home": self._go_home,
             "back": self._back,
             "forward": self._forward,
+            "search": self._start_search,
             "swap": self._swap_panes,
             "reload": self._reload,
             "mirror": self._mirror_to_other_pane,
@@ -756,15 +799,17 @@ class App:
         if handler is not None:
             handler()
 
-    def _menu_key(self, key: int) -> bool:
+    def _menu_key(self, key: int, following: int | None = None) -> bool:
         """Handle Esc and the Alt+letter combinations that open a menu.
 
         A lone Esc and Alt+F arrive as the same first byte, so the only way to
         tell them apart is to look for a second one straight away: a real Alt
         combination has already sent its letter, while a user pressing Escape
-        has not.  Returns True when the key was the menu's.
+        has not.  ``following`` is that second key when the caller has
+        already looked for it.  Returns True when the key was the menu's.
         """
-        following = self._peek_key()
+        if following is None:
+            following = self._peek_key()
         if following == -1:
             self.open_menu(0)
             return True
@@ -808,6 +853,13 @@ class App:
             if res is not None:
                 return
             # res is None: fall through so the app can handle the key (Tab).
+
+        # The search mode comes before every hotkey: while it is on, a letter
+        # is part of a name, and q asking to quit or d offering to delete in
+        # the middle of typing one would be the worst surprise it could give.
+        search = self.search
+        if search is not None and self._search_key(search, key):
+            return
 
         if key in (curses.KEY_UP, ord("k")):
             panel.move(-1)
@@ -883,6 +935,8 @@ class App:
             self._compare()
         elif key == ord("h"):  # head + tail of the other pane's file
             self._peek()
+        elif key == ord("/"):  # search this pane's listing by name
+            self._start_search()
         elif key == curses.KEY_MOUSE:
             self._handle_mouse()
         # F-keys, with digit (1..0 -> F1..F10) and mnemonic-letter alternates
@@ -909,6 +963,66 @@ class App:
             self._quit()
         elif key == curses.KEY_RESIZE:
             pass
+
+    # -- the search mode ----------------------------------------------------
+    def _start_search(self) -> None:
+        """Turn the search mode on in the active pane."""
+        panel = self.active
+        if panel.plugin is not None:
+            # A plug-in draws the pane, so there is no listing to search, and
+            # a cursor moving under it would be one nobody could see.
+            self._set_message("Search works on a directory listing")
+            return
+        self.search = Search(panel)
+        self._message_before_search = self.message
+        self._set_message("Search: / or Esc ends   Down/Up next/previous   "
+                          "Ins tag")
+
+    def _end_search(self) -> None:
+        """Turn the search mode off, leaving the cursor where it is."""
+        self.search = None
+        self._set_message(self._message_before_search)
+
+    def _search_key(self, search: Search, key: int | str) -> bool:
+        """Handle ``key`` in the search mode.  True when it was the mode's.
+
+        Every character is part of the pattern, hotkey letters and the digit
+        aliases of the F-keys included.  A key that is not text and not one
+        of the mode's own -- Enter, Tab, a real F-key, the mouse, Ctrl and
+        the other cursor keys -- ends the search and answers False, so the
+        caller goes on to do with it exactly what it always does: Enter opens
+        the entry the search found, F5 copies it.
+        """
+        if key == ord("/"):       # the toggle: no file name contains a "/"
+            self._end_search()
+        elif key == 27:
+            # Alt+letter arrives as Esc and the letter.  Read together they
+            # are a menu, as anywhere else; the letter on its own would be
+            # a hotkey let out of the search.
+            following = self._peek_key()
+            self._end_search()
+            if following != -1:
+                self._menu_key(key, following)
+        elif key in (curses.KEY_DOWN, 14):           # 14 = Ctrl-N
+            search.step(1)
+        elif key in (curses.KEY_UP, 16):             # 16 = Ctrl-P
+            search.step(-1)
+        elif key in (curses.KEY_BACKSPACE, 127, 8):
+            search.backspace()
+        elif key == curses.KEY_IC:
+            # Tag and go on to the next match, as Insert goes on to the next
+            # row outside the search: one search can tag all it finds.
+            search.panel.toggle_select()
+            search.step(1)
+        elif key == curses.KEY_RESIZE:
+            pass
+        else:
+            char = typed_char(key)
+            if char is None:
+                self._end_search()
+                return False
+            search.type(char)
+        return True
 
     # -- actions ----------------------------------------------------------
     def _quit(self) -> None:
@@ -2553,6 +2667,12 @@ class App:
             "                 has been: '=', F2 and archives included\n"
             "  =              other pane: same directory and connection\n"
             "  b              presets: go to / save / delete a location\n"
+            "  /              search this pane: type a name and the cursor\n"
+            "                 jumps to the first one containing it (all\n"
+            "                 lowercase ignores case); Down/Up or Ctrl-N/P\n"
+            "                 next/previous, Ins tag, Enter/F-keys act on it,\n"
+            "                 / or Esc ends.  Every letter and digit is part\n"
+            "                 of the name, so no hotkey runs meanwhile\n"
             "  .              show/hide hidden files (this pane)\n"
             "  u              directory sizes: each subdirectory shows what\n"
             "                 is under it, with a bar against the biggest\n"

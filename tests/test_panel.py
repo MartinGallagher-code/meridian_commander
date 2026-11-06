@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 
 from meridian_commander.filesystems import LocalFileSystem
-from meridian_commander.panel import Panel
+from meridian_commander.panel import Panel, Search
 
 from support import write
 
@@ -411,3 +411,187 @@ def test_a_backend_that_cannot_be_revived_is_passed_over(fs, tree):
     assert panel.back(lambda backend: None) is False
     assert panel.path == str(tree / "adir")
     assert panel.history == []
+
+
+# -- searching by name ---------------------------------------------------------
+
+@pytest.fixture
+def named(tmp_path):
+    """Names chosen to tell the matching rules apart.
+
+    Listed as: .., archive/, Reports/, notes.txt, old-report.txt, README.md,
+    report.txt, résumé.pdf, Été.txt, журнал.log -- directories first, then
+    the files by name without regard to case.
+    """
+    root = tmp_path / "named"
+    (root / "archive").mkdir(parents=True)
+    (root / "Reports").mkdir()
+    for name in ("notes.txt", "old-report.txt", "README.md", "report.txt",
+                 "r\u00e9sum\u00e9.pdf", "\u00c9t\u00e9.txt",
+                 "\u0436\u0443\u0440\u043d\u0430\u043b.log"):
+        write(str(root / name), "x")
+    return root
+
+
+def test_the_listing_the_search_tests_rely_on(fs, named):
+    assert names(Panel(fs, str(named))) == [
+        "..", "archive", "Reports", "notes.txt", "old-report.txt",
+        "README.md", "report.txt", "r\u00e9sum\u00e9.pdf",
+        "\u00c9t\u00e9.txt", "\u0436\u0443\u0440\u043d\u0430\u043b.log"]
+
+
+def test_a_lowercase_pattern_matches_anywhere_and_ignores_case(fs, named):
+    panel = Panel(fs, str(named))
+    # Reports/ (a directory, so first), old-report.txt (in the middle of the
+    # name) and report.txt, in the order they are listed.
+    assert panel.matches("rep") == [2, 4, 6]
+
+
+def test_a_capital_in_the_pattern_means_it(fs, named):
+    panel = Panel(fs, str(named))
+    assert panel.matches("Rep") == [2]
+    assert panel.matches("REP") == []
+    assert panel.matches("READ") == [5]
+
+
+def test_the_parent_entry_is_never_a_match(fs, named):
+    panel = Panel(fs, str(named))
+    # Every file has a dot in it; ".." is all dots and is still not one.
+    assert panel.matches(".") == [3, 4, 5, 6, 7, 8, 9]
+    assert 0 not in panel.matches("..") and panel.matches("..") == []
+
+
+def test_an_empty_pattern_and_a_missing_one_match_nothing(fs, named):
+    panel = Panel(fs, str(named))
+    assert panel.matches("") == []
+    assert panel.matches("zzz") == []
+
+
+def test_names_beyond_ascii_match_by_the_same_rules(fs, named):
+    panel = Panel(fs, str(named))
+    assert panel.matches("\u00e9t\u00e9") == [8]          # été finds Été
+    assert panel.matches("\u00c9t\u00e9") == [8]          # Été means it
+    assert panel.matches("\u00c9T") == []
+    assert panel.matches("\u0436\u0443\u0440") == [9]
+
+
+def test_typing_goes_to_the_first_match_from_the_top(fs, named):
+    panel = Panel(fs, str(named))
+    panel.move_to(8)                     # wherever the cursor happened to be
+    search = Search(panel)
+    search.type("r")
+    assert panel.cursor == 1             # "archive" has an r in it
+    search.type("e")
+    assert panel.cursor == 2             # Reports/, ahead of every file
+    search.type("p")
+    assert search.pattern == "rep"
+    assert panel.cursor == 2
+    assert search.position() == (1, 3)
+
+
+def test_next_and_previous_wrap_round_at_both_ends(fs, named):
+    panel = Panel(fs, str(named))
+    search = Search(panel)
+    for char in "rep":
+        search.type(char)
+    search.step(1)
+    assert panel.cursor == 4 and search.position() == (2, 3)
+    search.step(1)
+    assert panel.cursor == 6 and search.position() == (3, 3)
+    search.step(1)                       # past the last: back to the first
+    assert panel.cursor == 2 and search.position() == (1, 3)
+    search.step(-1)                      # before the first: on to the last
+    assert panel.cursor == 6
+    search.step(-1)
+    assert panel.cursor == 4
+
+
+def test_from_between_matches_each_way_finds_the_nearest(fs, named):
+    panel = Panel(fs, str(named))
+    search = Search(panel)
+    search.type("rep")
+    panel.move_to(5)                     # README.md, between two matches
+    search.step(1)
+    assert panel.cursor == 6
+    panel.move_to(5)
+    search.step(-1)
+    assert panel.cursor == 4
+
+
+def test_a_single_match_steps_onto_itself(fs, named):
+    panel = Panel(fs, str(named))
+    search = Search(panel)
+    search.type("Rep")
+    search.step(1)
+    assert panel.cursor == 2
+    search.step(-1)
+    assert panel.cursor == 2
+
+
+def test_a_character_too_many_leaves_the_cursor_on_the_last_match(fs, named):
+    panel = Panel(fs, str(named))
+    search = Search(panel)
+    search.type("rep")
+    search.step(1)                       # on old-report.txt
+    search.type("x")
+    assert search.pattern == "repx"
+    assert panel.cursor == 4
+    assert search.position() == (0, 0)
+    search.step(1)                       # nothing to step to
+    assert panel.cursor == 4
+
+
+def test_backspace_goes_back_to_the_first_match_of_the_shorter_pattern(
+        fs, named):
+    panel = Panel(fs, str(named))
+    search = Search(panel)
+    search.type("rep")
+    search.step(1)
+    search.step(1)                       # on report.txt
+    search.backspace()
+    assert search.pattern == "re"
+    assert panel.cursor == 2
+    search.type("x")
+    search.type("y")                     # two characters too many ...
+    search.backspace()
+    search.backspace()                   # ... and back again
+    assert search.pattern == "re" and panel.cursor == 2
+
+
+def test_backspace_with_nothing_typed_leaves_everything_alone(fs, named):
+    panel = Panel(fs, str(named))
+    panel.move_to(7)
+    search = Search(panel)
+    search.backspace()
+    assert search.pattern == ""
+    assert panel.cursor == 7
+    assert search.position() == (0, 0)
+
+
+def test_the_matches_are_found_once_per_pattern_not_once_per_frame(
+        fs, named, monkeypatch):
+    panel = Panel(fs, str(named))
+    search = Search(panel)
+    search.type("rep")
+    passes = []
+    real = panel.matches
+    monkeypatch.setattr(panel, "matches",
+                        lambda pattern: passes.append(pattern) or real(pattern))
+    for _ in range(5):                   # five frames' worth of footers
+        search.position()
+    search.step(1)
+    assert passes == []
+    search.type(".")
+    assert passes == ["rep."]
+
+
+def test_a_listing_reloaded_under_the_search_is_searched_again(fs, named):
+    panel = Panel(fs, str(named))
+    search = Search(panel)
+    search.type("rep")
+    assert search.position()[1] == 3
+    write(str(named / "zz-report.txt"), "x")
+    panel.refresh()
+    assert search.position() == (1, 4)
+    panel.toggle_hidden()                # a new listing, the same names
+    assert search.hits() == panel.matches("rep")

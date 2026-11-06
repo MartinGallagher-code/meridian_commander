@@ -6,11 +6,12 @@ A panel owns a :class:`~meridian_commander.filesystems.FileSystem` and a current
 directory within it.  It knows nothing about curses -- the application draws it
 -- but it holds all the state a pane needs: the sorted entries, where the
 highlight bar is, which items are tagged for a batch operation, and the scroll
-offset.
+offset.  :class:`Search` is the type-to-jump search over a panel's listing.
 """
 
 from __future__ import annotations
 
+import bisect
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -452,6 +453,24 @@ class Panel:
     def select_all(self) -> None:
         self.selected = {e.name for e in self.entries if e.name != self.PARENT}
 
+    # -- searching --------------------------------------------------------
+    def matches(self, pattern: str) -> list[int]:
+        """The entries whose names contain ``pattern``, as listing indexes.
+
+        Anywhere in the name, with the viewers' smart case: a pattern in
+        lowercase ignores case, and one with a capital in it means it.  ".."
+        is never a match: it is a way up rather than a name in the
+        directory, and a pattern of "." would otherwise land on it first.
+        One pass over the listing already in memory, so a remote pane costs
+        no round trip.
+        """
+        if not pattern:
+            return []
+        fold = pattern == pattern.lower()
+        return [index for index, entry in enumerate(self.entries)
+                if entry.name != self.PARENT
+                and pattern in (entry.name.lower() if fold else entry.name)]
+
     def clear_selection(self) -> None:
         self.selected.clear()
 
@@ -469,3 +488,73 @@ class Panel:
             self.sort_key = key
             self.sort_reverse = False
         self.refresh()
+
+
+class Search:
+    """Type-to-jump over one pane's listing: the pattern, and where it is.
+
+    The state of the search mode ``/`` turns on.  Each change of pattern sends
+    the cursor to the first match counting from the top, and :meth:`step`
+    walks to the next or previous one, wrapping round at either end.  Like
+    the rest of this module it knows nothing about curses: the application
+    feeds it keys and draws what it says.
+    """
+
+    def __init__(self, panel: Panel) -> None:
+        self.panel = panel
+        self.pattern = ""
+        self._hits: list[int] = []
+        # What _hits was found for.  The listing is compared by identity:
+        # every refresh builds a new list, so a reload, a sort or the hidden
+        # files toggle is noticed without walking it to find out.
+        self._found_in: list | None = None
+        self._found_for = ""
+
+    def hits(self) -> list[int]:
+        """The matching entries' indexes, found once per pattern and listing.
+
+        Asked on every frame, for the footer's count, so it is worked out
+        when the pattern or the listing changes and not again until then:
+        a directory of tens of thousands of entries costs one pass per key,
+        not one per frame.
+        """
+        entries = self.panel.entries
+        if self._found_in is not entries or self._found_for != self.pattern:
+            self._hits = self.panel.matches(self.pattern)
+            self._found_in, self._found_for = entries, self.pattern
+        return self._hits
+
+    def type(self, char: str) -> None:
+        """Add ``char`` to the pattern and go to the first match."""
+        self.pattern += char
+        self._first()
+
+    def backspace(self) -> None:
+        """Take the last character off and go to the first match again."""
+        self.pattern = self.pattern[:-1]
+        self._first()
+
+    def _first(self) -> None:
+        # With no match the cursor stays where the last one left it, so
+        # Backspace finds the way back from a character too many.
+        hits = self.hits()
+        if hits:
+            self.panel.move_to(hits[0])
+
+    def step(self, direction: int) -> None:
+        """Go to the next match (``direction`` 1) or the previous one (-1)."""
+        hits = self.hits()
+        if not hits:
+            return
+        cursor = self.panel.cursor
+        if direction > 0:
+            at = bisect.bisect_right(hits, cursor)
+        else:
+            at = bisect.bisect_left(hits, cursor) - 1
+        # Past either end it comes round to the other, as the viewers' n/N do.
+        self.panel.move_to(hits[at % len(hits)])
+
+    def position(self) -> tuple[int, int]:
+        """Which match the cursor is on, counting from 1, and how many."""
+        hits = self.hits()
+        return bisect.bisect_right(hits, self.panel.cursor), len(hits)

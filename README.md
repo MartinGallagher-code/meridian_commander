@@ -68,6 +68,15 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   `=` to do something, then `<` in that pane puts it back where it was. A step
   is a place on any backend — a remote connection, the inside of an archive —
   and lands with the cursor on the entry it was on.
+- **Search a pane by name** — every letter in a pane is a hotkey, so `/`
+  turns on a search mode in which typing is a name instead: the cursor jumps
+  to the first entry whose name contains what you have typed (a lowercase
+  pattern ignores case, as the viewers' `/` does), `↓`/`↑` or
+  `Ctrl-N`/`Ctrl-P` step through the rest, wrapping round, and the pane's
+  footer shows the pattern and `2 of 5`, or `not found`. `Insert` tags the
+  match and goes on to the next; `Enter`, `Tab` and the F-keys end the search
+  and act on what it found; `/` or `Esc` ends it where it is. Also on
+  **Command ▸ Search by name**.
 - **The cursor stays put** — after deleting (`F8`) the highlight settles on the
   next entry down, stepping over a whole tagged block rather than springing back
   to the top of the listing. The same holds whenever an entry disappears from

@@ -70,6 +70,16 @@ def test_every_menu_entry_runs_something(app):
     assert not [name for name in names if name not in actions]
 
 
+def test_search_by_name_is_on_the_command_menu_and_turns_the_mode_on(app):
+    command = next(menu for menu in MENUS if menu["name"] == "command")
+    entry = next(item for item in command["items"]
+                 if item.get("name") == "search")
+    assert entry["key"] == "/"
+    app._dispatch("search")
+    assert app.search is not None and app.search.panel is app.active
+    assert "/ or Esc ends" in app.message
+
+
 def test_an_action_nothing_names_is_still_harmless(app):
     before = app.message
     app._dispatch("no-such-action")
