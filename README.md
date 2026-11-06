@@ -54,6 +54,11 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   hide.
 - **Two independent panes** — browse two locations side by side, `Tab` between
   them, and swap them with `Ctrl-U`.
+- **Or one, at full width** — `z` (or **Options ▸ Single pane**) gives the
+  active pane the whole desktop and keeps the other in reserve, exactly as it
+  was: `Tab` flips to it, copy, move, extract and sync name it before using
+  it, and `h`, `Ctrl-]` and plug-ins that work on the other pane bring both
+  back while they run. `[ui] panes = 1` starts that way.
 - **Home and mirror shortcuts** — `~` jumps a pane to its own home directory
   (the *remote* account's home on a remote pane), and `=` points the **other
   pane at this pane's directory and connection**, reusing the same live session

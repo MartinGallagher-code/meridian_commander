@@ -141,6 +141,7 @@ def parse_ps(text: str, columns) -> list[Process]:
 class ProcessesPlugin(PanePlugin):
     name = "Processes"
     description = "Browse and kill processes on this pane's host (local or SSH)"
+    uses_other_pane = False  # its own pane's host; one pane on screen will do
     wants_timer = True     # the app polls tick() so the listing auto-refreshes
 
     def on_start(self) -> None:

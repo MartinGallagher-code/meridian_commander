@@ -52,6 +52,7 @@ DEFAULTS = {
 class RunRemoteScript(InputOutputPlugin):
     name = "Run remote script"
     description = "Upload the configured script over SSH, run it, show output"
+    uses_other_pane = False  # the configured script, not the other pane's
     prompt = "args> "
     config_section = "run_remote_script"
 

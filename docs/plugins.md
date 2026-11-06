@@ -140,5 +140,18 @@ and `self.print(...)` emits output at any time. The plug-in context is at
 `ctx.refresh_other()` give access to the opposite pane. For full control of
 drawing and keys, subclass `PanePlugin` instead.
 
+With [one pane on screen](usage.md#one-pane-at-a-time), a plug-in is shown
+beside the other pane for as long as it is open, so it never works on a pane
+the user cannot see. A plug-in that has no use for the other pane can say so,
+and have the single pane to itself:
+
+```python
+class Uptime(InputOutputPlugin):
+    uses_other_pane = False
+```
+
+Leave it out and the plug-in gets both panes, which is always safe; nothing
+else about the contract changes.
+
 The [API reference](api.md) documents `PluginContext`, `PanePlugin` and
 `InputOutputPlugin` in full.

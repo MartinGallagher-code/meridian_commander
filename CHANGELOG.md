@@ -33,6 +33,21 @@ day the version was cut.
 
 ### Added
 
+- **One pane at a time.** `z`, or **Options ▸ Single pane** (ticked while
+  on), gives the active pane the whole desktop and keeps the other in
+  reserve: its location, connection, history, tags and any plug-in are left
+  as they were, and a terminal in it goes on gathering output. The hint line
+  says the hidden pane is there and where it is, `Tab` flips to it at full
+  width and `Ctrl-U` brings it out. Nothing acts on it unseen: `F5`, `F6` and
+  `x` name it in their prompt (*Copy 'notes.txt' to the hidden pane, local:*),
+  `F9` marks it `(hidden pane)` in its confirmation, and `=` says where it
+  sent it. Anything that works in both panes shows both while it runs, then
+  goes back to one: `h`, `Ctrl-]` from a terminal, and every plug-in that
+  works on the other pane. A plug-in can set `uses_other_pane = False` to
+  have the single pane to itself, as Processes, SSH doctor, JSON push, Run
+  remote script and the terminal do; one that does not say gets both panes,
+  so user plug-ins work unchanged. `[ui] panes = 1` in `config.ini` starts
+  in single mode. (MC-003)
 - **Extract an archive in one key.** `x` on a `.zip` or `.tar` (or with
   several tagged) unpacks it into the other pane — also **File ▸ Extract
   archive** and the right-click menu. Each archive lands in a folder of its
