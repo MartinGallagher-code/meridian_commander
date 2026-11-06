@@ -738,6 +738,42 @@ A pane is half the screen, and a few programs assume 80 columns. `!` hands a
 program the whole real terminal instead: full width, true colour and the
 outer terminal's own mouse handling.
 
+## Searching a pane by name
+
+In a pane almost every key is a hotkey — `d` deletes, `q` quits, `8` is `F8` —
+so you cannot simply type a name to get to it. **`/`** (or **Command ▸ Search
+by name**) turns on a search mode in which you can: until it ends, every
+character you type is part of a name, the letters and digits that are hotkeys
+included, and none of them does anything else.
+
+- **Each character moves the cursor to the first entry whose name contains
+  what you have typed**, counting from the top of the listing, so
+  directories come first. A pattern all in lowercase ignores case, as the
+  viewers' `/` does; one with a capital in it means it. `..` never matches.
+  `Backspace` takes the last character off, and the cursor goes back to the
+  first match of what is left.
+- **`↓`/`↑` (or `Ctrl-N`/`Ctrl-P`) go to the next and previous match**,
+  wrapping round at either end.
+- **The pane's bottom frame shows the search**: `/ rep  2 of 5`, or
+  `/ repx  not found` in the error colour, when the last character matched
+  nothing; the cursor then stays on the last match, and `Backspace` takes you
+  back. In a narrow pane the start of the pattern is trimmed, so what you
+  just typed and the count stay in view.
+- **`Insert` tags the match and goes on to the next one**, so one search can
+  tag everything it finds. (`Space` is part of the name, since names have
+  spaces.)
+- **`/` again, or `Esc`, ends the search** and leaves the cursor where it is.
+  **`Enter`, `Tab`, the F-keys and the other keys that are not text end it and
+  then do what they always do**: `Enter` opens what the search found, `F5`
+  copies it, `F8` deletes it. A mouse click ends it too. The F-keys' digit
+  and letter aliases do not: inside the search they are part of the name.
+
+It searches the listing the pane already has, so a remote or in-archive pane
+is searched without asking the server again. In a pane running a terminal or
+a plug-in, `/` goes to it as before: the Processes and provost browser
+plug-ins keep their own `/`, which hides what does not match rather than
+jumping to it.
+
 ## Key bindings
 
 Keys are read decoded, so anywhere text is typed — the editor, a rename or
@@ -757,7 +793,7 @@ where it should.)
 | `Backspace` / `←` | parent directory | `F6` | move to other pane |
 | `Insert` / `Space` | tag file | `F7` | make directory |
 | `n` | new (empty) file here | `r` | rename the file under the cursor |
-| `x` | extract the archive into the other pane | | |
+| `x` | extract the archive into the other pane | `/` | search this pane by name (see above) |
 | `D` | compare both panes' files | `h` | head + tail of the other pane's file, in this pane |
 | `+` / `-` | tag all / untag all | `F8` | delete |
 | `Ctrl-U` | swap panes | `F9` | synchronize panes |

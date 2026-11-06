@@ -46,6 +46,17 @@ day the version was cut.
 
 ### Added
 
+- **`/` searches a pane by name.** Every letter in a pane is a hotkey, so
+  there was no way to type a name and get to it. `/` now turns on a search
+  mode in which typing is a name: the cursor jumps to the first entry whose
+  name contains it (smart case, as in the viewers), `↓`/`↑` or
+  `Ctrl-N`/`Ctrl-P` step to the next and previous match with wrap-around,
+  and the pane's footer shows the pattern and `2 of 5`, or `not found` in
+  the error colour. `Insert` tags the match and moves on; `Enter`, `Tab`,
+  the F-keys and the mouse end the search and act as usual; `/` or `Esc`
+  ends it in place. No hotkey runs while it is on, the F-keys' digit and
+  letter aliases included. It is also **Command ▸ Search by name**, and is
+  in the in-app help, the README and the manual.
 - **One pane at a time.** `z`, or **Options ▸ Single pane** (ticked while
   on), gives the active pane the whole desktop and keeps the other in
   reserve: its location, connection, history, tags and any plug-in are left

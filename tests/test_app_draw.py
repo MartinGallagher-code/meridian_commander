@@ -9,6 +9,7 @@ import re
 
 import pytest
 
+from meridian_commander import theme
 from meridian_commander.app import App
 
 from support import _StubScreen, with_curses_screen, write
@@ -451,3 +452,86 @@ def test_activating_nothing_does_nothing(panes, monkeypatch):
     app = App(_StubScreen(), str(panes / "left"), str(panes / "right"))
     app.left.entries = []
     app._activate_entry()                     # must not raise
+
+
+# -- the search mode's footer ----------------------------------------------------
+
+def _search_footer(panes, typed, rows=24, cols=80, scheme="turbo"):
+    """Search the left pane for ``typed`` and read back its bottom frame.
+
+    Returns the row's text, the attribute of each of its cells, what the
+    two footer roles are in ``scheme`` (read while it is the one in use),
+    and the app.  The pane's bottom frame is the row above the hint line.
+    """
+    for name in ("report.txt", "old-report.txt", "notes.txt",
+                 "a-name-long-enough-to-overflow-a-half-width-pane.txt"):
+        write(str(panes / "left" / name), "x")
+    holder = {}
+
+    def run(stdscr):
+        theme.init(scheme)
+        try:
+            app = App(stdscr, str(panes / "left"), str(panes / "right"))
+            holder["app"] = app
+            app.handle_key(ord("/"))
+            for char in typed:
+                app.handle_key(ord(char))
+            app.draw()
+            row = rows - 3
+            text = stdscr.instr(row, 0).decode()
+            attrs = [stdscr.inch(row, col) & curses.A_ATTRIBUTES
+                     for col in range(cols)]
+            roles = {role: theme.attr(role) & curses.A_ATTRIBUTES
+                     for role in ("panelinfo", "panelerror")}
+            return text, attrs, roles
+        finally:
+            theme.init()
+
+    text, attrs, roles = with_curses_screen(rows, cols, run)
+    return text, attrs, roles, holder["app"]
+
+
+def _role_of(attrs, text, words):
+    """The attribute the first cell of ``words`` was drawn in."""
+    return attrs[text.index(words)]
+
+
+@pytest.mark.parametrize("scheme", ["turbo", "midnight", "mono"])
+def test_the_footer_shows_the_pattern_and_the_count(panes, scheme):
+    text, attrs, roles, _ = _search_footer(panes, "rep", scheme=scheme)
+    assert "/ rep  1 of 2" in text
+    assert _role_of(attrs, text, "1 of 2") == roles["panelinfo"]
+    # The other pane keeps its own footer.
+    assert "items" in text[40:]
+
+
+@pytest.mark.parametrize("scheme", ["turbo", "midnight", "mono"])
+def test_no_match_is_drawn_in_the_error_colour(panes, scheme):
+    text, attrs, roles, _ = _search_footer(panes, "repx", scheme=scheme)
+    assert "/ repx  not found" in text
+    assert roles["panelerror"] != roles["panelinfo"]
+    assert _role_of(attrs, text, "not found") == roles["panelerror"]
+    assert _role_of(attrs, text, "items") == roles["panelinfo"]
+
+
+def test_nothing_typed_yet_says_what_to_do(panes):
+    text, _, _, _ = _search_footer(panes, "")
+    assert "/   type a name" in text
+
+
+def test_a_long_pattern_keeps_its_end_and_the_count_in_a_half_pane(panes):
+    typed = "name-long-enough-to-overflow"
+    text, _, _, app = _search_footer(panes, typed)
+    assert app.active.current_name().startswith("a-name-long")
+    left = text[:40]
+    assert "1 of 1" in left
+    assert "/ ~" in left and "overflow  1 of 1" in left
+    # Inside the frame: the pane's bottom-right corner is still drawn.
+    assert left[39] in "╝┘+"
+
+
+def test_the_narrowest_pane_drawn_shows_the_end_of_the_pattern(panes):
+    text, _, _, _ = _search_footer(panes, "report", rows=10, cols=24)
+    left = text[:12]
+    assert "eport" in left
+    assert left[11] in "╝┘+"

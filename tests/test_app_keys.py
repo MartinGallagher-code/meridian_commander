@@ -4,8 +4,11 @@
 
 from __future__ import annotations
 
+import ast
 import curses
+import inspect
 import os
+import re
 import subprocess
 
 import pytest
@@ -18,6 +21,7 @@ from meridian_commander.filesystems import LocalFileSystem
 from meridian_commander.filesystems import (
     FTPFileSystem,
     SFTPFileSystem,
+    SSHFileSystem,
 )
 
 from support import _ScriptedDialogs, _StubScreen, write, write_zip
@@ -1443,3 +1447,355 @@ def test_a_failing_rename_is_reported(app, tmp_path, monkeypatch):
     scripted = _ScriptedDialogs(monkeypatch, prompt=["other.txt"])
     app._rename()
     assert "permission denied" in scripted.last_message
+
+
+# -- the search mode -----------------------------------------------------------
+
+class _SshLike(_RemoteLike, SSHFileSystem):
+    def label(self):
+        return f"ssh://{self.username}@{self.host}"
+
+
+@pytest.fixture
+def searching(app, tmp_path):
+    """The left pane holding names to search, with the search mode on.
+
+    Listed as: .., Reports/, sub/, file.txt, notes.txt, old-report.txt,
+    report.txt.
+    """
+    (tmp_path / "left" / "Reports").mkdir()
+    for name in ("notes.txt", "old-report.txt", "report.txt"):
+        write(str(tmp_path / "left" / name), "x")
+    app.left.refresh()
+    app.handle_key(ord("/"))
+    return app
+
+
+def _type(app, text):
+    for char in text:
+        app.handle_key(ord(char) if ord(char) < 256 else char)
+
+
+def _current(app):
+    return app.active.current_name()
+
+
+def _printable_hotkeys():
+    """Every character the main keymap binds, read from handle_key itself.
+
+    Read rather than listed, so a hotkey added later is tested here without
+    anyone having to remember to add it: the search has to swallow it too.
+    """
+    source = inspect.getsource(App.handle_key)
+    written = re.findall(r'ord\("((?:[^"\\]|\\.)+)"\)', source)
+    return sorted({ast.literal_eval(f'"{text}"') for text in written} - {"/"})
+
+
+_HOTKEYS = _printable_hotkeys()
+
+#: What the search mode runs itself.  Any other method of the application
+#: running while it is on is a hotkey that got out.
+_THE_SEARCH_ITSELF = {"handle_key", "_search_key", "_start_search",
+                      "_end_search", "_set_message"}
+
+
+@pytest.fixture
+def spy(searching, monkeypatch):
+    """Record every action that runs, in the application and in the panes."""
+    ran: list[str] = []
+    for name in vars(App):
+        if (name.startswith("_") and not name.startswith("__")
+                and name not in _THE_SEARCH_ITSELF
+                and callable(getattr(searching, name))):
+            monkeypatch.setattr(searching, name,
+                                lambda *a, _name=name, **k: ran.append(_name))
+    for panel in (searching.left, searching.right):
+        for name in ("move", "select_all", "clear_selection", "toggle_select",
+                     "go_parent", "chdir", "refresh", "toggle_hidden",
+                     "set_sort", "enter", "go_home", "back", "forward"):
+            monkeypatch.setattr(panel, name,
+                                lambda *a, _name=name, **k:
+                                ran.append("panel." + _name))
+    return ran
+
+
+def test_slash_turns_the_search_on_and_slash_turns_it_off(app, monkeypatch):
+    before = app.message
+    app.handle_key(ord("/"))
+    assert app.search is not None and app.search.panel is app.left
+    assert "/ or Esc ends" in app.message
+    app.handle_key(ord("/"))
+    assert app.search is None
+    assert app.message == before
+    # Off again, the keys are hotkeys again.
+    _ScriptedDialogs(monkeypatch, confirm=[False])
+    app.handle_key(ord("q"))
+    assert app.running is True and app.search is None
+
+
+def test_turning_it_off_leaves_the_cursor_where_the_search_put_it(searching):
+    _type(searching, "old")
+    assert _current(searching) == "old-report.txt"
+    searching.handle_key(ord("/"))
+    assert searching.search is None
+    assert _current(searching) == "old-report.txt"
+
+
+def test_the_keymap_read_for_the_hotkey_test_is_the_real_one():
+    # If the reading went wrong the next test would test nothing.
+    assert set("qd8t!fx +-\\~<>=.?C0") <= set(_HOTKEYS)
+    assert len(_HOTKEYS) >= 40
+
+
+@pytest.mark.parametrize("char", _HOTKEYS)
+def test_in_the_search_every_hotkey_is_part_of_the_name(searching, spy, char):
+    searching.handle_key(ord(char))
+    assert searching.search.pattern == char
+    assert spy == []
+
+
+def test_q_d_and_8_in_the_search_neither_quit_nor_delete(searching, tmp_path,
+                                                          monkeypatch):
+    scripted = _ScriptedDialogs(monkeypatch, confirm=[True, True, True])
+    _type(searching, "report")
+    for char in "qd8":
+        searching.handle_key(ord(char))
+    assert searching.running is True
+    assert scripted.messages == []          # no quit or delete dialog
+    assert (tmp_path / "left" / "report.txt").exists()
+    assert searching.search.pattern == "reportqd8"
+
+
+def test_each_key_goes_to_the_first_match(searching):
+    searching.left.move_to(6)
+    _type(searching, "r")
+    assert _current(searching) == "Reports"     # a directory, so listed first
+    _type(searching, "eport")
+    assert _current(searching) == "Reports"
+    _type(searching, ".")                   # only files have "report."
+    assert _current(searching) == "old-report.txt"
+    _type(searching, "t")
+    assert searching.search.pattern == "report.t"
+
+
+def test_a_capital_letter_makes_the_search_mind_case(searching):
+    _type(searching, "re")
+    assert _current(searching) == "Reports"
+    searching.handle_key(curses.KEY_BACKSPACE)
+    searching.handle_key(curses.KEY_BACKSPACE)
+    _type(searching, "rE")
+    assert searching.search.position() == (0, 0)
+
+
+def test_characters_beyond_ascii_are_typed_into_the_pattern(searching,
+                                                            tmp_path):
+    for name in ("été.txt", "журнал"):
+        write(str(tmp_path / "left" / name), "x")
+    searching.left.refresh()
+    searching.handle_key("ж")          # from U+0100 up, read_key's str
+    assert _current(searching) == "журнал"
+    searching.handle_key(curses.KEY_BACKSPACE)
+    searching.handle_key(0xE9)              # Latin-1: an int, as getch gave
+    assert _current(searching) == "été.txt"
+
+
+@pytest.mark.parametrize("key", [curses.KEY_BACKSPACE, 127, 8])
+def test_backspace_shortens_the_pattern_and_the_cursor_follows(searching,
+                                                               key):
+    path = searching.left.path
+    _type(searching, "rep")
+    searching.handle_key(curses.KEY_DOWN)
+    _type(searching, "x")
+    searching.handle_key(key)
+    assert searching.search.pattern == "rep"
+    assert _current(searching) == "Reports"
+    assert searching.left.path == path          # not up to the parent
+
+
+@pytest.mark.parametrize("down, up", [(curses.KEY_DOWN, curses.KEY_UP),
+                                      (14, 16)])      # Ctrl-N, Ctrl-P
+def test_next_and_previous_wrap_round(searching, down, up):
+    _type(searching, "rep")
+    seen = []
+    for _ in range(4):
+        searching.handle_key(down)
+        seen.append(_current(searching))
+    assert seen == ["old-report.txt", "report.txt", "Reports",
+                    "old-report.txt"]
+    searching.handle_key(up)
+    searching.handle_key(up)
+    assert _current(searching) == "report.txt"
+    assert searching.search is not None
+
+
+def test_insert_tags_the_match_and_goes_on_to_the_next(searching):
+    _type(searching, "report")
+    searching.handle_key(curses.KEY_IC)
+    assert searching.left.selected == {"Reports"}
+    assert _current(searching) == "old-report.txt"
+    searching.handle_key(curses.KEY_IC)
+    searching.handle_key(curses.KEY_IC)
+    assert searching.left.selected == {"Reports", "old-report.txt",
+                                       "report.txt"}
+    assert searching.search is not None
+
+
+def test_space_is_part_of_the_name_not_a_tag(searching, tmp_path):
+    write(str(tmp_path / "left" / "my notes.txt"), "x")
+    searching.left.refresh()
+    _type(searching, "y n")
+    assert _current(searching) == "my notes.txt"
+    assert searching.left.selected == set()
+
+
+def test_esc_ends_the_search_without_opening_the_menu_bar(searching,
+                                                          monkeypatch):
+    opened = []
+    monkeypatch.setattr(searching, "open_menu", opened.append)
+    _type(searching, "old")
+    searching.handle_key(27)
+    assert searching.search is None
+    assert opened == []
+    assert _current(searching) == "old-report.txt"
+
+
+def test_alt_and_a_letter_end_the_search_and_open_that_menu(searching,
+                                                            monkeypatch):
+    opened, found = [], []
+    monkeypatch.setattr(searching, "open_menu", opened.append)
+    monkeypatch.setattr(searching, "_find_files", lambda: found.append(1))
+    searching.stdscr.getch = lambda: ord("f")
+    searching.handle_key(27)                # Alt+F: Esc, then the f
+    assert searching.search is None
+    assert opened == [1]                    # the File menu ...
+    assert found == []                      # ... not f, find files
+
+
+def test_enter_ends_the_search_and_opens_the_match(searching, tmp_path):
+    _type(searching, "sub")
+    searching.handle_key(10)
+    assert searching.search is None
+    assert searching.left.path == str(tmp_path / "left" / "sub")
+
+
+def test_tab_ends_the_search_and_switches_panes(searching):
+    _type(searching, "old")
+    searching.handle_key(9)
+    assert searching.search is None
+    assert searching.active is searching.right
+    assert searching.left.current_name() == "old-report.txt"
+
+
+def test_a_real_f_key_ends_the_search_and_acts_on_the_match(searching,
+                                                            tmp_path,
+                                                            monkeypatch):
+    _type(searching, "old")
+    _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+    searching.handle_key(curses.KEY_F5)
+    assert searching.search is None
+    assert (tmp_path / "right" / "old-report.txt").exists()
+
+
+@pytest.mark.parametrize("key, cursor", [(curses.KEY_HOME, 0),
+                                         (curses.KEY_END, 6)])
+def test_other_keys_that_are_not_text_end_it_and_do_their_job(searching, key,
+                                                              cursor):
+    _type(searching, "old")
+    searching.handle_key(key)
+    assert searching.search is None
+    assert searching.left.cursor == cursor
+
+
+def test_a_change_of_directory_ends_the_search(searching, tmp_path):
+    _type(searching, "rep")
+    searching.handle_key(curses.KEY_LEFT)       # up to the parent
+    assert searching.search is None
+    assert searching.left.path == str(tmp_path)
+
+
+def test_go_to_path_ends_the_search_first(searching, tmp_path, monkeypatch):
+    _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+    searching.handle_key(7)                     # Ctrl-G
+    assert searching.search is None
+    assert searching.left.path == str(tmp_path / "right")
+
+
+def test_an_unbound_key_code_ends_the_search(searching):
+    _type(searching, "old")
+    searching.handle_key(0x1234)
+    assert searching.search is None
+    assert _current(searching) == "old-report.txt"
+
+
+def test_a_resize_keeps_the_search(searching):
+    _type(searching, "old")
+    searching.handle_key(curses.KEY_RESIZE)
+    assert searching.search is not None
+    assert searching.search.pattern == "old"
+
+
+def test_a_click_ends_the_search(searching, monkeypatch):
+    searching._panel_boxes = [(searching.left, 1, 0, 21, 40),
+                              (searching.right, 1, 40, 21, 40)]
+    _type(searching, "old")
+    _mouse(monkeypatch, 41, 4, curses.BUTTON1_CLICKED)
+    searching.handle_key(curses.KEY_MOUSE)
+    assert searching.search is None
+    assert searching.active is searching.right
+
+
+def test_a_click_in_the_searched_pane_ends_it_and_moves_the_cursor(
+        searching, monkeypatch):
+    searching._panel_boxes = [(searching.left, 1, 0, 21, 40),
+                              (searching.right, 1, 40, 21, 40)]
+    _type(searching, "old")
+    _mouse(monkeypatch, 5, 3 + 3, curses.BUTTON1_CLICKED)      # file.txt
+    searching.handle_key(curses.KEY_MOUSE)
+    assert searching.search is None
+    assert _current(searching) == "file.txt"
+
+
+def test_a_plugin_pane_still_gets_the_slash(app):
+    plugin = _Plugin(None)
+    app.left.plugin = plugin
+    app.handle_key(ord("/"))
+    assert plugin.keys == [ord("/")]
+    assert app.search is None
+
+
+def test_a_plugin_that_hands_the_slash_back_is_not_searched(app):
+    """It draws the pane, so a search would move a cursor nobody can see."""
+    plugin = _Plugin(None)
+    plugin.answer = None
+    app.left.plugin = plugin
+    app.handle_key(ord("/"))
+    assert app.search is None
+    assert "directory listing" in app.message
+
+
+@pytest.mark.parametrize("backend", [_SftpLike, _SshLike, _FtpLike, "archive"])
+def test_remote_and_archive_panes_are_searched_without_asking_them_again(
+        app, tmp_path, monkeypatch, backend):
+    if backend == "archive":
+        write_zip(str(tmp_path / "left" / "bundle.zip"),
+                  {"report.txt": "x", "notes.txt": "x", "old-report.txt": "x"})
+        app.left.refresh()
+        _point_at(app.left, "bundle.zip")
+        app._activate_entry()
+    else:
+        for name in ("report.txt", "notes.txt", "old-report.txt"):
+            write(str(tmp_path / "left" / name), "x")
+        assert app.left.set_location(backend(), str(tmp_path / "left"))
+    fs = app.left.fs
+    asked = []
+    real = fs.listdir
+    monkeypatch.setattr(fs, "listdir",
+                        lambda path: asked.append(path) or real(path))
+    app.handle_key(ord("/"))
+    _type(app, "rep")
+    assert _current(app) == "old-report.txt"
+    app.handle_key(curses.KEY_DOWN)
+    assert _current(app) == "report.txt"
+    app.handle_key(curses.KEY_BACKSPACE)
+    app.handle_key(ord("/"))
+    assert asked == []
