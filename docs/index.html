@@ -220,13 +220,14 @@
       <div class="feature-copy">
         <h3>A shell without leaving the pane</h3>
         <p>
-          Press <kbd>t</kbd> and the pane itself becomes a pseudo-terminal running a shell
+          Press <kbd>t</kbd> and the pane itself becomes a terminal running a shell
           in the pane's directory, while the other pane keeps working normally. On an SFTP
           or SSH pane, the shell runs over the pane's existing SSH connection.
         </p>
         <ul>
-          <li><kbd>Ctrl-]</kbd> switches to the other pane while the shell keeps running.</li>
-          <li>For full-screen programs like <code>vim</code> or <code>htop</code>, <kbd>!</kbd> suspends the UI into a real terminal.</li>
+          <li>A real terminal emulator: colours, and full-screen programs like <code>vim</code>, <code>less</code> and <code>htop</code> run in the pane.</li>
+          <li><kbd>Ctrl-]</kbd> opens its menu: <kbd>Tab</kbd> switches to the other pane while the shell keeps running, <kbd>q</kbd> closes, <kbd>PgUp</kbd> scrolls back.</li>
+          <li><kbd>!</kbd> still hands a program the whole real terminal.</li>
         </ul>
       </div>
       <figure class="shot">

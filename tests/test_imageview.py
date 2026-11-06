@@ -13,7 +13,7 @@ import curses
 
 import pytest
 
-from meridian_commander import imageview
+from meridian_commander import imageview, theme
 from meridian_commander.browsers import viewer_for
 from meridian_commander.imageview import (
     HALF_BLOCK,
@@ -147,6 +147,17 @@ def test_the_first_pair_request_of_all_falls_back_to_zero():
         return Pairs(limit=1).get(4, 5)
 
     assert with_colour_screen(10, 40, run) == 0
+
+
+def test_the_viewer_draws_from_the_applications_one_allocator(picture):
+    """The terminal pane draws from the same one, so neither can re-colour
+    the other's cells."""
+    def run(stdscr):
+        picture.colour = True
+        picture.draw(stdscr)
+        return picture.pairs is theme.shared_pairs()
+
+    assert with_colour_screen(24, 80, run) is True
 
 
 # -- geometry ------------------------------------------------------------------

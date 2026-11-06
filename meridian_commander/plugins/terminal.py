@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Martin J. Gallagher
-"""Built-in plugin: a pseudo-terminal running *inside* the pane.
+"""Built-in plugin: a terminal running *inside* the pane.
 
 The terminal appears in the pane's rectangle (the other pane keeps working
 normally) and follows the pane's location:
@@ -13,17 +13,19 @@ normally) and follows the pane's location:
   already made for browsing;
 * FTP panes have no shell and are refused with a clear message.
 
-Rendering uses a small built-in VT100-subset emulator (carriage-return
-overwrite, backspace, tabs, erase-line/screen, cursor column moves; SGR
-colour codes are stripped).  That covers prompts, line editing and ordinary
-command output well.  Full-screen programs (vim, htop, ...) want a real
-terminal -- run those with `!` (full-screen shell) instead.
+It is a real terminal emulator (:mod:`meridian_commander.vt`): colours,
+cursor addressing, scroll regions and the alternate screen all work, so
+``ls --color``, vim, less, man and top run in the pane and leave it as it
+was when they exit.  The shell is told ``TERM=xterm-256color``, which is what
+the emulator implements.  ``!`` still hands a program the whole real terminal.
 
-Keys: everything is sent to the shell, including Tab (completion).
-``Ctrl-]`` switches focus to the other pane while the terminal keeps
-running -- Tab back (or click) to return to it.  ``F10`` closes the
-terminal, as does exiting the shell (``exit`` / Ctrl-D).  PgUp/PgDn
-scroll the local scrollback.
+Keys: every key goes to the program -- F1-F12, PgUp/PgDn and Esc included.
+``Ctrl-]`` is the one key the terminal keeps, and it opens a small menu in the
+pane's footer: ``Tab`` switches to the other pane (the shell keeps running;
+Tab or a click comes back), ``q`` closes the terminal, ``PgUp`` scrolls back
+through what went off the top, and ``Ctrl-]`` again sends a literal Ctrl-] to
+the program.  The mouse wheel scrolls back too.  Exiting the shell (``exit``
+/ Ctrl-D) closes it as well.
 """
 
 from __future__ import annotations
@@ -34,161 +36,294 @@ import os
 import shlex
 import signal
 import struct
+import time
+import unicodedata
 
-from .. import theme
+from .. import theme, vt
+from ..imageview import palette_index, palette_rgb
 from ..plugin_api import PanePlugin
 from ..util import typed_char
 
-SCROLLBACK = 2000
+#: The terminal type the shell is told, local and remote: what :mod:`vt`
+#: implements, and an entry nearly every host has in its terminfo.
+TERM = "xterm-256color"
 
-#: How far right the cursor may be moved by an escape sequence.  A real
-#: terminal clamps it to the screen; this model has no screen, and without a
-#: clamp "ESC[100000000C" followed by one printable character built a line of
-#: a hundred million spaces.  Printing still grows a line without limit -- it
-#: is a *jump* that is bounded, and no terminal is 10,000 columns wide.
-MAX_COLS = 10_000
+#: How much is read from the pty at a time.
+CHUNK = 65536
 
-#: How many bytes of parameters a CSI sequence may carry before the rest are
-#: dropped.  Real ones carry a handful; an unterminated one in binary output
-#: carries the rest of the file, and appending to a string per byte made that
-#: quadratic as well as unbounded.  The sequence is still swallowed to its
-#: final byte, so the stream resynchronises exactly as it did.
-MAX_CSI_PARAMS = 64
+#: How long one poll may spend taking output in.  A ``cat`` of a large file
+#: produces output faster than it can be drawn; without a limit the pane kept
+#: reading and never got back to the keyboard, so Ctrl-C could not get
+#: through until the file ended.
+FEED_SECONDS = 0.05
+
+#: How often the application polls while the program is busy -- output has
+#: arrived or a key was sent in the last :data:`BUSY_SECONDS` -- so that
+#: typing echoes at once rather than on the next idle poll, 120 ms later.
+FAST_POLL_MS = 10
+BUSY_SECONDS = 0.5
+
+#: The key that opens the terminal's own menu: Ctrl-], telnet's escape key,
+#: and one no shell or full-screen program binds.
+MENU_KEY = 29
+
+#: The sixteen colours as xterm draws them, for finding the nearest one when
+#: the outer terminal has fewer than 256.
+BASE16 = (
+    (0, 0, 0), (205, 0, 0), (0, 205, 0), (205, 205, 0),
+    (0, 0, 238), (205, 0, 205), (0, 205, 205), (229, 229, 229),
+    (127, 127, 127), (255, 0, 0), (0, 255, 0), (255, 255, 0),
+    (92, 92, 255), (255, 0, 255), (0, 255, 255), (255, 255, 255),
+)
+
+# -- keys ----------------------------------------------------------------------
+
+#: Cursor keys: the final letter, after ``ESC [`` normally and ``ESC O`` once
+#: the program has asked for application cursor keys (DECCKM) -- which is
+#: what vim, less and every curses program do on start-up.
+_CURSOR_KEYS = {
+    curses.KEY_UP: b"A", curses.KEY_DOWN: b"B",
+    curses.KEY_RIGHT: b"C", curses.KEY_LEFT: b"D",
+    curses.KEY_HOME: b"H", curses.KEY_END: b"F",
+    curses.KEY_A1: b"H", curses.KEY_C1: b"F",       # keypad 7 and 1
+    curses.KEY_B2: b"E",                             # keypad 5
+}
+#: Keys sent as ``ESC [ n ~``, as xterm sends them.
+_TILDE_KEYS = {
+    curses.KEY_IC: 2, curses.KEY_DC: 3,
+    curses.KEY_PPAGE: 5, curses.KEY_NPAGE: 6,
+    curses.KEY_A3: 5, curses.KEY_C3: 6,             # keypad 9 and 3
+    curses.KEY_F0 + 5: 15, curses.KEY_F0 + 6: 17, curses.KEY_F0 + 7: 18,
+    curses.KEY_F0 + 8: 19, curses.KEY_F0 + 9: 20, curses.KEY_F0 + 10: 21,
+    curses.KEY_F0 + 11: 23, curses.KEY_F0 + 12: 24,
+}
+#: F1-F4, which xterm sends as ``ESC O P`` to ``ESC O S``.
+_SS3_KEYS = {
+    curses.KEY_F0 + 1: b"P", curses.KEY_F0 + 2: b"Q",
+    curses.KEY_F0 + 3: b"R", curses.KEY_F0 + 4: b"S",
+}
+#: Shifted keys, in xterm's modifier form (2 = Shift).  curses reports Shift
+#: with F1-F12 as F13-F24.
+_SHIFTED_KEYS = {
+    curses.KEY_SR: b"\x1b[1;2A", curses.KEY_SF: b"\x1b[1;2B",
+    curses.KEY_SRIGHT: b"\x1b[1;2C", curses.KEY_SLEFT: b"\x1b[1;2D",
+    curses.KEY_SHOME: b"\x1b[1;2H", curses.KEY_SEND: b"\x1b[1;2F",
+    curses.KEY_SIC: b"\x1b[2;2~", curses.KEY_SDC: b"\x1b[3;2~",
+    curses.KEY_SPREVIOUS: b"\x1b[5;2~", curses.KEY_SNEXT: b"\x1b[6;2~",
+    curses.KEY_BTAB: b"\x1b[Z",
+}
+for _n, _letter in zip(range(13, 17), b"PQRS"):
+    _SHIFTED_KEYS[curses.KEY_F0 + _n] = b"\x1b[1;2%c" % _letter
+for _n, _code in zip(range(17, 25), (15, 17, 18, 19, 20, 21, 23, 24)):
+    _SHIFTED_KEYS[curses.KEY_F0 + _n] = b"\x1b[%d;2~" % _code
 
 
-class TermEmulator:
-    """A tiny line-oriented VT100-subset screen model.
+def encode_key(key: int | str, app_cursor: bool = False,
+               app_keypad: bool = False) -> bytes:
+    """The bytes xterm would send for ``key``, in the program's key modes.
 
-    Maintains a scrollback of finished lines plus the current line and a
-    cursor column.  Understands \\r, \\n, \\b, \\t, CSI K (erase to end of
-    line), CSI J (clear screen), CSI C/D (cursor right/left) and strips all
-    other CSI/OSC sequences (colours, titles, bracketed paste, ...).
+    Nothing comes back for a key code with no meaning to a program -- a
+    resize, a mouse report -- because encoding one sent a stray letter to the
+    shell, where the next Enter would have run it.
+    """
+    if key in _CURSOR_KEYS:
+        lead = b"\x1bO" if app_cursor else b"\x1b["
+        return lead + _CURSOR_KEYS[key]
+    if key in _TILDE_KEYS:
+        return b"\x1b[%d~" % _TILDE_KEYS[key]
+    if key in _SS3_KEYS:
+        return b"\x1bO" + _SS3_KEYS[key]
+    if key in _SHIFTED_KEYS:
+        return _SHIFTED_KEYS[key]
+    if key == curses.KEY_ENTER:
+        # The keypad's Enter: its own sequence in application keypad mode.
+        return b"\x1bOM" if app_keypad else b"\r"
+    if key in (curses.KEY_BACKSPACE, 127, 8):
+        return b"\x7f"
+    if key in (10, 13):
+        return b"\r"
+    # A control key is a number and only ever a number; a character from
+    # U+0100 up arrives as a str, and comparing the two raises.
+    if isinstance(key, int) and 0 <= key < 32:
+        return bytes([key])
+    char = typed_char(key)
+    return char.encode("utf-8") if char is not None else b""
+
+
+# -- colours -------------------------------------------------------------------
+
+#: The emulator's attribute flags as curses attributes.  Strike-through has no
+#: curses attribute, and invisible text is drawn as blanks instead of relying
+#: on A_INVIS, which some terminals ignore.
+_FLAGS = (
+    (vt.BOLD, curses.A_BOLD), (vt.DIM, curses.A_DIM),
+    (vt.ITALIC, getattr(curses, "A_ITALIC", 0)),
+    (vt.UNDERLINE, curses.A_UNDERLINE), (vt.BLINK, curses.A_BLINK),
+    (vt.REVERSE, curses.A_REVERSE),
+)
+
+
+def _rgb_of(index: int) -> tuple[int, int, int]:
+    """The colour a palette index stands for."""
+    return BASE16[index] if index < 16 else palette_rgb(index)
+
+
+def nearest16(rgb: tuple[int, int, int]) -> int:
+    """The one of the sixteen colours nearest to ``rgb``."""
+    return min(range(16), key=lambda i: sum(
+        (a - b) ** 2 for a, b in zip(BASE16[i], rgb)))
+
+
+class Colours:
+    """Turns the emulator's attributes into curses attributes.
+
+    Colours come down to what the outer terminal has: 256-colour and 24-bit
+    colours map to the nearest of 256, or of sixteen, or of eight (with bold
+    standing in for bright, as the theme does); with no colour at all only the
+    attributes are kept.  The default colours are the outer terminal's own --
+    usually white on black -- rather than the pane's blue, because
+    ``ls --color`` paints directories blue and every program's colour scheme
+    assumes the terminal's background.
+
+    Pairs come from the application's shared allocator.  When that runs out,
+    a colour gets the nearest pair already made rather than a wrong one.
     """
 
     def __init__(self) -> None:
-        self.lines: list[str] = []
-        self.cur = ""
-        self.col = 0
-        self._state = ""      # "", "esc", "csi", "osc"
-        self._buf = ""
-        import codecs
+        self.pairs = theme.shared_pairs() if theme.in_colour() else None
+        self.count = getattr(curses, "COLORS", 0) or 0
+        if self.count < 8:
+            self.pairs = None
+        try:
+            defaults = tuple(curses.pair_content(0)) == (-1, -1)
+        except (curses.error, ValueError):
+            defaults = False
+        # Without use_default_colors() there is no "the terminal's own
+        # colour" to ask for, so the default is spelt out: white on black.
+        self.default_fg = -1 if defaults else curses.COLOR_WHITE
+        self.default_bg = -1 if defaults else curses.COLOR_BLACK
+        self._cache: dict[tuple, int] = {}
 
-        self._decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    def current(self) -> bool:
+        """Whether this is still right for the screen: a new colour scheme
+        hands every pair out again and makes a new allocator."""
+        wanted = theme.shared_pairs() if theme.in_colour() else None
+        return self.pairs is wanted or (self.pairs is None and self.count < 8)
 
-    # -- input ----------------------------------------------------------
-    def feed(self, data: bytes) -> None:
-        for ch in self._decoder.decode(data):
-            self._feed_char(ch)
+    def attr(self, cell: tuple) -> int:
+        found = self._cache.get(cell)
+        if found is None:
+            found = self._cache[cell] = self._compute(cell)
+        return found
 
-    def _feed_char(self, ch: str) -> None:
-        if self._state == "esc":
-            if ch == "[":
-                self._state, self._buf = "csi", ""
-            elif ch == "]":
-                self._state = "osc"
-            else:
-                self._state = ""      # single-char escape: ignore
-            return
-        if self._state == "csi":
-            if "@" <= ch <= "~":
-                self._csi(self._buf, ch)
-                self._state = ""
-            elif len(self._buf) < MAX_CSI_PARAMS:
-                self._buf += ch
-            return
-        if self._state == "osc":
-            if ch in ("\x07",):       # BEL terminates OSC
-                self._state = ""
-            elif ch == "\x1b":
-                self._state = "osc_esc"
-            elif ch < " ":
-                # An OSC string is text, so a control character means the
-                # sequence was never terminated -- binary output, or a program
-                # killed mid-title.  Abandon it and act on the character, the
-                # way a real terminal does; swallowing on regardless meant one
-                # stray "ESC ]" in a "cat" blanked the rest of the session.
-                self._state = ""
-                self._feed_char(ch)
-            return
-        if self._state == "osc_esc":  # ESC \ (ST) terminates OSC
-            self._state = "" if ch == "\\" else "osc"
-            return
+    def _compute(self, cell: tuple) -> int:
+        fg, bg, flags = cell
+        result = 0
+        for flag, attribute in _FLAGS:
+            if flags & flag:
+                result |= attribute
+        if self.pairs is None:
+            return result
+        fore, bright = self._colour(fg, self.default_fg)
+        back, _ = self._colour(bg, self.default_bg)
+        if bright:
+            result |= curses.A_BOLD
+        return result | curses.color_pair(self._pair(fore, back))
 
-        if ch == "\x1b":
-            self._state = "esc"
-        elif ch == "\r":
-            self.col = 0
-        elif ch == "\n":
-            self._newline()
-        elif ch == "\b":
-            self.col = max(0, self.col - 1)
-        elif ch == "\t":
-            self.col = min(MAX_COLS, (self.col // 8 + 1) * 8)
-            if len(self.cur) < self.col:
-                self.cur = self.cur.ljust(self.col)
-        elif ch == "\x07":
-            pass                       # bell
-        elif ch >= " ":
-            if len(self.cur) < self.col:
-                self.cur = self.cur.ljust(self.col)
-            self.cur = self.cur[: self.col] + ch + self.cur[self.col + 1 :]
-            self.col += 1
+    def _colour(self, value: int, default: int) -> tuple[int, bool]:
+        """A curses colour number for ``value``, and whether it needs bold to
+        reach the bright half on an eight-colour terminal."""
+        if value == vt.DEFAULT:
+            return default, False
+        if value & vt.RGB:
+            rgb = ((value >> 16) & 255, (value >> 8) & 255, value & 255)
+            index = palette_index(*rgb) if self.count >= 256 else nearest16(rgb)
+        else:
+            index = value
+        if self.count >= 256:
+            return index, False
+        if index >= 16:
+            index = nearest16(palette_rgb(index))
+        if self.count >= 16:
+            return index, False
+        if index >= 8:
+            return index - 8, True
+        return index, False
 
-    def _csi(self, params: str, final: str) -> None:
-        def num(default: int = 1) -> int:
-            try:
-                return int(params.split(";")[0] or default)
-            except ValueError:
-                return default
+    def _pair(self, fg: int, bg: int) -> int:
+        if (fg, bg) == (self.default_fg, self.default_bg):
+            return 0
+        assert self.pairs is not None
+        found = self.pairs.find(fg, bg)
+        if found is not None:
+            return found
+        return self._nearest(fg, bg)
 
-        if final == "K":              # erase (to end of) line
-            self.cur = self.cur[: self.col]
-        elif final == "J":            # clear screen
-            self.lines = []
-            self.cur = ""
-            self.col = 0
-        elif final == "C":            # cursor right
-            self.col = min(MAX_COLS, self.col + num())
-        elif final == "D":            # cursor left
-            self.col = max(0, self.col - num())
-        elif final in ("H", "f"):     # cursor home -- treat as column reset
-            self.col = 0
-        # everything else (m/SGR colours, h/l modes, ...) is ignored
+    def _nearest(self, fg: int, bg: int) -> int:
+        """The pair already made whose colours are closest to these."""
+        def rgb(colour: int, default: tuple[int, int, int]):
+            return default if colour < 0 else _rgb_of(colour)
 
-    def _newline(self) -> None:
-        self.lines.append(self.cur)
-        if len(self.lines) > SCROLLBACK:
-            del self.lines[: len(self.lines) - SCROLLBACK]
-        self.cur = ""
-        self.col = 0
+        def distance(a, b) -> int:
+            return sum((x - y) ** 2 for x, y in zip(a, b))
 
-    # -- output ---------------------------------------------------------
-    def visible(self, height: int, scroll: int = 0):
-        """The last ``height`` rows, ``scroll`` lines back from the bottom."""
-        all_lines = self.lines + [self.cur]
-        end = max(0, len(all_lines) - scroll)
-        start = max(0, end - height)
-        return all_lines[start:end]
+        white, black = BASE16[7], BASE16[0]
+        want_fg, want_bg = rgb(fg, white), rgb(bg, black)
+        assert self.pairs is not None
+        best, best_score = 0, distance(want_fg, white) + distance(want_bg, black)
+        for (have_fg, have_bg), pair in self.pairs.allocated():
+            score = (distance(want_fg, rgb(have_fg, white))
+                     + distance(want_bg, rgb(have_bg, black)))
+            if score < best_score:
+                best, best_score = pair, score
+        return best
 
+
+def _ascii_fallback(ch: str) -> str:
+    """A box-drawing character as ASCII, for a terminal that cannot show it."""
+    try:
+        name = unicodedata.name(ch)
+    except ValueError:
+        return "?"
+    if "HORIZONTAL" in name and "VERTICAL" not in name or "SCAN LINE" in name:
+        return "-"
+    if "VERTICAL" in name and "HORIZONTAL" not in name:
+        return "|"
+    return "+"
+
+
+#: The DEC line-drawing characters, and the rest of the box-drawing block, in
+#: ASCII: what a program's borders turn into when the outer terminal's
+#: encoding cannot show the real ones, as the app's own frames do.
+ASCII_BOX = {code: _ascii_fallback(chr(code)) for code in range(0x2500, 0x2580)}
+ASCII_BOX.update({ord(k): v for k, v in {
+    "◆": "+", "▒": "#", "°": "o", "±": "+",
+    "≤": "<", "≥": ">", "π": "p", "≠": "!",
+    "£": "L", "·": ".", " ": " ",
+    "⎺": "-", "⎻": "-", "⎼": "-", "⎽": "_",
+}.items()})
+
+
+# -- the plug-in ---------------------------------------------------------------
 
 class TerminalPlugin(PanePlugin):
     name = "Terminal"
     description = "Shell inside this pane (local pty, or SSH for remote panes)"
     wants_timer = True     # the app polls tick() so output flows while idle
 
-    SWITCH_KEY = 29        # Ctrl-]: focus the other pane, keep the shell alive
-    CLOSE_KEY = curses.KEY_F10
-
     def on_start(self) -> None:
-        self.term = TermEmulator()
-        self.scroll = 0
+        self.screen = vt.Screen(24, 80)
+        self.scroll = 0         # lines scrolled back; 0 is the live screen
+        self.menu = False       # Ctrl-] was pressed: the next key is ours
         self.done = False
         self.status = ""
         self._rows = 24
         self._cols = 80
-        self._pid = None       # local child pid
-        self._fd = None        # local pty master
-        self._chan = None      # paramiko channel
+        self._pid = None        # local child pid
+        self._fd = None         # local pty master
+        self._chan = None       # paramiko channel
+        self._busy_at = 0.0
+        self._colours: Colours | None = None
 
         fs = self.ctx.own_fs
         path = self.ctx.own_path
@@ -218,7 +353,11 @@ class TerminalPlugin(PanePlugin):
                 os.chdir(path)
             except OSError:
                 pass
-            os.environ["TERM"] = "vt100"
+            os.environ["TERM"] = TERM
+            # The size comes from the pty, and follows the pane; a LINES or
+            # COLUMNS inherited from the outer shell would pin it instead.
+            os.environ.pop("LINES", None)
+            os.environ.pop("COLUMNS", None)
             os.execvp(shell, [shell])
             os._exit(127)
         self._pid = pid
@@ -234,7 +373,7 @@ class TerminalPlugin(PanePlugin):
         if transport is None or not transport.is_active():
             raise RuntimeError("The SSH connection is no longer active.")
         chan = transport.open_session()
-        chan.get_pty(term="vt100", width=self._cols, height=self._rows)
+        chan.get_pty(term=TERM, width=self._cols, height=self._rows)
         chan.invoke_shell()
         chan.setblocking(False)
         self._chan = chan
@@ -243,13 +382,14 @@ class TerminalPlugin(PanePlugin):
 
     # -- pumping ------------------------------------------------------------
     def tick(self) -> None:
-        """Pull any pending shell output into the emulator (non-blocking)."""
+        """Take in pending output, for at most :data:`FEED_SECONDS`."""
         if self.done:
             return
+        deadline = time.monotonic() + FEED_SECONDS
         if self._fd is not None:
             while True:
                 try:
-                    data = os.read(self._fd, 65536)
+                    data = os.read(self._fd, CHUNK)
                 except OSError as exc:
                     if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
                         break
@@ -257,8 +397,8 @@ class TerminalPlugin(PanePlugin):
                 if not data:
                     self._finish()
                     return
-                self.term.feed(data)
-                if len(data) < 65536:
+                self._feed(data)
+                if len(data) < CHUNK or time.monotonic() >= deadline:
                     break
             if self._pid is not None:
                 try:
@@ -269,23 +409,44 @@ class TerminalPlugin(PanePlugin):
                 except ChildProcessError:
                     pass
         elif self._chan is not None:
-            while self._chan.recv_ready():
-                data = self._chan.recv(65536)
+            while self._chan.recv_ready() and time.monotonic() < deadline:
+                data = self._chan.recv(CHUNK)
                 if not data:
                     break
-                self.term.feed(data)
+                self._feed(data)
             if self._chan.exit_status_ready() or self._chan.closed:
                 # Drain what's left, then mark finished.
                 try:
                     while self._chan.recv_ready():
-                        self.term.feed(self._chan.recv(65536))
+                        self._feed(self._chan.recv(CHUNK))
                 except Exception:
                     pass
                 self._finish()
 
+    def _feed(self, data: bytes) -> None:
+        before = self.screen.history_count
+        self.screen.feed(data)
+        self._busy_at = time.monotonic()
+        if self.scroll:
+            # Keep a scrolled-back view on the same lines while output
+            # pushes more into the history beneath it.
+            added = self.screen.history_count - before
+            self.scroll = min(self._max_scroll(), self.scroll + added)
+        replies = self.screen.take_replies()
+        if replies:
+            self._send(replies)
+
+    @property
+    def poll_ms(self) -> int | None:
+        """How soon the application should poll again, while busy."""
+        if not self.done and time.monotonic() - self._busy_at < BUSY_SECONDS:
+            return FAST_POLL_MS
+        return None
+
     def _finish(self) -> None:
         if not self.done:
             self.done = True
+            self.menu = False
             self.status = "[process exited -- press any key to close]"
 
     # -- keys ----------------------------------------------------------------
@@ -293,102 +454,189 @@ class TerminalPlugin(PanePlugin):
         if self.done:
             self.on_exit()
             return False
-        if key == self.SWITCH_KEY:  # Ctrl-]: hand focus to the other pane
-            self.ctx.focus_other()
+        if self.menu:
+            return self._menu_key(key)
+        if self.scroll:
+            return self._scroll_key(key)
+        if key == MENU_KEY:
+            self.menu = True
             return True
-        if key == self.CLOSE_KEY:   # F10: close the terminal
-            self.on_exit()
-            return False
-        if key == curses.KEY_PPAGE:
-            self.scroll = min(self.scroll + 10,
-                              max(0, len(self.term.lines) - 1))
-            return True
-        if key == curses.KEY_NPAGE:
-            self.scroll = max(0, self.scroll - 10)
-            return True
-
-        data = self._encode_key(key)
+        data = encode_key(key, self.screen.app_cursor, self.screen.app_keypad)
         if data:
-            self.scroll = 0
+            self._busy_at = time.monotonic()
             self._send(data)
         return True
 
-    @staticmethod
-    def _encode_key(key: int | str) -> bytes:
-        specials = {
-            curses.KEY_UP: b"\x1b[A",
-            curses.KEY_DOWN: b"\x1b[B",
-            curses.KEY_RIGHT: b"\x1b[C",
-            curses.KEY_LEFT: b"\x1b[D",
-            curses.KEY_HOME: b"\x1b[H",
-            curses.KEY_END: b"\x1b[F",
-            curses.KEY_DC: b"\x1b[3~",
-        }
-        if key in specials:
-            return specials[key]
-        if key in (curses.KEY_BACKSPACE, 127, 8):
-            return b"\x7f"
-        if key in (10, 13, curses.KEY_ENTER):
-            return b"\r"
-        # A control key is a number and only ever a number; a character from
-        # U+0100 up arrives as a str, and comparing the two raises.
-        if isinstance(key, int) and 0 <= key < 32:
-            return bytes([key])
-        # Text only.  The specials above are the key codes worth translating;
-        # every other code -- a resize, a mouse report, an unbound function
-        # key -- is not a character, and encoding one sent a stray letter to
-        # the shell, where the next Enter would have run it.
-        char = typed_char(key)
-        return char.encode("utf-8") if char is not None else b""
+    def _menu_key(self, key: int | str):
+        """The key after Ctrl-]: one of the terminal's own commands."""
+        self.menu = False
+        if key == 9:                                 # Tab: the other pane
+            self.ctx.focus_other()
+        elif key in (ord("q"), ord("Q")):            # close the terminal
+            self.on_exit()
+            return False
+        elif key in (curses.KEY_PPAGE, ord("[")):    # scroll back
+            self._scroll_by(self._page())
+        elif key == MENU_KEY:                        # Ctrl-] for the program
+            self._send(b"\x1d")
+        # Esc, or anything else: the menu simply closes.
+        return True
+
+    def _scroll_key(self, key: int | str):
+        """Keys while scrolled back: they move the view, and reach nothing."""
+        if key == curses.KEY_PPAGE:
+            self._scroll_by(self._page())
+        elif key == curses.KEY_NPAGE:
+            self._scroll_by(-self._page())
+        elif key == curses.KEY_UP:
+            self._scroll_by(1)
+        elif key == curses.KEY_DOWN:
+            self._scroll_by(-1)
+        elif key == curses.KEY_HOME:
+            self.scroll = self._max_scroll()
+        elif key == MENU_KEY:
+            self.menu = True
+        else:
+            # Any other key goes back to the live screen -- and is not sent,
+            # so a key pressed to leave the history cannot run anything.
+            self.scroll = 0
+        return True
+
+    def wheel(self, lines: int) -> None:
+        """The mouse wheel: ``lines`` back into the history, or forward."""
+        if not self.done:
+            self._scroll_by(lines)
+
+    def _page(self) -> int:
+        return max(1, self._rows - 1)
+
+    def _max_scroll(self) -> int:
+        # The alternate screen has no history: what a full-screen program
+        # scrolls off is its own business, not the shell's.
+        return 0 if self.screen.alt_active else len(self.screen.scrollback)
+
+    def _scroll_by(self, lines: int) -> None:
+        self.scroll = max(0, min(self._max_scroll(), self.scroll + lines))
 
     def _send(self, data: bytes) -> None:
         try:
             if self._fd is not None:
-                os.write(self._fd, data)
+                while data:
+                    data = data[os.write(self._fd, data):]
             elif self._chan is not None:
                 self._chan.sendall(data)
+        except BlockingIOError:
+            # The program is not reading its input and the pty's buffer is
+            # full.  Dropping these bytes is better than ending the session.
+            pass
         except Exception:
             self._finish()
 
     # -- drawing ---------------------------------------------------------------
     def draw(self, stdscr, y: int, x: int, h: int, w: int) -> None:
         # Match the file-pane layout: header row on top, status bar on the
-        # bottom, shell content in between -- so the terminal's usable area
-        # lines up exactly with the listing in the other pane.
+        # bottom, the screen in between -- so the terminal's area lines up
+        # exactly with the listing in the other pane.
         rows, cols = h - 2, w
-        if rows < 1:
+        if rows < 1 or cols < 1:
             return
-        if (rows, cols) != (self._rows, self._cols) and rows > 0 and cols > 0:
+        if (rows, cols) != (self._rows, self._cols):
             self._rows, self._cols = rows, cols
+            self.screen.resize(rows, cols)
             self._resize(rows, cols)
+        # The history can shrink under a scrolled-back view (ED 3, or a
+        # program switching to the alternate screen, which has none).
+        self._scroll_by(0)
 
         fs = self.ctx.own_fs
         where = f"{fs.label()}:{self.ctx.own_path}"
-        title = f" [terminal] {where} "
-        self.put(stdscr, y, x, w, title, theme.attr("keybar"))
+        self.put(stdscr, y, x, w, f" [terminal] {where} ", theme.attr("keybar"))
 
-        visible = self.term.visible(rows, self.scroll)
-        pad = rows - len(visible)
-        for row in range(rows):
-            text = visible[row - pad] if row >= pad else ""
-            self.put(stdscr, y + 1 + row, x, w, text)
-
-        if self.status:
-            footer = f" {self.status} "
-        elif self.scroll:
-            footer = f" scrollback ({self.scroll} lines back)  PgDn: forward "
+        if self._colours is None or not self._colours.current():
+            self._colours = Colours()
+        screen = self.screen
+        if self.scroll:
+            # The history, then the main screen under it: there are always at
+            # least a screenful of lines, since the scroll never goes further
+            # back than the history is long.
+            history = list(screen.scrollback) + screen.main
+            end = len(history) - self.scroll
+            lines = history[end - rows:end]
         else:
-            footer = " Ctrl-] switch pane   F10 close   PgUp/PgDn scroll "
-        self.put(stdscr, y + h - 1, x, w, footer, theme.attr("keybar"))
+            lines = screen.lines
+        for row, line in enumerate(lines):
+            self._draw_line(stdscr, y + 1 + row, x, cols, line)
 
-        if not self.status and self.scroll == 0 and visible:
-            # Draw the cursor as a reverse cell on the last rendered row.
-            cy = y + 1 + pad + len(visible) - 1
-            cx = x + min(self.term.col, w - 1)
-            line = visible[-1]
-            ch = line[self.term.col] if self.term.col < len(line) else " "
-            self.put(stdscr, cy, cx, 1, ch, theme.attr("inputcursor"),
-                     pad=False)
+        app = getattr(self.ctx, "app", None)
+        active = getattr(app, "active", None) is self.ctx.own_panel
+        if (active and not self.scroll and not self.done and not self.menu
+                and screen.cursor_visible):
+            self._draw_cursor(stdscr, y + 1, x, rows, cols)
+
+        self.put(stdscr, y + h - 1, x, w, self._footer(), theme.attr("keybar"))
+
+    def _footer(self) -> str:
+        # Each fits the forty columns of half an 80-column screen.
+        if self.status:
+            return f" {self.status} "
+        if self.menu:
+            return " Tab: pane  q: close  PgUp: scroll  Esc "
+        if self.scroll:
+            return f" scrollback, {self.scroll} lines up  Esc: live "
+        return " Ctrl-]: Tab pane  q close  PgUp scroll "
+
+    def _draw_line(self, stdscr, y: int, x: int, cols: int,
+                   line: vt.Line) -> None:
+        """One row of the screen, as runs of cells that share an attribute.
+
+        A line from the history can be wider or narrower than the pane, from
+        before a resize: it is cut, or padded with blanks.
+        """
+        colours = self._colours
+        assert colours is not None
+        reverse = curses.A_REVERSE if self.screen.reverse_video else 0
+        chars, attrs = line.chars, line.attrs
+        width = min(len(chars), cols)
+        if width < len(chars) and chars[width] == "":
+            # A line from a wider screen, cut through a wide character.
+            chars = chars[:width - 1] + [" "]
+        col = 0
+        while col < width:
+            attr = attrs[col]
+            start = col
+            while col < width and attrs[col] == attr:
+                col += 1
+            text = "".join(chars[start:col])
+            if attr[2] & vt.INVISIBLE:
+                text = " " * (col - start)
+            self._put_run(stdscr, y, x + start, text, colours.attr(attr) ^ reverse)
+        if width < cols:
+            self._put_run(stdscr, y, x + width, " " * (cols - width),
+                          colours.attr(vt.PLAIN) ^ reverse)
+
+    @staticmethod
+    def _put_run(stdscr, y: int, x: int, text: str, attr: int) -> None:
+        if theme.GLYPHS is theme.ASCII_GLYPHS:
+            text = text.translate(ASCII_BOX)
+        try:
+            stdscr.addstr(y, x, text, attr)
+        except curses.error:
+            # The bottom-right cell of the screen cannot be written without
+            # scrolling, and a character the outer terminal cannot show is
+            # refused: the rest of the line is still worth drawing.
+            pass
+
+    def _draw_cursor(self, stdscr, y: int, x: int, rows: int, cols: int) -> None:
+        """The cursor, as the cell under it in reverse."""
+        screen = self.screen
+        cy, cx = min(screen.y, rows - 1), min(screen.x, cols - 1)
+        line = screen.lines[cy]
+        ch = line.chars[cx] or " "
+        assert self._colours is not None
+        attr = self._colours.attr(line.attrs[cx]) ^ curses.A_REVERSE
+        if screen.reverse_video:
+            attr ^= curses.A_REVERSE
+        self._put_run(stdscr, y + cy, x + cx, ch, attr)
 
     def _resize(self, rows: int, cols: int) -> None:
         if self._fd is not None:

@@ -35,8 +35,10 @@ Run remote script) have no menu, and the three that already run on keys
 
 ## Built-in plug-ins
 
-- **Terminal** — the in-pane pseudo-terminal (also on the `t` key); a shell
-  in the pane's directory, local or over the pane's SSH connection.
+- **Terminal** — the in-pane terminal (also on the `t` key); a shell in the
+  pane's directory, local or over the pane's SSH connection, on a terminal
+  emulator that runs vim, less and htop. See *The terminal in a pane* in the
+  usage guide.
 - **Processes** — a process browser and killer for the pane's host, local or
   over the pane's SSH connection. Auto-refreshing; sort with `c`/`m`/`t`/`p`/
   `n`/`u`, filter with `/`, and kill the process under the cursor with

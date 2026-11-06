@@ -657,6 +657,57 @@ a remote pane the file is fetched to a private temporary copy (mode `0700`,
 8 MB ceiling) and read there. Nothing is written back — a pager has nothing to
 send — so the copy is removed however the pager exits.
 
+## The terminal in a pane
+
+`t` turns the active pane into a terminal running your shell in the pane's
+directory; the other pane goes on working. On a local pane the shell runs on
+a pty of its own; on an SFTP or SSH pane it is an interactive shell on the
+connection the pane already has, so there is no second login. (An FTP pane
+has no shell to offer.)
+
+It is a terminal emulator, not a line printer: colours (the sixteen, the 256
+and 24-bit), bold, underline and reverse, cursor addressing, scroll regions,
+the line-drawing characters, wide characters, and the alternate screen that
+full-screen programs draw on. So `ls --color`, `git diff`, coloured prompts
+and **vim, less, man, top and htop** all work in the pane, and when vim or
+less exits the shell's screen comes back as it was. The shell is told
+`TERM=xterm-256color` — what the emulator implements, and an entry nearly
+every host has; if a remote host has never heard of it, set `TERM` to
+`xterm` there.
+
+**Keys.** Every key goes to the program, including F1–F12, `PgUp`/`PgDn`,
+`Esc` and `Tab` (completion). One key is the terminal's own, **`Ctrl-]`**,
+which opens a small menu in the pane's footer:
+
+| After `Ctrl-]` | |
+|---|---|
+| `Tab` | switch to the other pane; the shell keeps running, and `Tab` or a click comes back |
+| `q` | close the terminal |
+| `PgUp` or `[` | scroll back through what has gone off the top |
+| `Ctrl-]` | send a `Ctrl-]` to the program |
+| `Esc`, anything else | close the menu |
+
+While scrolled back, `PgUp`/`PgDn`, the arrows and `Home` move through the
+history, and any other key returns to the live screen without being sent.
+The mouse wheel scrolls back too. Exiting the shell (`exit`, `Ctrl-D`) closes
+the terminal.
+
+**Colours.** The terminal is drawn on your outer terminal's own background —
+usually black — rather than the pane's blue, because `ls --color` paints
+directories blue and every program's colour scheme assumes the terminal's own
+background. Colours come down to what the outer terminal has: 24-bit colour
+to the nearest of 256, and on a 16- or 8-colour terminal to the nearest of
+those. When curses runs out of colour pairs (an attribute can name only 255)
+a colour takes the nearest pair already made.
+
+**`Esc` is prompt.** curses waits after `Esc` to see whether a key's sequence
+follows, a whole second by default; Meridian sets 25 ms, so leaving insert
+mode in vim does not lag. An `ESCDELAY` in your environment is left as it is.
+
+A pane is half the screen, and a few programs assume 80 columns. `!` hands a
+program the whole real terminal instead: full width, true colour and the
+outer terminal's own mouse handling.
+
 ## Key bindings
 
 Keys are read decoded, so anywhere text is typed — the editor, a rename or
@@ -686,11 +737,11 @@ where it should.)
 | `~` | home directory (this pane) | `=` | other pane: same location |
 | `<` / `>` | back / forward through this pane's history | | |
 | `b` | presets: saved locations | | |
-| `.` | show/hide hidden files | `t` | terminal inside this pane |
+| `.` | show/hide hidden files | `t` | terminal inside this pane (see below) |
 | `u` | directory sizes in this pane | | |
 | `p` / F11 | plug-in mode (this pane) | `!` | full-screen shell |
 | `f` | find files (browsable results) | | |
-| `C` | configuration menu | `Ctrl-]` | terminal: switch to other pane |
+| `C` | configuration menu | `Ctrl-]` | in the terminal: its menu — `Tab` other pane, `q` close, `PgUp` scroll back |
 | `Options ▸ Editor` | F4 opens your editor | `Options ▸ Viewer` | F3 opens your pager |
 
 **F-key aliases** (for terminals that swallow function keys): press the digit
@@ -729,6 +780,11 @@ page, `g`/`G` jump to the first/last row, `Home`/`End` to the first/last column,
 same smart case and `n`/`N`, `w` cycles the column-width limit, `q` quits. The
 footer shows the cursor's cell reference and its value in full, which is where
 to look when a column is too narrow for what is in it.
+In the **terminal pane** (`t`): every key goes to the program. `Ctrl-]` then
+`Tab` switches to the other pane, `q` closes the terminal, `PgUp` (or `[`)
+scrolls back — then `PgUp`/`PgDn`/arrows/`Home` move through the history and
+any other key returns — and `Ctrl-]` sends a `Ctrl-]` to the program. The
+mouse wheel scrolls back too.
 In the **editor**: `F2` / `Ctrl-S` / `Ctrl-O` save, `F10` / `Ctrl-Q` quit,
 `Ctrl-Y` / `Ctrl-K` delete a line, `Ctrl-L` toggles line numbers. Esc does
 not quit — only `q`-style keys and `F10` leave the app, so a stray Esc never

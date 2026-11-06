@@ -134,6 +134,79 @@ def test_a_pair_number_curses_will_not_turn_into_an_attribute(monkeypatch):
     assert menu == curses.A_REVERSE
 
 
+# -- the shared pair allocator ---------------------------------------------------
+
+def test_one_allocator_for_everything_above_the_themes_pairs():
+    """Two would both start at next_free_pair() and init_pair the same
+    numbers: an image opened over the terminal re-coloured its cells."""
+    def run(stdscr):
+        first = theme.shared_pairs()
+        return first is theme.shared_pairs(), first.start, theme.next_free_pair()
+
+    same, start, free = with_curses_screen(10, 40, run)
+    assert same is True
+    assert start == free
+
+
+def test_a_new_scheme_starts_a_new_allocator():
+    def run(stdscr):
+        before = theme.shared_pairs()
+        before.find(1, 2)
+        theme.init("midnight")
+        after = theme.shared_pairs()
+        theme.init()
+        return before is not after, len(after)
+
+    assert with_curses_screen(10, 40, run) == (True, 0)
+
+
+def test_pairs_stop_where_an_attribute_can_no_longer_name_them():
+    """COLOR_PAIRS is 65536 on ncurses 6, but color_pair(300) is pair 44."""
+    def run(stdscr):
+        return theme.Pairs().limit, curses.COLOR_PAIRS
+
+    limit, available = with_curses_screen(10, 40, run)
+    assert limit == min(available, theme.ATTR_PAIRS) == 256
+
+
+def test_a_curses_reporting_no_pairs_gets_the_attribute_limit(monkeypatch):
+    monkeypatch.setattr(curses, "COLOR_PAIRS", 0, raising=False)
+    assert theme.Pairs().limit == theme.ATTR_PAIRS
+
+
+def test_find_says_when_there_is_no_pair():
+    def run(stdscr):
+        pairs = theme.Pairs(limit=3, start=1)
+        first, second = pairs.find(1, 2), pairs.find(3, 4)
+        full = pairs.find(5, 6)
+        return first, second, full, pairs.exhausted, pairs.allocated()
+
+    first, second, full, exhausted, allocated = with_curses_screen(10, 40, run)
+    assert (first, second, full, exhausted) == (1, 2, None, True)
+    assert allocated == [((1, 2), 1), ((3, 4), 2)]
+
+
+def test_find_refusing_a_colour_does_not_use_the_pairs_up():
+    def run(stdscr):
+        pairs = theme.Pairs()
+        refused = pairs.find(300, 300)
+        return refused, pairs.exhausted, pairs.find(1, 2)
+
+    assert with_curses_screen(10, 40, run) == (None, False, 1)
+
+
+def test_get_falls_back_to_the_first_pair_it_handed_out():
+    """Not pair 1, which belongs to the theme when the allocator starts
+    above it."""
+    def run(stdscr):
+        pairs = theme.Pairs(limit=12, start=10)
+        first = pairs.get(1, 2)
+        pairs.get(3, 4)
+        return first, pairs.get(5, 6), pairs.exhausted
+
+    assert with_curses_screen(10, 40, run) == (10, 10, True)
+
+
 def test_an_unknown_scheme_falls_back_to_the_default():
     assert theme.init("chartreuse") == theme.DEFAULT_SCHEME
     assert "turbo" in theme.names() and "midnight" in theme.names()
