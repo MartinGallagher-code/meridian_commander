@@ -222,6 +222,24 @@ CURSES_SCREENS = (sys.platform != "darwin"
                   or os.environ.get("MERIDIAN_CURSES_TESTS") == "1")
 
 
+def terminal_text(screen) -> str:
+    """Everything a terminal pane's screen holds, history first, as text.
+
+    A row the terminal wrapped because it ran out of columns is joined to the
+    next one, as a reader would read it: a path longer than the pane --
+    macOS's temporary directories are -- is one line of output, and a test
+    looking for it must not depend on how wide the pane happens to be.
+    """
+    out, current = [], ""
+    for line in list(screen.scrollback) + screen.lines:
+        if line.wrapped:
+            current += "".join(line.chars)
+        else:
+            out.append(current + line.text())
+            current = ""
+    return "\n".join(out + ([current] if current else []))
+
+
 def with_curses_screen(rows: int, cols: int, fn, colours: int | None = None):
     """Run ``fn(stdscr)`` on a real curses screen ``rows`` x ``cols``.
 

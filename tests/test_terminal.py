@@ -20,7 +20,7 @@ from meridian_commander.plugins.terminal import (
     MENU_KEY, Colours, TerminalPlugin, encode_key, nearest16,
 )
 
-from support import _FakeRemoteBackend, with_curses_screen
+from support import _FakeRemoteBackend, terminal_text, with_curses_screen
 
 
 # -- keys ----------------------------------------------------------------------
@@ -518,8 +518,7 @@ def _type(plugin, text):
 
 
 def _shown(plugin) -> str:
-    return "\n".join(line.text() for line in
-                     list(plugin.screen.scrollback) + plugin.screen.lines)
+    return terminal_text(plugin.screen)
 
 
 def test_a_local_terminal_runs_a_real_shell(local):
@@ -1044,3 +1043,14 @@ def test_nearest16():
     assert nearest16((250, 5, 5)) == 9
     assert nearest16((0, 0, 0)) == 0
     assert nearest16((128, 128, 128)) == 8
+
+
+def test_output_wrapped_by_a_narrow_pane_reads_as_one_line():
+    """What the tests search: a long path is one line, however it wrapped."""
+    screen = vt.Screen(4, 10)
+    screen.feed(b"/a/rather/long/path/name\r\nnext\r\n" + b"x\r\n" * 5)
+    assert terminal_text(screen).split("\n")[:2] == [
+        "/a/rather/long/path/name", "next"]
+    unfinished = vt.Screen(2, 4)
+    unfinished.feed(b"abcdefgh")
+    assert terminal_text(unfinished) == "abcdefgh"

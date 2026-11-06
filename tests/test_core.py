@@ -1155,6 +1155,7 @@ def test_terminal_plugin_local_shell_roundtrip(fs, tmp_path):
     from types import SimpleNamespace
 
     from meridian_commander.plugins.terminal import TerminalPlugin
+    from support import terminal_text
 
     workdir = tmp_path / "termwork"
     workdir.mkdir()
@@ -1173,7 +1174,7 @@ def test_terminal_plugin_local_shell_roundtrip(fs, tmp_path):
         joined = ""
         while time.time() < deadline:
             plug.tick()
-            joined = "\n".join(plug.screen.display())
+            joined = terminal_text(plug.screen)
             if "MARKER_42" in joined:
                 break
             time.sleep(0.05)
@@ -1185,7 +1186,7 @@ def test_terminal_plugin_local_shell_roundtrip(fs, tmp_path):
         deadline = time.time() + 10
         while time.time() < deadline:
             plug.tick()
-            joined = "\n".join(plug.screen.display())
+            joined = terminal_text(plug.screen)
             if str(workdir) in joined:
                 break
             time.sleep(0.05)
