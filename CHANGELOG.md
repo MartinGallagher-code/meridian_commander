@@ -46,6 +46,22 @@ day the version was cut.
 
 ### Added
 
+- **One pane at a time.** `z`, or **Options ▸ Single pane** (ticked while
+  on), gives the active pane the whole desktop and keeps the other in
+  reserve: its location, connection, history, tags and any plug-in are left
+  as they were, and a terminal in it goes on gathering output. The hint line
+  says the hidden pane is there and where it is, `Tab` flips to it at full
+  width and `Ctrl-U` brings it out. Nothing acts on it unseen: `F5`, `F6` and
+  `x` name it in their prompt (*Copy 'notes.txt' to the hidden pane, local:*),
+  `F9` marks it `(hidden pane)` in its confirmation, and `=` says where it
+  sent it. Anything that works in both panes shows both while it runs, then
+  goes back to one: `h`, `Ctrl-]` then `Tab` from a terminal, and every
+  plug-in that works on the other pane. A plug-in can set
+  `uses_other_pane = False` to have the single pane to itself, as Processes,
+  SSH doctor, JSON push, Run remote script and the terminal do; one that
+  does not say gets both panes, so user plug-ins work unchanged.
+  `[ui] panes = 1` in `config.ini` starts in single mode. (MC-003)
+
 - **The terminal in a pane is a real terminal.** `t` used to give a
   line-printer that dropped colours and cursor movement, so `ls --color`
   lost its colours and vim, less, man, top and htop came out garbled — the
@@ -66,7 +82,7 @@ day the version was cut.
   stay: unterminated sequences are bounded, an unterminated OSC is abandoned
   at a control character, and a flood of output is taken a slice per poll so
   Ctrl-C still gets through. While output flows the pane polls every 10 ms
-  instead of 120, so typing echoes at once.
+  instead of 120, so typing echoes at once. (MC-002)
 
 - **Extract an archive in one key.** `x` on a `.zip` or `.tar` (or with
   several tagged) unpacks it into the other pane — also **File ▸ Extract

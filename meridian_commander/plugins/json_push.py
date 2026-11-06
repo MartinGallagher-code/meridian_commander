@@ -49,6 +49,7 @@ DEFAULTS = {
 class JsonPush(InputOutputPlugin):
     name = "JSON push"
     description = "Send JSON to a listener on a remote host via SSH, show reply"
+    uses_other_pane = False  # what is typed, to the configured host
     prompt = "json> "
     config_section = "json_push"
 

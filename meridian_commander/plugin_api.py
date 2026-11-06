@@ -161,10 +161,15 @@ class PluginContext:
         """Move keyboard focus to the opposite pane (the plugin keeps running).
 
         Lets a plugin that consumes Tab (like the terminal, where Tab must
-        reach the shell for completion) still offer a switch-pane key.
+        reach the shell for completion) still offer a switch-pane key.  With
+        one pane on screen, the plug-in's pane stays in view beside the one
+        taking the keyboard, until the keyboard comes back to it.
         """
         try:
             self.app.active = self.other_panel
+            keep_beside = getattr(self.app, "_keep_beside", None)
+            if keep_beside is not None:
+                keep_beside(self.own_panel)
         except Exception:
             pass
 
@@ -180,6 +185,12 @@ class PanePlugin:
     name = ""
     #: One line shown next to the name in the plugin menu.
     description = ""
+    #: Whether the plug-in works on the opposite pane.  In single mode such
+    #: a plug-in gets both panes on screen for as long as it is open, so it
+    #: never acts on a pane the user cannot see; one that sets this false
+    #: (a process list, a remote script) has the single pane to itself.
+    #: True unless a plug-in says otherwise, which is the safe answer.
+    uses_other_pane = True
 
     def __init__(self, ctx: PluginContext) -> None:
         self.ctx = ctx

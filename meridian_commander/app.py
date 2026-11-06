@@ -33,6 +33,7 @@ Key bindings (also shown in the F1 help screen)::
     ~              home directory (this pane)
     =              other pane: same location as this one
     b              presets: saved locations to return to
+    z              single pane: one pane at full width, the other kept
 """
 
 from __future__ import annotations
@@ -162,6 +163,7 @@ MENUS: list[dict] = [
             {"label": "~S~ort order...", "name": "sort", "key": "Ctrl+T"},
             {"label": "Show ~h~idden files", "name": "hidden", "key": "."},
             {"label": "Director~y~ sizes", "name": "sizes", "key": "u"},
+            {"label": "Single ~p~ane", "name": "single", "key": "z"},
             {"sep": True},
             {"label": "~C~olours...", "name": "colours"},
             {"label": "~E~ditor...", "name": "editor"},
@@ -220,7 +222,7 @@ def menu_layout() -> list[tuple[int, int]]:
 
 class App:
     def __init__(self, stdscr, left_path: str | None = None,
-                 right_path: str | None = None) -> None:
+                 right_path: str | None = None, single: bool = False) -> None:
         self.stdscr = stdscr
         self._backends: list[FileSystem] = []
 
@@ -242,6 +244,14 @@ class App:
         self._panel_boxes: list[tuple] = []
         # The menu whose caption is highlighted while its drop-down is open.
         self._open_menu: int | None = None
+        # Single mode: the active pane fills the desktop and the other is kept
+        # out of sight -- not closed, so its place, connection, history, tags
+        # and any plug-in are all still there when it comes back.
+        self.single = single
+        # A pane single mode keeps on screen beside the active one: a
+        # terminal that handed the keyboard over with Ctrl-], until the
+        # keyboard comes back to it.  See _panes_on_screen.
+        self._beside: Panel | None = None
 
     # -- helpers ----------------------------------------------------------
     @property
@@ -276,6 +286,104 @@ class App:
                 other.refresh()
                 return
 
+    # -- the layout -------------------------------------------------------
+    def _pairing_plugin(self):
+        """An open plug-in that works on the other pane, or None.
+
+        Such a plug-in is half of a pair -- head + tail follows the other
+        pane's cursor, Grep searches the other pane's directory -- so single
+        mode shows both panes for as long as one is open, rather than leave
+        it working on a pane nobody can see.  ``uses_other_pane`` defaults to
+        true, so a plug-in that does not say is given both panes: the safe
+        answer for user plug-ins, and one that asks nothing new of them.
+        """
+        for panel in (self.active, self.other):
+            plugin = panel.plugin
+            if plugin is not None and getattr(plugin, "uses_other_pane", True):
+                return plugin
+        return None
+
+    def _panes_on_screen(self) -> list[Panel]:
+        """The panes drawn, left to right: both, or the active one alone.
+
+        Single mode still draws both while something needs the pair: a
+        plug-in working on the other pane, or a terminal kept beside the
+        pane it handed the keyboard to.  Worked out afresh at every call
+        rather than switched on and off, so no way of closing a plug-in or
+        moving the keyboard can leave the layout stuck in the wrong state.
+        """
+        if self._beside is self.active:
+            # The keyboard is back in the pane that was kept in view, so the
+            # errand in the other pane is over and this one fills the screen.
+            self._beside = None
+        if (not self.single or self._beside is not None
+                or self._pairing_plugin() is not None):
+            return [self.left, self.right]
+        return [self.active]
+
+    def _hidden(self, panel: Panel) -> bool:
+        """Whether single mode is keeping ``panel`` off the screen."""
+        return all(shown is not panel for shown in self._panes_on_screen())
+
+    def _keep_beside(self, panel: Panel) -> None:
+        """Keep ``panel`` on screen while the keyboard is in the other pane.
+
+        Called when a plug-in hands the keyboard over (the terminal's
+        Ctrl-]): in single mode the pane taking the keyboard would otherwise
+        replace the terminal on screen, and the point of Ctrl-] is to work in
+        one pane with the shell still in sight.  Two panes show both anyway.
+        """
+        if self.single:
+            self._beside = panel
+
+    def _toggle_single(self) -> None:
+        """Switch between two panes and one, keeping the other in reserve."""
+        self.single = not self.single
+        self._beside = None
+        if not self.single:
+            self._set_message("Two panes")
+            return
+        pairing = self._pairing_plugin()
+        if pairing is not None:
+            name = getattr(pairing, "name", "") or "a plug-in"
+            self._set_message(f"Single pane -- both stay on screen while "
+                              f"{name} works on the other pane")
+        else:
+            # Short enough to sit beside the hidden pane's note on an
+            # 80-column hint line without being cut off.
+            self._set_message("Single pane -- Tab flips, z shows both")
+
+    def _hidden_note(self, hidden: Panel, width: int) -> str:
+        """The hint line's note of where the pane out of sight is.
+
+        Half the line at most, so the message keeps the rest; the location is
+        trimmed from the left, as a caption is, because the deepest directory
+        is the part that says which one it is.  On a very narrow screen it
+        comes down to which side is hidden.
+        """
+        side = "left" if hidden is self.left else "right"
+        prefix = f"{side} pane hidden: "
+        where = f"{hidden.fs.label()}:{hidden.path}"
+        room = min(width - 2, max((width - 2) // 2, 12))
+        if len(prefix) + len(where) <= room:
+            return prefix + where
+        keep = room - len(prefix) - 1
+        if keep >= 8:
+            return prefix + "~" + where[-keep:]
+        return f"{side} hidden"[:room]
+
+    def _destination(self, panel: Panel) -> str:
+        """How a prompt names a destination pane that is out of sight.
+
+        Empty for a pane on screen, whose caption already says where it is.
+        Otherwise it names the pane and its backend, in front of the path the
+        prompt is filled with, so the two read as the location the way a
+        caption does: ``the hidden pane, sftp://web1:`` then ``/srv/www``.
+        """
+        if not self._hidden(panel):
+            return ""
+        return f" the hidden pane, {panel.fs.label()}"
+
     # -- drawing ----------------------------------------------------------
     def draw(self) -> None:
         stdscr = self.stdscr
@@ -296,19 +404,22 @@ class App:
         # it the hint line; the desktop is everything in between.
         panel_y = 1
         panel_h = height - 3
-        left_w = width // 2
-        right_x = left_w
-        right_w = width - right_x
 
         self._draw_desktop(panel_y, height - 2, width)
         self._draw_menu_bar(width)
 
         # Remember each pane's screen rectangle so the mouse handler can map a
-        # click back to a pane and a row.
-        self._panel_boxes = [
-            (self.left, panel_y, 0, panel_h, left_w),
-            (self.right, panel_y, right_x, panel_h, right_w),
-        ]
+        # click back to a pane and a row.  Only panes on screen get one, so a
+        # click in single mode can only ever reach the pane it landed on.
+        shown = self._panes_on_screen()
+        if len(shown) == 2:
+            left_w = width // 2
+            self._panel_boxes = [
+                (self.left, panel_y, 0, panel_h, left_w),
+                (self.right, panel_y, left_w, panel_h, width - left_w),
+            ]
+        else:
+            self._panel_boxes = [(shown[0], panel_y, 0, panel_h, width)]
 
         for panel, py, px, ph, pw in self._panel_boxes:
             if panel.plugin is not None:
@@ -323,8 +434,15 @@ class App:
                                  active=self.active is panel)
 
         # The hint line sits on the desktop rather than in a bar of its own,
-        # which is where Turbo Vision put anything that was not chrome.
-        theme.paint(stdscr, height - 2, 1, self.message[: width - 2], "hint")
+        # which is where Turbo Vision put anything that was not chrome.  In
+        # single mode its right-hand end says that a second pane exists, and
+        # where it is: a pane nobody can see is easy to forget is there.
+        room = width - 2
+        if len(shown) == 1:
+            note = self._hidden_note(self.other, width)
+            theme.paint(stdscr, height - 2, width - 1 - len(note), note, "hint")
+            room -= len(note) + 1
+        theme.paint(stdscr, height - 2, 1, self.message[:room], "hint")
         self._draw_function_bar(height - 1, width)
         stdscr.noutrefresh()
         curses.doupdate()
@@ -554,6 +672,8 @@ class App:
             entry = dict(item)
             if entry.get("name") == "hidden":
                 entry["checked"] = self.active.show_hidden
+            elif entry.get("name") == "single":
+                entry["checked"] = self.single
             items.append(entry)
         return items
 
@@ -620,6 +740,7 @@ class App:
             "sort": self._sort_menu,
             "hidden": self._toggle_hidden,
             "sizes": self._toggle_sizes,
+            "single": self._toggle_single,
             "colours": self._colour_menu,
             "editor": self._editor_menu,
             "viewer": self._viewer_menu,
@@ -701,6 +822,8 @@ class App:
         elif key == curses.KEY_END:
             panel.move_to(len(panel.entries) - 1)
         elif key == 9:  # Tab
+            # In single mode too: the drawing shows whichever pane is active,
+            # so this flips to the other one at full width, like a tab.
             self.active = self.other
         elif key in (curses.KEY_ENTER, 10, 13, curses.KEY_RIGHT):
             self._activate_entry()
@@ -738,6 +861,8 @@ class App:
             self._toggle_hidden()
         elif key == ord("u"):  # subdirectory sizes in the active pane
             self._toggle_sizes()
+        elif key == ord("z"):  # one pane at full width, or two
+            self._toggle_single()
         elif key == ord("t"):  # terminal inside this pane
             self._open_terminal_pane()
         elif key == ord("!"):  # full-screen shell (for vim/htop and friends)
@@ -1050,7 +1175,15 @@ class App:
         fs.close()
 
     def _swap_panes(self) -> None:
+        alone = len(self._panes_on_screen()) == 1
         self.left, self.right = self.right, self.left
+        if alone:
+            # With one pane on screen, swapping only the sides would change
+            # nothing anyone can see.  The swap brings the hidden pane out
+            # instead, in the place the shown one had.
+            self.active = self.other
+            self._set_message("Panes swapped -- the hidden one is on screen")
+            return
         # Keep the highlighted (active) pane pointing at the same panel object.
         self.active = self.left if self.active is self.left else self.right
         self._set_message("Panes swapped")
@@ -1198,11 +1331,17 @@ class App:
                             f"{cls.name} failed to start:\n{exc}", error=True)
             panel.plugin = None
             return
+        # Single mode shows both panes while the plug-in works on the other
+        # one; saying so explains why the second pane has just come back.
+        both = (" -- both panes on screen while it runs"
+                if self.single and len(self._panes_on_screen()) == 2 else "")
         self._set_message(
-            f"Plug-in '{cls.name}' opened -- Esc closes it, Tab switches panes")
+            f"Plug-in '{cls.name}' opened -- Esc closes it, Tab switches panes"
+            + both)
         if errors:
             self._set_message(f"Plug-in '{cls.name}' opened "
-                              f"({len(errors)} plug-in(s) failed to load)")
+                              f"({len(errors)} plug-in(s) failed to load)"
+                              + both)
 
     # -- configuration ------------------------------------------------------
     def _config_menu(self) -> None:
@@ -1605,7 +1744,8 @@ class App:
                             f"Cannot open in the other pane:\n{panel.path}",
                             error=True)
             return
-        self._set_message(f"Other pane: {other.fs.label()}:{other.path} "
+        which = "Hidden pane" if self._hidden(other) else "Other pane"
+        self._set_message(f"{which}: {other.fs.label()}:{other.path} "
                           "-- '<' there goes back")
 
     def _sort_menu(self) -> None:
@@ -1846,7 +1986,8 @@ class App:
         for panel, side in ((self.left, "left"), (self.right, "right")):
             path, why = self._sole_file(panel)
             if path is None:
-                self._set_message(f"Compare: {side} pane -- {why}")
+                hidden = " (hidden)" if self._hidden(panel) else ""
+                self._set_message(f"Compare: {side} pane{hidden} -- {why}")
                 return
             picked.append((panel.fs, path))
         try:
@@ -1914,12 +2055,15 @@ class App:
             return
         verb = "Move" if move else "Copy"
 
-        # Ask for the destination directory, defaulting to the other pane.
+        # Ask for the destination directory, defaulting to the other pane --
+        # named, when single mode has it out of sight, so nothing lands in a
+        # directory the user has forgotten the hidden pane was showing.
         default_dest = dst_panel.path
+        where = self._destination(dst_panel)
         if len(sources) == 1:
-            prompt_label = f"{verb} '{sources[0].name}' to:"
+            prompt_label = f"{verb} '{sources[0].name}' to{where}:"
         else:
-            prompt_label = f"{verb} {len(sources)} items to:"
+            prompt_label = f"{verb} {len(sources)} items to{where}:"
         dest = dialogs.prompt(self.stdscr, f"{verb}", prompt_label,
                               default=default_dest)
         if dest is None:
@@ -2064,11 +2208,15 @@ class App:
                             "Point the cursor at a zip or tar archive to "
                             "extract it, or tag several.")
             return
+        where = self._destination(dst_panel)
+        if where:
+            where = f" in{where}"
         if len(archives) == 1:
-            label = f"Extract '{archives[0].name}' into its own folder under:"
+            label = (f"Extract '{archives[0].name}' into its own folder"
+                     f"{where or ' under'}:")
         else:
             label = (f"Extract {len(archives)} archives, each into its own "
-                     "folder, under:")
+                     f"folder,{where or ' under'}:")
         dest = dialogs.prompt(self.stdscr, "Extract", label,
                               default=dst_panel.path)
         if dest is None:
@@ -2271,7 +2419,8 @@ class App:
 
         lines: list[str] = []
         for label, panel, survey in surveys:
-            lines.append(f"{label}: {panel.fs.label()}:{panel.path}")
+            lines.append(f"{label}: {panel.fs.label()}:{panel.path}"
+                         + self._hidden_tag(panel))
             lines.append(f"       {survey.describe()}"
                          + ("   <-- large" if survey.is_large else ""))
         lines += [
@@ -2287,6 +2436,14 @@ class App:
             "Scan these two directories anyway?",
         ]
         return "\n".join(lines)
+
+    def _hidden_tag(self, panel: Panel) -> str:
+        """A sync line's mark for the side single mode keeps out of sight.
+
+        Sync writes into both panes, so the side nobody can see is the one
+        its confirmation most needs to point out.
+        """
+        return "   (hidden pane)" if self._hidden(panel) else ""
 
     def _sync(self) -> None:
         left, right = self.left, self.right
@@ -2323,8 +2480,8 @@ class App:
 
         # Build a preview.
         lines = [
-            f"Left : {left.fs.label()}:{left.path}",
-            f"Right: {right.fs.label()}:{right.path}",
+            f"Left : {left.fs.label()}:{left.path}" + self._hidden_tag(left),
+            f"Right: {right.fs.label()}:{right.path}" + self._hidden_tag(right),
             "",
             f"{len(plan.actions)} file(s), {human_size(plan.total_bytes).strip()} to copy:",
             "",
@@ -2400,6 +2557,12 @@ class App:
             "  u              directory sizes: each subdirectory shows what\n"
             "                 is under it, with a bar against the biggest\n"
             "                 here -- follow them down to find the space\n"
+            "  z              single pane: this pane at full width, the other\n"
+            "                 kept as it was (Tab flips to it, Ctrl-U brings\n"
+            "                 it out); copy, move, extract and sync name it.\n"
+            "                 h, Ctrl-] Tab in the terminal and plug-ins that\n"
+            "                 use the other pane show both while they run.\n"
+            "                 z again: two panes\n"
             "  t              terminal in this pane: every key goes to the\n"
             "                 program; Ctrl-] then Tab other pane, q close,\n"
             "                 PgUp scroll back (or the mouse wheel)\n"
@@ -2514,7 +2677,8 @@ def _main(stdscr, args) -> str | None:
         curses.mouseinterval(200)  # ms window for double-click detection
     except curses.error:
         pass
-    app = App(stdscr, left_path=args.left, right_path=args.right)
+    app = App(stdscr, left_path=args.left, right_path=args.right,
+              single=config_mod.single_pane())
     app.run()
     # Returned rather than written here: curses still owns the terminal at
     # this point, so a failure to write could not be reported legibly.

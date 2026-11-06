@@ -71,6 +71,7 @@ class SshDoctor(InputOutputPlugin):
         Command("convert", "convert a key to the modern format", arg="text"),
     )
     description = "Inspect ~/.ssh keys and convert legacy ones to modern format"
+    uses_other_pane = False  # ~/.ssh, wherever the panes are
     prompt = "F2 for commands, or type one> "
     @property
     def greeting(self) -> str:

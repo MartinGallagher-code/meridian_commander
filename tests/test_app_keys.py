@@ -1047,8 +1047,10 @@ def test_main_wires_up_curses_and_runs_the_app(monkeypatch, tmp_path):
             return (24, 80)
 
     class _FakeApp:
-        def __init__(self, stdscr, left_path=None, right_path=None):
+        def __init__(self, stdscr, left_path=None, right_path=None,
+                     single=False):
             started["paths"] = (left_path, right_path)
+            started["single"] = single
 
         def run(self):
             started["ran"] = True
@@ -1070,6 +1072,8 @@ def test_main_wires_up_curses_and_runs_the_app(monkeypatch, tmp_path):
     assert started["ran"] is True
     assert started["keypad"] is True
     assert started["paths"] == (str(tmp_path), str(tmp_path))
+    # No config.ini: two panes, as always.
+    assert started["single"] is False
 
 
 def _run_main_for_escdelay(monkeypatch):
@@ -1082,7 +1086,7 @@ def _run_main_for_escdelay(monkeypatch):
         fn(_Screen(), args)
 
     class _FakeApp:
-        def __init__(self, stdscr, left_path=None, right_path=None):
+        def __init__(self, stdscr, **kwargs):
             pass
 
         def run(self):
@@ -1137,7 +1141,8 @@ def test_main_copes_with_a_terminal_that_refuses_colour_and_mouse(monkeypatch):
         fn(_Screen(), args)
 
     class _FakeApp:
-        def __init__(self, stdscr, left_path=None, right_path=None):
+        def __init__(self, stdscr, left_path=None, right_path=None,
+                     single=False):
             pass
 
         def run(self):
@@ -1184,7 +1189,8 @@ def test_main_on_a_monochrome_terminal(monkeypatch):
         fn(_Screen(), args)
 
     class _FakeApp:
-        def __init__(self, stdscr, left_path=None, right_path=None):
+        def __init__(self, stdscr, left_path=None, right_path=None,
+                     single=False):
             pass
 
         def run(self):

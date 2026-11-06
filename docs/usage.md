@@ -611,6 +611,36 @@ Home/End then scroll the overflow), `r` re-reads a file that has grown, and
 once and only the two ends are held, so peeking at a multi-gigabyte log costs
 what peeking at a short one does, on a remote pane as much as a local one.
 
+## One pane at a time
+
+Press **`z`** — or tick **Options ▸ Single pane** — and the active pane fills
+the desktop. The other pane is not closed: its location, connection, history,
+tags and any plug-in stay exactly as they were, and a terminal in it keeps
+gathering output, ready for when it comes back. The right-hand end of the hint
+line says it is there and where it is (`right pane hidden: sftp://web1:/srv`).
+`z` again brings both back.
+
+- **`Tab` flips to the hidden pane**, at full width, like switching tabs; the
+  one you left is now the hidden one. **`Ctrl-U`** swaps the two and brings the
+  hidden one out in the same way.
+- **Copy, move, extract and sync use the hidden pane without showing it, and
+  name it first.** `F5`/`F6` ask *Copy 'notes.txt' to the hidden pane, local:*
+  with its directory filled in below, `x` asks the same, and `F9`'s
+  confirmation marks the hidden side `(hidden pane)`. `D` compares the two
+  panes' files full-screen, as it always does, and `=` says where it has sent
+  the hidden pane.
+- **Anything that works in both panes brings both back while it runs:**
+  `h` (head + tail of the other pane's file, which you steer from the other
+  pane), a plug-in that works on the other pane — Grep, Find, the table tools,
+  and any of your own unless it says otherwise — and `Ctrl-]` then `Tab` from a
+  terminal, which keeps the shell in view beside the pane it handed the
+  keyboard to until you come back to it. When it closes, or you return, it is one pane again. A
+  terminal, or a plug-in that has no use for the other pane (Processes, SSH
+  doctor), has the whole width to itself.
+
+To start this way every time, set `[ui] panes = 1` in the
+[configuration](configuration.md).
+
 ## Finding what is taking up the space
 
 Press **`u`** and the pane stops saying `<DIR>`: every subdirectory shows what
@@ -737,12 +767,13 @@ where it should.)
 | `~` | home directory (this pane) | `=` | other pane: same location |
 | `<` / `>` | back / forward through this pane's history | | |
 | `b` | presets: saved locations | | |
-| `.` | show/hide hidden files | `t` | terminal inside this pane (see below) |
-| `u` | directory sizes in this pane | | |
+| `.` | show/hide hidden files | `t` | terminal inside this pane (see above) |
+| `u` | directory sizes in this pane | `z` | single pane: this one at full width, the other kept |
 | `p` / F11 | plug-in mode (this pane) | `!` | full-screen shell |
 | `f` | find files (browsable results) | | |
 | `C` | configuration menu | `Ctrl-]` | in the terminal: its menu — `Tab` other pane, `q` close, `PgUp` scroll back |
 | `Options ▸ Editor` | F4 opens your editor | `Options ▸ Viewer` | F3 opens your pager |
+| `Options ▸ Single pane` | the same as `z`, ticked while on | | |
 
 **F-key aliases** (for terminals that swallow function keys): press the digit
 `1`–`0` for `F1`–`F10`, or the mnemonic letter — `?`/`1` help, `o` open/connect,
