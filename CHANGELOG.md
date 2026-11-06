@@ -81,6 +81,9 @@ day the version was cut.
   message, and the common failures come back with a line saying what to do.
   `push` on a branch with no upstream sets one rather than printing the longer
   command for you to retype.
+- **A `CLAUDE.md` for Claude Code sessions.** It puts work here on the shared
+  ticket board in `shared_tools`, and lists the checks and how to bundle the
+  repository. It is not part of the package (`MANIFEST.in` leaves it out).
 
 ### Fixed
 
