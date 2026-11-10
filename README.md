@@ -78,6 +78,12 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   match and goes on to the next; `Enter`, `Tab` and the F-keys end the search
   and act on what it found; `/` or `Esc` ends it where it is. Also on
   **Command ▸ Search by name**.
+- **Filter a pane** — `F` asks for a pattern and the pane then shows only the
+  names that match it: text matches anywhere in the name with the same smart
+  case, and `*`, `?` or `[` make it a glob (`*.tsv`, `run_?`). The caption
+  names the filter and how many entries it hides; a tag on a hidden entry is
+  kept, counted, and named by `F5`, `F6` and `F8` ("2 not shown"). An empty
+  pattern, or leaving the directory, clears it. Also on **Command ▸ Filter…**.
 - **The cursor stays put** — after deleting (`F8`) the highlight settles on the
   next entry down, stepping over a whole tagged block rather than springing back
   to the top of the listing. The same holds whenever an entry disappears from

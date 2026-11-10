@@ -12,6 +12,27 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.10.0] — 2026-11-10
+
+### Added
+
+- **`F` filters a pane.** It asks for a pattern and the pane then shows only
+  the names that match it, and `..`, with the cursor on the first match. Text
+  matches anywhere in the name with the search's smart case; `*`, `?` or `[`
+  make it a glob. Files and directories alike are filtered, the caption names
+  the pattern and how many entries it hides, and an empty pattern or leaving
+  the directory clears it; reload, sort and hidden files keep it. It works on
+  the listing already in memory, so a remote pane filters without a round
+  trip. Also on **Command ▸ Filter…**. (MC-012)
+- **A filter hides; it does not untag.** A tag on a hidden entry is kept and
+  counted in the caption, `F5`, `F6` and `F8` say how many of their items are
+  not shown, and the footer's tagged total includes them. (MC-012)
+
+### Changed
+
+- **`F9`'s "this looks too big" check counts what a filter hides**, since the
+  sync walks the whole directory whatever the pane shows. (MC-012)
+
 ## [1.8.0] — 2026-11-10
 
 ### Added
@@ -854,6 +875,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.10.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.8.0...v1.10.0
 [1.8.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.5.0...v1.6.0

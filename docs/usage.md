@@ -962,6 +962,29 @@ a plug-in, `/` goes to it as before: the Processes and provost browser
 plug-ins keep their own `/`, which hides what does not match rather than
 jumping to it.
 
+### Filtering a pane
+
+**`F`** (or **Command ▸ Filter…**) asks for a pattern, and the pane then shows
+only the names that match it, and `..`, with the cursor on the first match.
+
+- **Text matches anywhere in the name**, with the search's smart case: all
+  lowercase ignores case, a capital means it. **`*`, `?` or `[` make it a
+  glob**, matched against the whole name: `*.tsv`, `run_?.tsv`, `run_[12]*`.
+- **Files and directories alike** are filtered.
+- **The caption names it**: `[*.tsv: 120 hidden]`, and `, 2 tagged` when tags
+  are among what it hides.
+- **It hides, it does not untag.** A tag on a hidden entry is kept, and `F5`,
+  `F6` and `F8` say how many of their items are not on the screen —
+  *Copy 5 items (2 not shown) to:* — so nothing goes anywhere unseen without
+  your being told.
+- **`F` with an empty pattern shows everything again**, and so does leaving the
+  directory: one filter per pane, for the directory it was set in. Reload
+  (`Ctrl-R`), sort (`Ctrl-T`) and hidden files (`.`) keep it.
+
+It works on the listing the pane already has, so a remote or in-archive pane
+filters without asking the server again. `F` in a file pane is the filter; in
+the table browser, which owns its pane, `F` freezes columns as before.
+
 ## Key bindings
 
 Keys are read decoded, so anywhere text is typed — the editor, a rename or
@@ -982,6 +1005,7 @@ where it should.)
 | `Insert` / `Space` | tag file | `F7` | make directory |
 | `n` | new (empty) file here | `r` | rename the file under the cursor |
 | `x` | extract the archive into the other pane | `/` | search this pane by name (see above) |
+| `F` | filter: show only the names matching a pattern (see above) | | |
 | `D` | compare both panes' files | `h` | head + tail of the other pane's file, in this pane |
 | `+` / `-` | tag all / untag all | `F8` | delete |
 | `Ctrl-U` | swap panes | `F9` | synchronize panes |
