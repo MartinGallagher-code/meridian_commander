@@ -254,6 +254,10 @@ class App:
         # terminal that handed the keyboard over with Ctrl-], until the
         # keyboard comes back to it.  See _panes_on_screen.
         self._beside: Panel | None = None
+        # The pane whose plug-in turned single mode on (the terminal's
+        # Ctrl-] z), or None.  That was the plug-in's zoom, so closing the
+        # plug-in ends it; z or the menu takes it over, and then it stays.
+        self._zoomed_by: Panel | None = None
         # The search mode "/" turns on, or None.  Only the active pane can be
         # searching, and every key that is not the mode's own ends it before
         # doing what it always does, so it never outlives the pane's focus.
@@ -344,10 +348,16 @@ class App:
         if self.single:
             self._beside = panel
 
-    def _toggle_single(self) -> None:
-        """Switch between two panes and one, keeping the other in reserve."""
+    def _toggle_single(self, zoomed_by: Panel | None = None) -> None:
+        """Switch between two panes and one, keeping the other in reserve.
+
+        ``zoomed_by`` is the pane whose plug-in asked, from inside a plug-in
+        that takes every key (the terminal's Ctrl-] z): one pane turned on
+        that way goes back to two when that plug-in closes.
+        """
         self.single = not self.single
         self._beside = None
+        self._zoomed_by = zoomed_by if self.single else None
         if not self.single:
             self._set_message("Two panes")
             return
@@ -356,6 +366,9 @@ class App:
             name = getattr(pairing, "name", "") or "a plug-in"
             self._set_message(f"Single pane -- both stay on screen while "
                               f"{name} works on the other pane")
+        elif zoomed_by is not None:
+            # Tab and z belong to the program in there; only Ctrl-] is not.
+            self._set_message("Single pane -- Ctrl-] z shows both")
         else:
             # Short enough to sit beside the hidden pane's note on an
             # 80-column hint line without being cut off.
@@ -1309,7 +1322,7 @@ class App:
         location: a local pty for local panes, an interactive channel on the
         pane's existing SSH connection for SFTP/SSH panes.  Every key goes to
         the program; Ctrl-] opens the terminal's menu (Tab: the other pane,
-        q: close, PgUp: scroll back).
+        z: zoom to the full width and back, q: close, PgUp: scroll back).
         """
         from .plugin_api import PluginContext
         from .plugins.terminal import TerminalPlugin
@@ -1323,8 +1336,9 @@ class App:
             panel.plugin = None
             dialogs.message(self.stdscr, "Terminal", str(exc), error=True)
             return
-        self._set_message("Terminal opened -- Ctrl-] then Tab: other pane, "
-                          "q: close, PgUp: scroll back")
+        # 78 characters: the whole hint line of an 80-column screen.
+        self._set_message("Terminal opened -- Ctrl-] then Tab: pane, "
+                          "z: zoom, q: close, PgUp: scroll back")
 
     def _open_terminal(self) -> None:
         """Suspend the TUI and drop the user into a full-screen shell.
@@ -2682,10 +2696,12 @@ class App:
             "                 it out); copy, move, extract and sync name it.\n"
             "                 h, Ctrl-] Tab in the terminal and plug-ins that\n"
             "                 use the other pane show both while they run.\n"
-            "                 z again: two panes\n"
+            "                 z again: two panes.  In the terminal it is\n"
+            "                 Ctrl-] z, and closing the terminal ends it\n"
             "  t              terminal in this pane: every key goes to the\n"
-            "                 program; Ctrl-] then Tab other pane, q close,\n"
-            "                 PgUp scroll back (or the mouse wheel)\n"
+            "                 program; Ctrl-] then Tab other pane, z zoom to\n"
+            "                 the full width and back, q close, PgUp scroll\n"
+            "                 back (or the mouse wheel)\n"
             "  !              full-screen shell: the whole real terminal\n"
             "  p / F11        plug-in mode: run a plug-in in this pane\n"
             "  f              find files: browsable results (view/edit/goto)\n"
@@ -2746,6 +2762,10 @@ class App:
         panel.plugin = None
         if plugin is None:
             return
+        if self._zoomed_by is panel:
+            # Single mode was this plug-in's zoom, and ends with it: the
+            # pane's listing comes back in the two panes it had before.
+            self._toggle_single()
         exit_hook = getattr(plugin, "on_exit", None)
         if exit_hook is not None:
             try:

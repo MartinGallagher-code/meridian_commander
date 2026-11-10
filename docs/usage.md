@@ -637,6 +637,13 @@ line says it is there and where it is (`right pane hidden: sftp://web1:/srv`).
   keyboard to until you come back to it. When it closes, or you return, it is one pane again. A
   terminal, or a plug-in that has no use for the other pane (Processes, SSH
   doctor), has the whole width to itself.
+- **In a terminal, it is `Ctrl-]` then `z`**, because `z` itself goes to the
+  shell. The terminal is zoomed to the full width — all 80 columns of an
+  80-column screen — and the program is told its new size, as when the window
+  is resized, so vim, less and top redraw to fit. `Ctrl-]` `z` again brings
+  both panes back. Closing the terminal ends a zoom made this way and gives
+  the pane's listing back beside the other pane; one that `z` or the menu has
+  since turned off and on again stays.
 
 To start this way every time, set `[ui] panes = 1` in the
 [configuration](configuration.md).
@@ -714,6 +721,7 @@ footer:
 | After `Ctrl-]` | |
 |---|---|
 | `Tab` | switch to the other pane; the shell keeps running, and `Tab` or a click comes back |
+| `z` | zoom: the terminal at the full width ([one pane at a time](#one-pane-at-a-time)), and `z` again for both panes; the program is told its new size |
 | `q` | close the terminal |
 | `PgUp` or `[` | scroll back through what has gone off the top |
 | `Ctrl-]` | send a `Ctrl-]` to the program |
@@ -810,7 +818,7 @@ where it should.)
 | `u` | directory sizes in this pane | `z` | single pane: this one at full width, the other kept |
 | `p` / F11 | plug-in mode (this pane) | `!` | full-screen shell |
 | `f` | find files (browsable results) | | |
-| `C` | configuration menu | `Ctrl-]` | in the terminal: its menu — `Tab` other pane, `q` close, `PgUp` scroll back |
+| `C` | configuration menu | `Ctrl-]` | in the terminal: its menu — `Tab` other pane, `z` zoom, `q` close, `PgUp` scroll back |
 | `Options ▸ Editor` | F4 opens your editor | `Options ▸ Viewer` | F3 opens your pager |
 | `Options ▸ Single pane` | the same as `z`, ticked while on | | |
 
@@ -851,7 +859,8 @@ same smart case and `n`/`N`, `w` cycles the column-width limit, `q` quits. The
 footer shows the cursor's cell reference and its value in full, which is where
 to look when a column is too narrow for what is in it.
 In the **terminal pane** (`t`): every key goes to the program. `Ctrl-]` then
-`Tab` switches to the other pane, `q` closes the terminal, `PgUp` (or `[`)
+`Tab` switches to the other pane, `z` zooms the terminal to the full width and
+back, `q` closes the terminal, `PgUp` (or `[`)
 scrolls back — then `PgUp`/`PgDn`/arrows/`Home` move through the history and
 any other key returns — and `Ctrl-]` sends a `Ctrl-]` to the program. The
 mouse wheel scrolls back too.

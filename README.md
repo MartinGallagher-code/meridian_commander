@@ -58,7 +58,8 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   active pane the whole desktop and keeps the other in reserve, exactly as it
   was: `Tab` flips to it, copy, move, extract and sync name it before using
   it, and `h`, `Ctrl-]` `Tab` from a terminal and plug-ins that work on the
-  other pane bring both back while they run. `[ui] panes = 1` starts that way.
+  other pane bring both back while they run. In a terminal, where `z` goes to
+  the shell, it is `Ctrl-]` `z`. `[ui] panes = 1` starts that way.
 - **Home and mirror shortcuts** — `~` jumps a pane to its own home directory
   (the *remote* account's home on a remote pane), and `=` points the **other
   pane at this pane's directory and connection**, reusing the same live session
@@ -196,9 +197,11 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   terminal emulator: colours, `ls --color`, `git diff`, and full-screen
   programs — **vim, less, man, top, htop** — run in the pane and leave it as it
   was when they exit. Every key goes to the program, F-keys, PgUp/PgDn and
-  Ctrl-/Alt-arrows included; **`Ctrl-]`** opens the terminal's menu: `Tab` switches to the
-  other pane while the shell keeps running (Tab back to return), `q` closes
-  it, `PgUp` scrolls back through what went off the top (so does the mouse
+  Ctrl-/Alt-arrows included; **`Ctrl-]`** opens the terminal's menu: `Tab`
+  switches to the other pane while the shell keeps running (Tab back to
+  return), `z` zooms the terminal to the full width and back (single pane, as
+  `z` is in a file pane; vim, less and top redraw to fit), `q` closes it,
+  `PgUp` scrolls back through what went off the top (so does the mouse
   wheel). Exiting the shell closes it too. `!` still hands a program the
   whole real terminal instead.
 - **Mouse support** — click to select, double-click to open, wheel to scroll,
