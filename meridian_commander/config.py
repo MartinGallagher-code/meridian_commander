@@ -47,6 +47,9 @@ panes = 2
 ; Columns in each pane: short (name, size, time) or long, which adds the
 ; mode and the owner.  Also switchable while running, from Options.
 listing = short
+; Whether F8 on a local pane offers the trash first (yes) or deletes for
+; good (no).  Remote panes and archives have no trash and always ask plainly.
+trash = yes
 
 [plugins]
 ; Extra directories to search for plug-ins, colon-separated.
@@ -286,6 +289,23 @@ def save_listing(long: bool) -> bool:
     if long_listing() == long:
         return True
     return _save_ui("listing", "long" if long else "short")
+
+
+def trash_enabled() -> bool:
+    """Whether ``[ui] trash`` leaves F8 offering the trash on local panes.
+
+    On unless it says ``no``: a mistaken F8 that can be undone is the default
+    worth having, and turning it off has to be asked for.
+    """
+    parser = load()
+    return (parser.get("ui", "trash", fallback="") or "").strip().lower() != "no"
+
+
+def save_trash(on: bool) -> bool:
+    """Remember the trash setting chosen from the Options menu."""
+    if trash_enabled() == on:
+        return True
+    return _save_ui("trash", "yes" if on else "no")
 
 
 def extra_plugin_dirs() -> list[str]:

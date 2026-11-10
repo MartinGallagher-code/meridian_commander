@@ -82,6 +82,7 @@ from .panel import Panel, Search
 from . import usage
 from .peek import PeekPane
 from .quickview import QuickViewPane
+from .trash import TrashUnavailable, move_to_trash
 from .sync import (
     MTIME_TOLERANCE,
     build_sync_plan,
@@ -189,6 +190,7 @@ MENUS: list[dict] = [
             {"label": "Director~y~ sizes", "name": "sizes", "key": "u"},
             {"label": "Single ~p~ane", "name": "single", "key": "z"},
             {"label": "~L~ong listing", "name": "long"},
+            {"label": "~T~rash on delete", "name": "trash"},
             {"sep": True},
             {"label": "~C~olours...", "name": "colours"},
             {"label": "~E~ditor...", "name": "editor"},
@@ -346,6 +348,8 @@ class App:
 
         #: Whether panes show a mode and an owner column (Options).
         self.long_listing = _config.long_listing()
+        #: Whether F8 on a local pane offers the trash first (Options).
+        self.use_trash = _config.trash_enabled()
 
         left_fs = LocalFileSystem()
         right_fs = LocalFileSystem()
@@ -868,6 +872,10 @@ class App:
                 entry["checked"] = self.active.show_hidden
             elif entry.get("name") == "single":
                 entry["checked"] = self.single
+            elif entry.get("name") == "long":
+                entry["checked"] = self.long_listing
+            elif entry.get("name") == "trash":
+                entry["checked"] = self.use_trash
             items.append(entry)
         return items
 
@@ -921,6 +929,7 @@ class App:
             "attributes": self._attributes,
             "link": self._link,
             "long": self._toggle_long,
+            "trash": self._toggle_trash,
             "find": self._find_files,
             "connect": self._open_location,
             "presets": self._presets_menu,
@@ -1414,6 +1423,16 @@ class App:
             return
         panel.refresh(keep_name=name)
         self._set_message(f"{name} -> {target}")
+
+    def _toggle_trash(self) -> None:
+        """Have F8 offer the trash on local panes, or not, and remember it."""
+        from . import config as config_mod
+
+        self.use_trash = not self.use_trash
+        saved = config_mod.save_trash(self.use_trash)
+        self._set_message(("F8 offers the trash" if self.use_trash
+                           else "F8 deletes permanently")
+                          + ("" if saved else "  (could not be saved)"))
 
     def _toggle_long(self) -> None:
         """Show the mode and owner columns, or not, and remember it."""
@@ -2993,7 +3012,19 @@ class App:
         has_dir = any(t.is_dir for t in targets)
         if has_dir:
             text += "\n(directories are removed recursively)"
-        if not dialogs.confirm(self.stdscr, "Delete", text):
+        # The trash is the local disk's: a server or an archive has none, so
+        # there it is said plainly that this is for good.
+        to_trash = (self.use_trash
+                    and getattr(panel.fs, "scheme", "") == "local")
+        if to_trash:
+            choice = dialogs.menu(self.stdscr, "Delete",
+                                  ["Move to trash", "Delete permanently",
+                                   "Cancel"], keys=["t", "p", "c"], text=text)
+            if choice is None or choice == 2:
+                return
+            to_trash = choice == 0
+        elif not dialogs.confirm(self.stdscr, "Delete",
+                                 text + "\nThis cannot be undone."):
             return
 
         # Decide where the cursor goes while the listing is still intact: the
@@ -3005,6 +3036,8 @@ class App:
 
         errors: list[str] = []
         removed: list[str] = []
+        #: Items with no trash on their disk, put to the user afterwards.
+        homeless: list[str] = []
         cancelled = False
         dlg = dialogs.ProgressDialog(self.stdscr, "Delete")
         try:
@@ -3020,7 +3053,13 @@ class App:
                     dlg.update(i, len(targets), entry.name)
                     target = panel.fs.join(panel.path, entry.name)
                     try:
-                        panel.fs.delete_tree(target)
+                        if to_trash:
+                            move_to_trash(target)
+                        else:
+                            panel.fs.delete_tree(target)
+                    except TrashUnavailable:
+                        homeless.append(target)
+                        continue
                     except Exception as exc:
                         errors.append(f"{entry.name}: {exc}")
                         continue
@@ -3032,6 +3071,20 @@ class App:
         finally:
             dlg.close()
 
+        trashed = len(removed)
+        if homeless and dialogs.menu(
+                self.stdscr, "Delete", ["Delete permanently", "Skip them"],
+                keys=["p", "s"],
+                text=f"{len(homeless)} item(s) have no trash on their disk:\n"
+                     + "\n".join(os.path.basename(h) for h in homeless[:6])) == 0:
+            for target in homeless:
+                try:
+                    panel.fs.delete_tree(target)
+                except Exception as exc:
+                    errors.append(f"{panel.fs.basename(target)}: {exc}")
+                    continue
+                removed.append(target)
+
         panel.clear_selection()
         self._reload_after_change(panel, keep_name=keep, gone=tuple(removed))
         if errors:
@@ -3042,6 +3095,10 @@ class App:
             # two of ten used to be reported as ten deleted.
             self._set_message(
                 f"Delete cancelled -- {len(removed)} of {len(targets)} removed")
+        elif to_trash:
+            deleted = len(removed) - trashed
+            self._set_message(f"Moved {trashed} item(s) to the trash"
+                              + (f", deleted {deleted}" if deleted else ""))
         else:
             self._set_message(f"Deleted {len(removed)} item(s)")
 
@@ -3196,6 +3253,7 @@ class App:
             "  Ctrl-Q         quick view: the other pane shows the cursor's file\n"
             "  Ctrl-T         sort: name, natural (run_2 < run_10), ext, size, time\n"
             "  l              link in the other pane; on a link, change its target\n"
+            "  F8             on a local pane: to the trash, or delete for good\n"
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
             "  Ctrl-G         go to path   Ctrl-T  sort order\n"
             "  Esc            the menu bar (Alt+F, Alt+C, Alt+O, Alt+H\n"

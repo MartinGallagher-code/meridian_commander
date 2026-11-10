@@ -35,6 +35,20 @@ Only `1` does this; anything else, blank included, is two panes. `z` and
 **Options ▸ Single pane** change it for the session and do not write the file,
 the way the hidden-files toggle does not.
 
+## `[ui] trash` — whether F8 offers the trash
+
+`yes`, the default, has `F8` on a local pane offer **Move to trash** first;
+`no` has it delete permanently, as it did before the trash existed:
+
+```ini
+[ui]
+trash = no
+```
+
+**Options ▸ Trash on delete** switches it and writes the file. Remote panes and
+archives have no trash either way. See
+[Deleting to the trash](usage.md#deleting-to-the-trash).
+
 ## `[ui] listing` — the mode and owner columns
 
 `short`, the default, lists each entry's name, size and time. `long` adds its

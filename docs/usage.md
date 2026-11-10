@@ -1055,6 +1055,28 @@ back, at the place it was showing.
 
 `h` is its smaller sibling: head and tail of the file, in the pane you are in.
 
+### Deleting to the trash
+
+On a local pane **`F8`** asks **Move to trash**, **Delete permanently** or
+**Cancel**. The trash is the desktop's own, so its window lists what went in
+and can restore it:
+
+- **Linux and the BSDs** follow the FreeDesktop.org specification: the trash in
+  your home for anything on the same disk; on another disk, that disk's
+  `.Trash/<uid>` when it has a proper shared one, or `.Trash-<uid>` at its top
+  — a move to another disk would be a copy and a delete, which is what a trash
+  is not. Each item gets an info file with where it came from and when, and a
+  name already in the trash is never written over.
+- **macOS** uses `~/.Trash`. Finder's **Put Back** reads metadata only Finder
+  writes, so an item trashed here can be dragged back but not put back.
+- **An item on a disk with no usable trash** is not deleted behind your back:
+  you are asked whether to delete it permanently or skip it.
+- **Remote panes and archives** have no trash: `F8` there asks the plain
+  question, and says that it cannot be undone.
+
+**Options ▸ Trash on delete** turns this off, so `F8` deletes permanently as it
+used to; it is remembered as `[ui] trash` (see [Configuration](configuration.md)).
+
 ## Key bindings
 
 Keys are read decoded, so anywhere text is typed — the editor, a rename or
@@ -1079,7 +1101,7 @@ where it should.)
 | `F` | filter: show only the names matching a pattern (see above) | | |
 | `D` | compare both panes' files | `h` | head + tail of the other pane's file, in this pane |
 | `Ctrl-Q` | quick view: the other pane shows the cursor's file (see below) | | |
-| `+` / `\` | tag / untag the names matching a pattern | `F8` | delete |
+| `+` / `\` | tag / untag the names matching a pattern | `F8` | delete: to the trash on a local pane, or permanently (see below) |
 | `-` / `*` | untag all / invert the tags | | |
 | `Ctrl-U` | swap panes | `F9` | synchronize panes |
 | `Ctrl-R` | reload panes | `F10` | quit |
