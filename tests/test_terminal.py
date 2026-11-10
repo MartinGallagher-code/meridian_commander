@@ -1584,3 +1584,36 @@ def test_the_help_and_the_opening_hint_say_how_to_zoom(app, monkeypatch):
         assert len(app.message) <= 78     # the hint line of 80 columns
     finally:
         app._close_plugin(app.left)
+
+
+def test_the_mouse_while_zoomed_reaches_only_the_terminal(app, tmp_path,
+                                                          monkeypatch):
+    # Mouse reports reach the app from the terminal now.  Zoomed, the pane
+    # out of sight has no rectangle on screen, so a click where it used to
+    # be lands on the terminal, and the wheel there scrolls the terminal.
+    channel = _FakeChannel()
+    monkeypatch.setattr(curses, "BUTTON4_PRESSED", _WHEEL_UP, raising=False)
+    monkeypatch.setattr(curses, "BUTTON5_PRESSED", _WHEEL_DOWN, raising=False)
+
+    def script(real):
+        plugin = real.left.plugin = TerminalPlugin(_remote_ctx(real, channel))
+        channel.sent = b""                    # the opening cd
+        _zoom(real)
+        real.draw()
+        _history(plugin, 200)
+
+        def report(mx, my, bstate):
+            monkeypatch.setattr(curses, "getmouse",
+                                lambda: (0, mx, my, 0, bstate))
+            real.handle_key(curses.KEY_MOUSE)
+
+        report(60, 5, _WHEEL_UP)              # over the right half
+        scrolled = plugin.scroll
+        report(60, 5, curses.BUTTON1_CLICKED)  # where the right pane was
+        result = (scrolled, real.active is real.left, real.single,
+                  real.right.cursor)
+        real._close_plugin(real.left)
+        return result
+
+    assert _real_app(tmp_path, script) == (3, True, True, 0)
+    assert channel.sent == b""
