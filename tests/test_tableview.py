@@ -766,3 +766,439 @@ def test_the_table_closes_on_every_quit_key(monkeypatch, fruit):
 def test_an_unhandled_key_is_simply_ignored(monkeypatch, fruit):
     _run(monkeypatch, fruit, [ord("z"), curses.KEY_RESIZE, "ā", ord("q")])
     assert (fruit.row, fruit.col) == (0, 0)
+
+
+# -- frozen columns ----------------------------------------------------------------
+def _rules(drawn, x):
+    """The rows on which the frozen columns' rule is drawn at ``x``."""
+    return sorted(a[0] for a in drawn
+                  if a[1] == x and a[2] == theme.glyph("v1"))
+
+
+def test_F_freezes_the_columns_up_to_the_cursors(monkeypatch, fs, tmp_path):
+    view = wide(fs, tmp_path)
+    window = _run(monkeypatch, view, [ord("l"), ord("F"), ord("q")], cols=40)
+    assert view.frozen == 2 and "frozen up to h1; F again unfreezes" \
+        in window.text
+    assert view.pinned() == [0, 1]
+
+
+def test_panning_right_keeps_the_frozen_columns_at_the_left(monkeypatch, fs, tmp_path):
+    view = wide(fs, tmp_path)
+    window = _run(monkeypatch, view, [ord("F"), curses.KEY_END, ord("q")],
+                  cols=40)
+    placed = view.layout(36)
+    assert placed[0] == (0, 0, 5) and view.left > 1
+    assert [c for c, _x, _w in placed] == [0, 8, 9, 10, 11]
+    headers = [a[2] for a in window.drawn if a[0] == 1]
+    assert any("h0" in text for text in headers[-6:])
+    assert any("h11" in text for text in headers[-6:])
+
+
+def test_a_rule_marks_where_the_frozen_columns_end(fruit):
+    fruit.toggle_freeze()                    # the cursor is on "fruit"
+    gutter = fruit.gutter()
+    # The fruit column is six wide; the rule takes the gap after it, on the
+    # header and on every row drawn, and the columns after it keep their
+    # places.
+    assert _rules(_draw(fruit), gutter + 6) == [1, 2, 3, 4, 5]
+    assert [x for _c, x, _w in fruit.layout(56)] == [0, 7, 14]
+    fruit.toggle_freeze()
+    assert _rules(_draw(fruit), gutter + 6) == []
+
+
+def test_F_again_unfreezes(monkeypatch, fs, tmp_path):
+    view = wide(fs, tmp_path)
+    _run(monkeypatch, view, [ord("F"), ord("q")])
+    window = _run(monkeypatch, view, [ord("F"), ord("q")])
+    assert view.frozen == 0 and "columns unfrozen" in window.text
+    assert view.pinned() == []
+
+
+def test_moving_into_the_frozen_columns_leaves_the_rest_where_they_are(monkeypatch, fs, tmp_path):
+    view = wide(fs, tmp_path)
+    _run(monkeypatch, view, [ord("F"), curses.KEY_END, ord("q")], cols=40)
+    left = view.left
+    _run(monkeypatch, view, [curses.KEY_HOME, ord("q")], cols=40)
+    assert view.col == 0 and view.left == left
+    # One step right is the first column after the frozen ones, which pans
+    # back into view.
+    _run(monkeypatch, view, [ord("l"), ord("q")], cols=40)
+    assert view.col == 1 and view.left == 1
+
+
+def test_freezing_more_than_two_thirds_of_the_screen_is_refused(monkeypatch, fs, tmp_path):
+    view = wide(fs, tmp_path)
+    view.col = 5
+    window = _run(monkeypatch, view, [ord("F"), ord("q")], cols=40)
+    assert view.frozen == 0 and "too wide to freeze here" in window.text
+    # Four columns of five, and their gaps, take 23 of the 24 allowed.
+    view.col = 3
+    _run(monkeypatch, view, [ord("F"), ord("q")], cols=40)
+    assert view.frozen == 4
+
+
+def test_a_table_not_yet_drawn_freezes_without_a_limit(fs, tmp_path):
+    view = wide(fs, tmp_path)
+    view.col = 11
+    view.toggle_freeze()
+    assert view.avail is None and view.frozen == 12
+
+
+def test_frozen_columns_that_no_longer_fit_give_way(fs, tmp_path):
+    # As after the screen shrinks: the frozen columns are left out once they
+    # pass two-thirds of the room, and the first is cut rather than lost.
+    view = wide(fs, tmp_path)
+    view.frozen = 6
+    assert [c for c, _x, _w in view.layout(36)] == [0, 1, 2, 3, 6, 7]
+    long = make(fs, tmp_path, "name\tn\n" + "x" * 40 + "\t1\n", "long.tsv")
+    long.frozen = 1
+    assert long.layout(16) == [(0, 0, 11), (1, 12, 3)]
+    # With no room for them at all, the table draws as if unfrozen.
+    assert long.layout(4) == [(1, 0, 3)]
+
+
+def test_freezing_an_empty_file_says_there_is_nothing_to_freeze(fs, tmp_path):
+    view = make(fs, tmp_path, "")
+    view.toggle_freeze()
+    assert view.frozen == 0 and "no column to freeze" in view.notice
+
+
+def test_a_hidden_column_is_not_drawn_among_the_frozen(fruit):
+    fruit.col = 1
+    fruit.toggle_freeze()
+    fruit.hidden.add(0)
+    assert fruit.pinned() == [1]
+    assert [c for c, _x, _w in fruit.layout(56)] == [1, 2]
+
+
+@pytest.mark.parametrize("rows, cols", [(1, 20), (3, 8), (4, 4), (12, 9)])
+def test_frozen_columns_survive_a_screen_with_no_room(fs, tmp_path, rows, cols):
+    view = wide(fs, tmp_path)
+    view.col = 2
+    view.toggle_freeze()
+    view.col = 11
+    _draw(view, rows=rows, cols=cols)
+
+
+# -- hidden columns ----------------------------------------------------------------
+def _headers(view, **size):
+    return [a[2].strip() for a in _draw(view, **size)
+            if a[0] == 1 and a[1] > 0 and a[2].strip()]
+
+
+def test_minus_hides_the_cursors_column(monkeypatch, fruit):
+    fruit.col = 1
+    window = _run(monkeypatch, fruit, [ord("-"), ord("q")])
+    assert fruit.hidden == {1} and fruit.col == 2
+    assert "price hidden; + shows it again" in window.text
+    assert _headers(fruit) == ["fruit", "city"]
+    assert "3 columns (1 hidden), tab" in _text(fruit)
+
+
+def test_hiding_the_last_column_moves_the_cursor_back(fruit):
+    fruit.col = 2
+    fruit.hide_column()
+    assert fruit.hidden == {2} and fruit.col == 1
+
+
+def test_the_last_column_shown_cannot_be_hidden(monkeypatch, fs, tmp_path, fruit):
+    window = _run(monkeypatch, fruit, [ord("-"), ord("-"), ord("-"), ord("q")])
+    assert fruit.hidden == {0, 1} and fruit.col == 2
+    assert "the last column shown cannot be hidden" in window.text
+    empty = make(fs, tmp_path, "", "empty.tsv")
+    empty.hide_column()
+    assert empty.hidden == set() and "cannot be hidden" in empty.notice
+
+
+def test_movement_skips_hidden_columns(monkeypatch, fs, tmp_path):
+    view = make(fs, tmp_path, "a\tb\tc\td\n1\t2\t3\t4\n")
+    view.hidden = {0, 2, 3}
+    view.col = 1
+    _run(monkeypatch, view, [curses.KEY_RIGHT, curses.KEY_LEFT, ord("q")])
+    assert view.col == 1                 # nowhere to go either way
+    view.hidden = {1}
+    view.col = 0
+    _run(monkeypatch, view, [ord("l"), ord("q")])
+    assert view.col == 2
+    _run(monkeypatch, view, [ord("h"), ord("q")])
+    assert view.col == 0
+    view.hidden = {0, 3}
+    _run(monkeypatch, view, [curses.KEY_END, ord("q")])
+    assert view.col == 2
+    _run(monkeypatch, view, [curses.KEY_HOME, ord("q")])
+    assert view.col == 1
+
+
+def test_search_skips_hidden_columns(fruit):
+    fruit.hidden = {2}                    # city
+    fruit.set_search("oslo")
+    assert fruit.find_next(1) is False
+    fruit.set_search("p")
+    # "pear" on the second row, not "Paris" on the first: the city column
+    # is hidden, so the next match in reading order is in the fruit column.
+    assert fruit.find_next(1) is True and (fruit.row, fruit.col) == (1, 0)
+    fruit.set_search("a")
+    # Backwards from "pear", "Paris" and then (wrapping round) "Lima" would
+    # be found first; with the city column hidden it is "apple", then "pear".
+    assert fruit.find_next(-1) is True and (fruit.row, fruit.col) == (0, 0)
+    assert fruit.find_next(-1) is True and (fruit.row, fruit.col) == (1, 0)
+
+
+def test_the_record_leaves_hidden_columns_out_and_says_so(fruit):
+    fruit.hidden = {1}
+    _start, lines = fruit.record_lines(60)
+    assert [(n.strip(), v) for n, v, _r in lines] == [
+        ("fruit :", "apple"), ("city :", "Paris"),
+        ("", "(hidden: price; + shows them)")]
+    assert lines[-1][2] == "editdim"
+    assert "Row 1 (1 of 4 shown) -- 1 column hidden -- fruit.tsv" \
+        in _text_record(fruit)
+
+
+def test_a_record_whose_fields_are_all_hidden_still_says_so(fs, tmp_path):
+    # Row one has a single field, which is hidden; the other columns come
+    # from a longer row further down, so this one has none to list.
+    view = make(fs, tmp_path, "a\n1\n1\t2\t3\n")
+    view.hidden = {0}
+    view.col = 1
+    _start, lines = view.record_lines(60)
+    assert [v for _n, v, _r in lines] == ["(hidden: a; + shows them)"]
+
+
+def test_plus_shows_every_hidden_column_again(monkeypatch, fruit):
+    fruit.hidden = {0, 2}
+    fruit.col = 1
+    window = _run(monkeypatch, fruit, [ord("+"), ord("q")])
+    assert fruit.hidden == set() and "2 hidden columns shown again" \
+        in window.text
+    window = _run(monkeypatch, fruit, [ord("+"), ord("q")])
+    assert "no columns are hidden" in window.text
+
+
+def test_filters_and_sorting_still_see_hidden_columns(fruit):
+    fruit.add_filter("city = paris")
+    fruit.col = 1
+    fruit.sort_by_cursor()
+    fruit.col = 2
+    fruit.hide_column()
+    assert _shown(fruit) == ["fig", "apple"]
+    assert "2 of 4 rows: city = paris" in _text(fruit)
+
+
+# -- the column summary --------------------------------------------------------------
+def _summary(view, rows=30, cols=60):
+    """What the summary screen draws, line by line from the top; a line
+    with nothing drawn on it is blank."""
+    drawn: dict[int, list[str]] = {}
+    for a in _draw(view, rows=rows, cols=cols):
+        if len(a) > 2 and isinstance(a[2], str):
+            drawn.setdefault(a[0], []).append(a[2])
+    return ["".join(drawn.get(y, [])).rstrip() for y in range(rows)]
+
+
+def test_i_summarises_the_cursors_column(monkeypatch, fruit):
+    fruit.col = 1                                       # price
+    _run(monkeypatch, fruit, [ord("i")])                # ... then Escape
+    assert fruit.summary is None                        # Escape closed it
+    fruit.open_summary()
+    lines = _summary(fruit, rows=30)
+    assert lines[0] == " Column: price -- numbers -- 4 rows -- fruit.tsv"
+    # Over 3, 10.5 and 0.25, with the plum's blank price counted as empty.
+    assert lines[1:9] == [
+        " Holds     numbers", " Rows      4", " Empty     1",
+        " Distinct  3 values", " Minimum   0.25", " Maximum   10.5",
+        " Mean      4.583333333", " Median    3"]
+    assert lines[10].startswith(" Most frequent: Enter keeps")
+    assert lines[11:14] == ["  1  3", "  1  10.5", "  1  0.25"]
+    assert lines[15] == " Histogram"
+    assert lines[29].startswith(" Up/Down value  Enter/= keep its rows")
+
+
+def test_the_histogram_scales_its_bars_to_the_screen(fruit):
+    fruit.col = 1
+    fruit.open_summary()
+    bars = [text for text, _role in fruit.summary_lines(fruit.summary, 60)
+            if theme.glyph("block") in text or text.rstrip().endswith(" 0")]
+    block = theme.glyph("block")
+    # Ten equal ranges from 0.25 to 10.5: 0.25 in the first, 3 in the
+    # third, 10.5 in the last; the fullest fills the room there is.
+    assert [text.count(block) for text in bars] == [48, 0, 48, 0, 0, 0, 0,
+                                                    0, 0, 48]
+    assert bars[0].startswith("   0.25  ") and bars[0].rstrip().endswith(" 1")
+    assert all(display_width(text) == 60 for text in bars)
+
+
+def test_a_short_bar_is_never_drawn_as_none(fs, tmp_path):
+    view = make(fs, tmp_path, "n\n" + "1\n" * 200 + "2\n")
+    view.open_summary()
+    lines = view.summary_lines(view.summary, 40)
+    counts = [text.count(theme.glyph("block")) for text, _r in lines[-10:]]
+    assert counts[0] > 1 and counts[-1] == 1
+    # A screen too narrow for any bar still lists the ranges and counts.
+    assert view.summary_lines(view.summary, 12)[-1][0].rstrip() == \
+        "  1.9     1"
+
+
+def test_a_text_column_has_no_statistics_or_histogram(fruit):
+    fruit.col = 2
+    fruit.open_summary()
+    lines = _summary(fruit, rows=30)
+    assert " Holds     text" in lines and " Distinct  3 values" in lines
+    assert not any(line.startswith((" Mean", " Histogram")) for line in lines)
+    assert lines[7:10] == ["  2  Paris", "  1  Oslo", "  1  Lima"]
+
+
+def test_the_summary_is_over_the_rows_the_filters_keep(fruit):
+    fruit.add_filter("city = paris")
+    fruit.col = 1
+    fruit.open_summary()
+    lines = _summary(fruit, cols=80)
+    assert lines[0] == (" Column: price -- numbers -- 2 of 4 rows, "
+                        "filtered -- fruit.tsv")
+    assert " Rows      2 of 4, the rows the filters keep" in lines
+    assert " Mean      1.625" in lines
+
+
+def test_the_summary_follows_the_file_order_whatever_the_sort(fruit):
+    fruit.col = 2
+    fruit.sort_by_cursor()
+    fruit.sort_by_cursor()                  # Paris, Paris, Oslo, Lima
+    fruit.col = 0
+    fruit.open_summary()
+    assert [value for value, _n in fruit.summary.top] == [
+        "apple", "pear", "fig", "plum"]
+
+
+def test_a_column_with_many_values_says_how_many_are_listed(fs, tmp_path):
+    view = make(fs, tmp_path, "n\n" + "".join(f"v{i}\n" for i in range(25)))
+    view.open_summary()
+    assert any(line.startswith(" Most frequent (10 of 25): ")
+               for line in _summary(view, rows=30))
+
+
+def test_a_blank_column_says_there_is_nothing_to_pick(monkeypatch, fs, tmp_path):
+    view = make(fs, tmp_path, "a\tb\n1\t\n2\t\n")
+    view.col = 1
+    view.open_summary()
+    lines = _summary(view, rows=30)
+    assert " Holds     nothing: every cell is blank" in lines
+    assert "  (none: every cell in these rows is blank)" in lines
+    view.summary = None
+    window = _run(monkeypatch, view, [ord("i"), 10, ord("q"), ord("q")])
+    assert "no value to filter on" in window.text and view.view.filters == []
+
+
+def test_a_value_with_spaces_or_a_tab_is_shown_so(fs, tmp_path):
+    view = make(fs, tmp_path, 'a\n" fig "\nx\ty\n', "x.csv")
+    view.open_summary()
+    texts = [text.rstrip() for text, _r in view.summary_lines(view.summary, 40)]
+    assert '  1  " fig "' in texts
+
+
+def test_enter_on_a_value_keeps_its_rows(monkeypatch, fruit):
+    fruit.col = 2
+    window = _run(monkeypatch, fruit, [ord("i"), curses.KEY_DOWN, 10, ord("q")],
+                  rows=30)
+    assert fruit.summary is None
+    assert [f.text for f in fruit.view.filters] == ["city = Oslo"]
+    assert _shown(fruit) == ["pear"]
+    assert "1 of 4 rows: city = Oslo" in window.text
+
+
+def test_equals_keeps_and_bang_hides_the_picked_values_rows(monkeypatch, fruit):
+    fruit.col = 2
+    _run(monkeypatch, fruit, [ord("i"), ord("="), ord("q")])
+    assert _shown(fruit) == ["apple", "fig"]
+    fruit.clear_filters()
+    _run(monkeypatch, fruit, [ord("i"), ord("j"), ord("j"), ord("!"), ord("q")])
+    assert [f.text for f in fruit.view.filters] == ["city != Lima"]
+    assert _shown(fruit) == ["apple", "pear", "fig"]
+
+
+def test_the_pick_stays_among_the_values(monkeypatch, fruit):
+    fruit.col = 2
+    _run(monkeypatch, fruit, [ord("i"), ord("k"), curses.KEY_UP, ord("q"),
+                              ord("q")])
+    assert fruit.summary_pick == 0
+    _run(monkeypatch, fruit, [ord("i")] + [ord("j")] * 5 + [ord("q"), ord("q")])
+    assert fruit.summary_pick == 2
+
+
+def test_the_picked_value_is_kept_on_a_short_screen(monkeypatch, fruit):
+    fruit.col = 1
+    # Ten lines of room: the eight statistics, a blank and the heading fill
+    # them, so stepping down scrolls the values into view; stepping back up
+    # leaves them there.
+    window = _run(monkeypatch, fruit, [ord("i"), ord("j"), ord("j"), ord("k"),
+                                       ord("q"), ord("q")], rows=12)
+    assert fruit.summary_pick == 1 and fruit.summary_top == 3
+    # The last frame drawn before q: the picked value on screen, as the
+    # cursor, on the row its line scrolled to.
+    picked = [a for a in window.drawn
+              if len(a) > 3 and a[3] == theme.attr("panelcursor")
+              and "1  10.5" in a[2]]
+    assert picked and picked[-1][0] == 12 - 3 + 1 - 1
+
+
+def test_the_summary_scrolls(monkeypatch, fruit):
+    fruit.col = 1                                    # 25 lines, 10 on screen
+    _run(monkeypatch, fruit, [ord("i"), curses.KEY_NPAGE, ord("q"), ord("q")])
+    assert fruit.summary_top == 10
+    _run(monkeypatch, fruit, [ord("i"), ord(" "), ord(" "), ord("q"),
+                              ord("q")])
+    assert fruit.summary_top == 15                   # clamped at the end
+    _run(monkeypatch, fruit, [ord("i"), curses.KEY_END, curses.KEY_PPAGE,
+                              ord("q"), ord("q")])
+    assert fruit.summary_top == 5
+    _run(monkeypatch, fruit, [ord("i"), curses.KEY_END, curses.KEY_HOME,
+                              ord("q"), ord("q")])
+    assert fruit.summary_top == 0
+
+
+def test_left_and_right_summarise_the_neighbouring_columns(monkeypatch, fs, tmp_path):
+    view = make(fs, tmp_path, "a\tb\tc\n1\tx\t3\n")
+    view.hidden = {1}
+    _run(monkeypatch, view, [ord("i"), curses.KEY_RIGHT, ord("q"), ord("q")])
+    assert view.col == 2
+    window = _run(monkeypatch, view, [ord("i"), ord("l"), ord("q"), ord("q")])
+    assert view.col == 2 and "this is the last column shown" in window.text
+    _run(monkeypatch, view, [ord("i"), curses.KEY_LEFT, ord("q"), ord("q")])
+    assert view.col == 0
+    window = _run(monkeypatch, view, [ord("i"), ord("h"), ord("q"), ord("q")])
+    assert "this is the first column shown" in window.text
+
+
+@pytest.mark.parametrize("key", [ord("q"), ord("Q"), 27, curses.KEY_F3,
+                                 curses.KEY_F10, ord("i")])
+def test_every_way_out_of_the_summary_returns_to_the_table(monkeypatch, fruit, key):
+    # The summary closes, and the next key quits the table itself.
+    _run(monkeypatch, fruit, [ord("i"), key, ord("q")])
+    assert fruit.summary is None and fruit.view.filters == []
+
+
+def test_a_key_the_summary_does_not_know_is_ignored(monkeypatch, fruit):
+    _run(monkeypatch, fruit, [ord("i"), ord("z"), curses.KEY_RESIZE, ord("q")])
+    assert fruit.view.filters == []
+
+
+def test_there_is_no_summary_of_no_rows(monkeypatch, fs, tmp_path, fruit):
+    fruit.add_filter("nothing-matches-this")
+    window = _run(monkeypatch, fruit, [ord("i"), ord("q")])
+    assert fruit.summary is None and "no rows to summarise" in window.text
+    empty = make(fs, tmp_path, "", "empty.tsv")
+    empty.open_summary()
+    assert empty.summary is None
+
+
+@pytest.mark.parametrize("rows, cols", [(1, 20), (2, 20), (3, 4), (4, 1),
+                                        (30, 10)])
+def test_the_summary_survives_a_tiny_screen(fruit, rows, cols):
+    fruit.col = 1
+    fruit.open_summary()
+    _draw(fruit, rows=rows, cols=cols)
+
+
+def test_the_footer_names_the_new_keys(fruit):
+    text = _text(fruit, cols=200)
+    assert "[i] summary  [F]reeze  -/+ hide/show" in text

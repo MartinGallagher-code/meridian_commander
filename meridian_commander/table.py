@@ -4,9 +4,9 @@
 
 This is the model behind :mod:`meridian_commander.tableview`: reading a file
 into records, bounded, and the view layer over them -- which rows a stack of
-filters keeps, the order a stack of sort keys puts them in, and the display
-widths that line the columns up.  Nothing here draws, so all of it is tested
-without a screen.
+filters keeps, the order a stack of sort keys puts them in, the display
+widths that line the columns up, and the summary of one column.  Nothing
+here draws, so all of it is tested without a screen.
 
 There are two ways of reading, and the file's name chooses between them:
 
@@ -28,9 +28,12 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 import re
+import statistics
+from collections import Counter
 from dataclasses import dataclass, field
-from typing import Iterable, Sequence
+from typing import Iterable, NamedTuple, Sequence
 
 from .sheetview import looks_numeric
 from .vt import char_width
@@ -408,7 +411,7 @@ def _unquote(value: str) -> str:
     return value
 
 
-def _shown(value: str) -> str:
+def shown_value(value: str) -> str:
     """A value as the title shows it: quoted if its spaces would be lost."""
     return value if value and value == value.strip() else f'"{value}"'
 
@@ -433,13 +436,14 @@ def parse_filter(expression: str, labels: Sequence[str]) -> Filter:
         raise ValueError(f"no column called '{name}'")
     op = found.group()
     value = _unquote(expression[found.end():].strip())
-    return Filter(f"{labels[column]} {op} {_shown(value)}", column, op, value)
+    return Filter(f"{labels[column]} {op} {shown_value(value)}", column, op,
+                  value)
 
 
 def quick_filter(label: str, column: int, value: str, keep: bool) -> Filter:
     """Keep (or hide) the rows whose ``column`` holds exactly ``value``."""
     op = "=" if keep else "!="
-    return Filter(f"{label} {op} {_shown(value)}", column, op, value,
+    return Filter(f"{label} {op} {shown_value(value)}", column, op, value,
                   exact=True)
 
 
@@ -514,3 +518,126 @@ class View:
             if key.column == column:
                 return key.descending
         return None
+
+
+# -- column summaries ------------------------------------------------------------
+#: How many of a column's most frequent values its summary lists.
+TOP_VALUES = 10
+#: How many equal ranges a summary's histogram divides a column of numbers into.
+HISTOGRAM_BUCKETS = 10
+# An ISO 8601 date, with or without a time of day: the one way of writing a
+# date that can be recognised without guessing which of day and month is first.
+_DATE = re.compile(r"\d{4}-\d{2}-\d{2}"
+                   r"(?:[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?"
+                   r"(?:Z|[+-]\d{2}:?\d{2})?)?")
+
+
+def column_kind(values: Iterable[str]) -> str:
+    """What a column holds: ``"number"``, ``"date"``, ``"text"`` or ``"empty"``.
+
+    Blank cells are passed over, and a column of nothing else is empty.  A
+    number is what the grid right-aligns and sorts as one
+    (:func:`is_numeric`), so a summary never calls a column numeric that the
+    sort treats as text.
+    """
+    filled = [value.strip() for value in values if value.strip()]
+    if not filled:
+        return "empty"
+    if all(looks_numeric(value) for value in filled):
+        return "number"
+    if all(_DATE.fullmatch(value) for value in filled):
+        return "date"
+    return "text"
+
+
+def format_number(value: float) -> str:
+    """A statistic as a summary shows it.
+
+    A whole number has no point (``3``, not ``3.0``), and is written out in
+    full up to fifteen digits, so a large count or an id reads as it does in
+    the cell; anything else is given to ten significant figures.
+    """
+    if value.is_integer() and abs(value) < 1e15:
+        return str(int(value))
+    return f"{value:.10g}"
+
+
+def bucket_counts(numbers: Sequence[float],
+                  buckets: int = HISTOGRAM_BUCKETS) -> list[tuple[float, int]]:
+    """How many of ``numbers`` fall in each of ``buckets`` equal ranges.
+
+    The ranges run from the least to the most, and each is given as its lower
+    edge and its count; the most goes in the last range rather than one of
+    its own.  Numbers that are all the same make one range.  No numbers make
+    none, and so does a spread too wide for a float to hold, which a
+    histogram could not draw anyway.
+    """
+    if not numbers:
+        return []
+    low, high = min(numbers), max(numbers)
+    span = high - low
+    if not math.isfinite(span):
+        return []
+    if span == 0:
+        return [(low, len(numbers))]
+    counts = [0] * buckets
+    for value in numbers:
+        counts[min(int((value - low) / span * buckets), buckets - 1)] += 1
+    return [(low + span * index / buckets, count)
+            for index, count in enumerate(counts)]
+
+
+class Statistics(NamedTuple):
+    """The smallest, largest, average and middle of a column of numbers."""
+
+    minimum: float
+    maximum: float
+    mean: float
+    median: float
+
+
+@dataclass
+class Summary:
+    """What one column holds, over the rows it was taken from.
+
+    ``top`` is the most frequent values, each with how many rows hold it,
+    most first and ties in the order the rows came.  ``numbers`` and the
+    histogram are given for a column of numbers only.
+    """
+
+    kind: str
+    count: int                  # the rows looked at
+    empty: int                  # how many of them are blank in this column
+    distinct: int               # how many different values the rest hold
+    top: list[tuple[str, int]]
+    numbers: Statistics | None = None
+    #: The histogram: each range's lower edge, and how many numbers are in it.
+    buckets: list[tuple[float, int]] = field(default_factory=list)
+
+
+def summarise(values: Sequence[str], top: int = TOP_VALUES) -> Summary:
+    """A :class:`Summary` of one column's ``values``, in the rows' order.
+
+    Values are counted exactly as written -- ``Paris`` and ``paris`` are two
+    -- since picking one from the list keeps the rows holding exactly that.
+    """
+    filled = [value for value in values if value.strip()]
+    counts = Counter(filled)
+    kind = column_kind(filled)
+    summary = Summary(kind, len(values), len(values) - len(filled),
+                      len(counts), counts.most_common(top))
+    if kind != "number":
+        return summary
+    # A cell can say "-nan" and still look like a number; it is no value
+    # that a smallest, a middle or an average could be taken of.
+    numbers = sorted(number for number in map(float, filled)
+                     if not math.isnan(number))
+    if numbers:
+        # sum rather than math.fsum: fsum raises on inf + -inf and on an
+        # overflow, where an average of "inf" or "nan" is the honest answer.
+        summary.numbers = Statistics(numbers[0], numbers[-1],
+                                     sum(numbers) / len(numbers),
+                                     statistics.median(numbers))
+        summary.buckets = bucket_counts(
+            [number for number in numbers if math.isfinite(number)])
+    return summary

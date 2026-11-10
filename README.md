@@ -159,7 +159,12 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   filters — a word anywhere, or `column op value` with `= != < > <= >= ~ !~`,
   numbers compared as numbers — and filters stack; `=`/`!` on a cell keep or
   hide the rows holding that value. `s` sorts by the cursor's column, `Enter`
-  shows a row as a record, one field per line. TSV is split on tabs with no
+  shows a row as a record, one field per line. For a wide file, `F` freezes
+  the columns up to the cursor's at the left while the rest pan past, `-`/`+`
+  hide a column and bring them all back, and `i` summarises a column over the
+  rows shown — its type, empty and distinct counts, minimum, maximum, mean,
+  median and a histogram for numbers, and its most frequent values, which
+  `Enter` turns into a filter. TSV is split on tabs with no
   quoting; CSV goes through the `csv` module. `#` comment lines at the top
   (the run notes the suite's tools write) are set aside rather than read as
   the header, and `#` shows them. Rows with the wrong number of fields are

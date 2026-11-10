@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Martin J. Gallagher
-"""The table model: reading TSV and CSV, display widths, filters and sorting.
+"""The table model: reading TSV and CSV, display widths, filters, sorting
+and column summaries.
 
 Fixtures stay neutral -- fruit, cities and numbers -- rather than copies of
 real results files.
@@ -17,13 +18,17 @@ from meridian_commander.filesystems import LocalFileSystem
 from meridian_commander.table import (
     Filter,
     SortKey,
+    Statistics,
     Table,
     View,
+    bucket_counts,
     clean,
+    column_kind,
     decimals,
     display_width,
     find_column,
     fit,
+    format_number,
     is_numeric,
     is_table,
     number,
@@ -32,9 +37,11 @@ from meridian_commander.table import (
     quick_filter,
     read_bytes,
     read_table,
+    shown_value,
     sniff_delimiter,
     sort_rows,
     split_preamble,
+    summarise,
     wrap,
 )
 
@@ -588,3 +595,121 @@ def test_reading_and_parsing_agree_on_a_whole_file(fs, tmp_path):
     write(str(tmp_path / "towns.tsv"), text.getvalue())
     read = read_table(fs, str(tmp_path / "towns.tsv"))
     assert len(read.records) == 51 and read.records[50] == ["town49", "490"]
+
+
+# -- column summaries -------------------------------------------------------------
+@pytest.mark.parametrize("values, kind", [
+    (["3", " 10.5 ", "-0.25", "1e3", ""], "number"),
+    (["2026-11-10", "2026-11-10T18:40:25Z", "2026-11-10 18:40",
+      "2026-11-10T18:40:25.5+01:00", ""], "date"),
+    (["apple", "3"], "text"),
+    (["10/11/2026"], "text"),          # day or month first: not guessed
+    (["nan", "inf"], "text"),          # words, as the grid treats them
+    (["", "  "], "empty"),
+    ([], "empty"),
+])
+def test_what_a_column_holds(values, kind):
+    assert column_kind(values) == kind
+
+
+def test_a_number_column_is_what_the_sort_calls_numeric():
+    # The summary and the sort must never disagree about a column.
+    for values in (["1", "2"], ["1", "x"], ["", "4"], ["-nan"], ["+inf"]):
+        assert (column_kind(values) == "number") == is_numeric(values)
+
+
+@pytest.mark.parametrize("value, text", [
+    (3.0, "3"), (-0.0, "0"), (10092000.0, "10092000"), (0.25, "0.25"),
+    (4.1875, "4.1875"), (1 / 3, "0.3333333333"), (1e20, "1e+20"),
+    (123456789012345.0, "123456789012345"), (float("inf"), "inf"),
+    (float("nan"), "nan"),
+])
+def test_statistics_are_written_as_a_reader_expects(value, text):
+    assert format_number(value) == text
+
+
+def test_buckets_divide_the_range_into_equal_parts():
+    assert bucket_counts([0, 1, 2, 3, 9, 10], buckets=5) == [
+        (0.0, 2), (2.0, 2), (4.0, 0), (6.0, 0), (8.0, 2)]
+
+
+def test_the_largest_number_goes_in_the_last_bucket():
+    assert bucket_counts([0, 10], buckets=2) == [(0.0, 1), (5.0, 1)]
+
+
+def test_one_value_many_times_is_one_bucket():
+    assert bucket_counts([7, 7, 7]) == [(7, 3)]
+
+
+def test_no_numbers_or_a_spread_too_wide_for_a_float_make_no_buckets():
+    assert bucket_counts([]) == []
+    assert bucket_counts([-1e308, 1e308]) == []
+
+
+# The summary fixture: four prices, a repeat, and a blank.
+PRICES = ["3", "10.5", "0.25", "", "3"]
+
+
+def test_a_summary_of_a_number_column():
+    summary = summarise(PRICES)
+    assert summary.kind == "number"
+    assert (summary.count, summary.empty, summary.distinct) == (5, 1, 3)
+    assert summary.top == [("3", 2), ("10.5", 1), ("0.25", 1)]
+    # Over the four numbers: (3 + 10.5 + 0.25 + 3) / 4, and the middle two
+    # of 0.25, 3, 3, 10.5.
+    assert summary.numbers == Statistics(0.25, 10.5, 4.1875, 3.0)
+    assert summary.buckets == [
+        (0.25, 1), (1.275, 0), (2.3, 2), (3.325, 0), (4.35, 0),
+        (5.375, 0), (6.4, 0), (7.425, 0), (8.45, 0), (9.475, 1)]
+    assert sum(count for _edge, count in summary.buckets) == 4
+
+
+def test_an_odd_count_has_a_middle_value_for_its_median():
+    assert summarise(["9", "1", "5"]).numbers.median == 5
+
+
+def test_a_summary_of_a_text_column_has_no_statistics():
+    summary = summarise(["Paris", "Oslo", "Paris", "paris", ""])
+    assert summary.kind == "text" and summary.numbers is None
+    assert summary.buckets == []
+    # Counted exactly as written: picking one keeps exactly those rows.
+    assert summary.top == [("Paris", 2), ("Oslo", 1), ("paris", 1)]
+    assert summary.distinct == 3 and summary.empty == 1
+
+
+def test_a_summary_lists_the_most_frequent_values_most_first():
+    values = [str(n) for n in range(20) for _ in range(n % 4 + 1)]
+    summary = summarise(values, top=3)
+    # 3, 7, 11, ... each appear four times; ties keep the rows' order.
+    assert summary.top == [("3", 4), ("7", 4), ("11", 4)]
+    assert summary.distinct == 20
+    assert len(summarise(values).top) == table.TOP_VALUES
+
+
+def test_a_summary_of_blanks_or_of_nothing():
+    for values in (["", " "], []):
+        summary = summarise(values)
+        assert summary.kind == "empty" and summary.top == []
+        assert summary.numbers is None and summary.distinct == 0
+    assert summarise(["", " "]).empty == 2
+
+
+def test_a_cell_that_says_nan_is_no_number_to_average():
+    summary = summarise(["-nan", "2", "4"])
+    assert summary.kind == "number"
+    assert summary.numbers == Statistics(2.0, 4.0, 3.0, 3.0)
+    assert summarise(["-nan"]).numbers is None
+
+
+def test_infinities_give_honest_statistics_and_no_histogram_of_them():
+    summary = summarise(["-inf", "+inf", "1"])
+    assert summary.numbers.minimum == float("-inf")
+    assert summary.numbers.maximum == float("inf")
+    assert format_number(summary.numbers.mean) == "nan"
+    assert summary.buckets == [(1.0, 1)]
+
+
+def test_a_value_with_spaces_around_it_is_shown_quoted():
+    assert shown_value("Paris") == "Paris"
+    assert shown_value(" fig ") == '" fig "'
+    assert shown_value("") == '""'
