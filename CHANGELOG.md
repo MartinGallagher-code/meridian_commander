@@ -12,6 +12,28 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.6.0] — 2026-11-10
+
+### Added
+
+- **`F3` on a TSV or CSV opens a table browser.** The text viewer expanded
+  tabs to every fourth column, so a results file lined up only while every
+  cell was under four characters, and a CJK cell was out by its double width
+  as well. `.tsv`, `.csv`, `.tab` and `.psv` now open in a full-screen table:
+  the file's own header pinned over columns sized in terminal cells, numbers
+  right-aligned on their decimal points, and neighbouring columns in
+  different colours (`c` turns them off). `f` filters by a word or by
+  `column op value` (`= != < > <= >= ~ !~`, numbers compared as numbers), and
+  filters stack; `=`/`!` keep or hide the rows holding the cursor's value;
+  `s` sorts, stably, by the cursor's column; `Enter` shows a row as a record,
+  one field per line. TSV is split on tabs without quoting, CSV goes through
+  the `csv` module with its delimiter taken from the first line, `#` comment
+  lines at the top are set aside rather than read as the header (`#` shows
+  them), rows with the wrong number of fields are marked, and the read
+  stops at 50,000 rows or 16 MB with `[truncated]` in the title. It works on
+  remote panes and inside archives, and the configured pager no longer takes
+  these files, as it does not take a spreadsheet. (MC-007)
+
 ## [1.5.0] — 2026-11-10
 
 ### Changed
@@ -782,6 +804,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.6.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/552dc66...v1.4.0
 [1.3.0]: https://github.com/MartinGallagher-code/meridian_commander/commit/552dc66

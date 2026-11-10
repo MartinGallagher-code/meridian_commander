@@ -139,6 +139,15 @@ ROLES: dict[str, tuple[str, str, int, int]] = {
     "editlink": ("lightgreen", "blue", 0, curses.A_UNDERLINE),
     "editheading": ("lightgreen", "blue", curses.A_BOLD, curses.A_BOLD),
 
+    # -- the table browser's columns ---------------------------------------
+    # Neighbouring columns in different colours, so the eye can follow one
+    # down a long file; "edit" is the first of the cycle.  White is left out
+    # because it is the cursor row's colour.  Without colour the cycle
+    # alternates plain and bold, which still tells two neighbours apart.
+    "tablecol1": ("lightcyan", "blue", 0, curses.A_BOLD),
+    "tablecol2": ("lightgreen", "blue", 0, _NORMAL),
+    "tablecol3": ("lightmagenta", "blue", 0, curses.A_BOLD),
+
     # -- the side-by-side comparison --------------------------------------
     # The marker column ('+', '-', '!') says which is which without colour,
     # so the monochrome column only has to make a changed row stand out from
@@ -194,6 +203,9 @@ SCHEMES: dict[str, dict[str, tuple[str, str, int, int]]] = {
                    getattr(curses, "A_ITALIC", curses.A_UNDERLINE)),
         "editlink": ("lightgreen", "black", 0, curses.A_UNDERLINE),
         "editheading": ("lightgreen", "black", curses.A_BOLD, curses.A_BOLD),
+        "tablecol1": ("lightcyan", "black", 0, curses.A_BOLD),
+        "tablecol2": ("lightgreen", "black", 0, _NORMAL),
+        "tablecol3": ("yellow", "black", 0, curses.A_BOLD),
         "diffadd": ("lightgreen", "black", curses.A_BOLD, curses.A_BOLD),
         "diffdel": ("lightred", "black", curses.A_BOLD, curses.A_BOLD),
         "diffchange": ("white", "black", curses.A_BOLD, curses.A_BOLD),

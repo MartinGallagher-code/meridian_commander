@@ -22,6 +22,8 @@ from .markdown import MarkdownView, is_markdown
 from .pdf import PdfView, is_pdf
 from .pptx import SlideView, is_presentation
 from .sheetview import SheetView
+from .table import is_table
+from .tableview import TableView
 from .viewer import Viewer
 from .xlsx import is_spreadsheet
 
@@ -32,6 +34,7 @@ from .xlsx import is_spreadsheet
 #: drift out of step with what :func:`viewer_for` would actually open.
 BROWSERS = (
     (is_spreadsheet, SheetView),
+    (is_table, TableView),
     (is_document, DocxView),
     (is_presentation, SlideView),
     (is_markdown, MarkdownView),
@@ -41,7 +44,8 @@ BROWSERS = (
 
 
 def viewer_for(fs: FileSystem, path: str):
-    """The browser for ``path``: a grid, document, deck, page, image or text."""
+    """The browser for ``path``: a grid, table, document, deck, page, image
+    or text."""
     name = fs.basename(path)
     for claims, browser in BROWSERS:
         if claims(name):

@@ -501,6 +501,90 @@ whole file has to be read before anything can be shown — a zip's index lives a
 its end, so a partial read parses as nothing — which is why an oversized
 workbook is refused outright rather than shown in part.
 
+## Tables (TSV and CSV)
+
+`F3` on a file whose name ends `.tsv`, `.csv`, `.tab` or `.psv` (in any letter
+case) opens a full-screen table instead of the text viewer. The text viewer
+expands tabs to every fourth column, which lines a TSV up only while every cell
+is shorter than four characters; the table sizes each column from its values:
+
+```
+ Table: cities.tsv -- 5 rows -- 5 columns, tab
+    city   country   population  area_km2 note
+  1 Lisbon Portugal      545923    100.05 coastal
+  2 Oslo   Norway        709037    454    fjord
+  3 Kyoto  Japan        1463723    827.83 京都
+  4!Lima   Peru        10092000   2672.3
+  5 Porto  Portugal      231800     41.42 bridges
+
+ city: Lisbon  Enter row  [f]ilter  =/! this value  Bksp/0 unfilter  [s]ort
+```
+
+- **The file's own header** is the column names, and stays put while the rows
+  scroll. `H` reads the first line as data instead, for a file with no header;
+  the columns are then numbered.
+- **Columns line up in terminal cells**, not characters, so a CJK name or an
+  emoji takes the two columns it really occupies. Numbers are right-aligned,
+  and in a column of numbers the decimal points line up.
+- **Neighbouring columns are drawn in different colours**, so the eye can follow
+  one down a long file; `c` turns that off and on. Without colour the columns
+  alternate plain and bold.
+- **Honest about the file.** The title gives the row and column counts and the
+  delimiter it used. A row with more or fewer fields than the first line is
+  marked with `!` beside its number rather than silently padded, and the footer
+  says how many fields it has.
+- **Comment lines at the top are set aside.** The suite's own tools open a
+  results file with `#` lines saying which run it came from; read as the table,
+  the first of them would be the header. Blank lines and `#` lines at the top
+  are left out of the table instead, the title counts them (`2 comment lines
+  above (#)`), and `#` shows them. A last `#` line that has as many fields as
+  the line after it is a header written as a comment (VCF's `#CHROM`) and stays
+  the header. A `#` line further down is an ordinary row.
+
+**Filtering.** `f` asks for a filter and keeps only the rows that match:
+
+- A word on its own matches any cell, with the same smart case as `/` (all
+  lower case ignores case; a capital makes it exact).
+- `column op value` looks at one column, named as its header says (case does
+  not matter). The operators are `=`, `!=`, `<`, `>`, `<=`, `>=`, `~`
+  (contains) and `!~` (does not contain). When the value is a number the cell
+  is compared as one, so `gbps < 10` keeps 9.5 and drops 10 — and a blank cell
+  never meets a numeric comparison. Quote a value to keep its spaces:
+  `name = " fig "`. `price =` keeps the rows where the price is blank.
+- **Quick filter:** `=` on a cell keeps the rows holding exactly that value in
+  that column, and `!` hides them — a drill-down in two keys.
+- Filters stack, each narrowing the last. The title shows them with the count,
+  `37 of 1,204 rows: status = FAIL, gbps < 10`. `Backspace` drops the last one
+  and `0` clears them all, which brings back every row in the file's order.
+
+**Sorting.** `s` sorts by the cursor's column: ascending, then descending, then
+back. A column of numbers sorts as numbers (9 before 10), anything else as
+text ignoring case, and blank cells go last either way. Sorting by a second
+column keeps the first as the tie-break, as a spreadsheet does. The header
+marks the sorted column with ▲ or ▼, and the sort is stable, so rows that tie
+keep their order.
+
+**A row as a record.** `Enter` shows the cursor's row one field per line,
+`name : value`, with long values wrapped rather than cut and a line break inside
+a quoted CSV cell shown as one. A thirty-column row is readable on an
+eighty-column screen this way. `↑`/`↓` step to the neighbouring rows (of those
+the filters keep, in the order shown), `PgUp`/`PgDn` scroll a long record, and
+`Enter` or `q` returns to the table.
+
+**Reading.** TSV, `.tab` and `.psv` are split on their delimiter and nothing
+else: a `"` in a TSV cell is just a character, as the format says. A `.csv`
+goes through Python's `csv` module, so a quoted comma or line break stays in
+its cell, and its delimiter — comma, semicolon, tab or pipe — is taken from the
+first line, since a CSV exported in much of Europe uses semicolons. A
+byte-order mark is dropped and bytes that are not UTF-8 are shown as `�`. The
+read stops at 50,000 rows or 16 MB, whichever comes first, at a row boundary,
+and the title then says `[truncated]`; on a remote pane that keeps a large file
+quick to open. The file arrives through the pane's own backend, so tables open
+on SFTP, SSH and FTP panes and inside archives too.
+
+`/`, `n`/`N`, `w`, `g`/`G`, the arrows and `hjkl` mean what they mean in the
+spreadsheet grid; `/` searches the rows the filters keep, in the order shown.
+
 ## Popping up from the shell, and taking the shell with you
 
 A file manager is most useful a keystroke away: `Ctrl-O` from your prompt,
@@ -684,8 +768,9 @@ line you like, `bat --paging=always` included. *Built-in viewer* on the same
 menu puts it back. The choice is remembered in `[ui] viewer`, and `$PAGER` is
 expanded when the pager is launched rather than when the setting is read.
 
-It applies to **plain text only**. A spreadsheet, document, deck, PDF, image or
-markdown file keeps the browser built for it, whatever the setting says: a
+It applies to **plain text only**. A spreadsheet, table (TSV or CSV), document,
+deck, PDF, image or markdown file keeps the browser built for it, whatever the
+setting says: a
 pager handed a `.xlsx` shows you the bytes of a zip file, and choosing a pager
 is an answer about text rather than a request to give up the other viewers.
 
@@ -858,6 +943,13 @@ page, `g`/`G` jump to the first/last row, `Home`/`End` to the first/last column,
 same smart case and `n`/`N`, `w` cycles the column-width limit, `q` quits. The
 footer shows the cursor's cell reference and its value in full, which is where
 to look when a column is too narrow for what is in it.
+In the **table browser** (TSV, CSV): the spreadsheet grid's movement, `/`,
+`n`/`N` and `w`, plus `f` to filter, `=`/`!` to keep or hide the rows holding
+the cursor's value, `Backspace` to drop the last filter and `0` to clear them,
+`s` to sort by the cursor's column (again for descending, again for neither),
+`Enter` for the row as a record (`↑`/`↓` step rows, `Enter`/`q` return), `H` to
+read the first line as data, `c` for the column colours, `#` for the comment
+lines above the table, `q` quits.
 In the **terminal pane** (`t`): every key goes to the program. `Ctrl-]` then
 `Tab` switches to the other pane, `z` zooms the terminal to the full width and
 back, `q` closes the terminal, `PgUp` (or `[`)

@@ -152,10 +152,23 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   through the workbook's own number formats, `Tab` between sheets and the same
   `/` search. It reads the format with the **standard library alone**, so
   spreadsheets open with nothing installed — on remote panes too.
+- **Table browser** (`F3` on a `.tsv`, `.csv`, `.tab` or `.psv`) — the file's
+  own header pinned over columns that really line up (measured in terminal
+  cells, so CJK and emoji too), numbers right-aligned on their decimal points,
+  and neighbouring columns in different colours (`c` turns that off). `f`
+  filters — a word anywhere, or `column op value` with `= != < > <= >= ~ !~`,
+  numbers compared as numbers — and filters stack; `=`/`!` on a cell keep or
+  hide the rows holding that value. `s` sorts by the cursor's column, `Enter`
+  shows a row as a record, one field per line. TSV is split on tabs with no
+  quoting; CSV goes through the `csv` module. `#` comment lines at the top
+  (the run notes the suite's tools write) are set aside rather than read as
+  the header, and `#` shows them. Rows with the wrong number of fields are
+  marked rather than padded, and the read stops at 50,000 rows or 16 MB with
+  `[truncated]` in the title.
 - **Your own pager** (**Options ▸ Viewer**) — point `F3` at `less`, `$PAGER` or
-  any command you name, for plain text; a spreadsheet, document, deck, PDF or
-  image keeps the browser built for it rather than being shown to a pager as
-  bytes. Remote files are fetched to a private copy and read there.
+  any command you name, for plain text; a spreadsheet, table, document, deck,
+  PDF or image keeps the browser built for it rather than being shown to a
+  pager as bytes. Remote files are fetched to a private copy and read there.
 - **File editor** (`F4`) — a real in-place editor (insert/delete, Enter/Backspace
   line handling, save with `Ctrl-S`), also with toggleable line numbers. Prefer
   your own editor? **Options > Editor** points `F4` at `vi`, `vim`, `$EDITOR` or
