@@ -73,6 +73,9 @@ class _StubScreen:
     def noutrefresh(self):
         pass
 
+    def touchwin(self):
+        pass
+
     def timeout(self, value):
         pass
 
@@ -86,29 +89,44 @@ class _ScriptedDialogs:
     which keeps tests readable and independent of option ordering.
     """
 
-    def __init__(self, monkeypatch, menu=(), prompt=(), confirm=()):
+    def __init__(self, monkeypatch, menu=(), prompt=(), confirm=(),
+                 toggles=()):
         self.menu_answers = list(menu)
         self.prompt_answers = list(prompt)
         self.confirm_answers = list(confirm)
+        #: For each prompt that offers switches, ``{label: on}`` to set them
+        #: to before it answers -- as if the user had flipped them.
+        self.toggle_answers = list(toggles)
         self.menus: list[tuple] = []
         self.menu_keys: list[list] = []   # shortcut letters each menu offered
+        self.menu_texts: list[str] = []   # the text each menu showed above
         self.prompts: list[str] = []
+        self.prompt_toggles: list[list] = []   # the switches each prompt had
         self.messages: list[tuple] = []
         monkeypatch.setattr(dialogs, "menu", self._menu)
         monkeypatch.setattr(dialogs, "prompt", self._prompt)
         monkeypatch.setattr(dialogs, "confirm", self._confirm)
         monkeypatch.setattr(dialogs, "message", self._message)
 
-    def _menu(self, stdscr, title, options, keys=None):
+    def _menu(self, stdscr, title, options, keys=None, text=""):
         self.menus.append((title, list(options)))
         self.menu_keys.append(list(keys) if keys else [])
+        self.menu_texts.append(text)
         answer = self.menu_answers.pop(0)
         if isinstance(answer, str):
             return next(i for i, o in enumerate(options) if answer in o)
         return answer
 
-    def _prompt(self, stdscr, title, label, default="", is_password=False):
+    def _prompt(self, stdscr, title, label, default="", is_password=False,
+                toggles=None):
         self.prompts.append(label)
+        self.prompt_toggles.append(
+            [(t.label, t.on) for t in toggles] if toggles else [])
+        if toggles and self.toggle_answers:
+            wanted = self.toggle_answers.pop(0)
+            for toggle in toggles:
+                if toggle.label in wanted:
+                    toggle.on = wanted[toggle.label]
         return self.prompt_answers.pop(0)
 
     def _confirm(self, stdscr, title, text, default_yes=False):

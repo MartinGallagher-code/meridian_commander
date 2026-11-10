@@ -133,23 +133,27 @@ def test_move_removes_the_source(app, tmp_path, monkeypatch):
 
 def test_a_copy_says_which_symlinked_directories_it_left(app, tmp_path,
                                                          monkeypatch):
+    """An archive cannot hold a link, so a link to a directory is left out
+    and named rather than turned into an empty directory."""
+    path = _into_archive(app, tmp_path)
     write(str(tmp_path / "left" / "tree" / "a.txt"), "A")
     (tmp_path / "left" / "tree" / "sub").mkdir()
     os.symlink(str(tmp_path / "left" / "tree" / "sub"),
                str(tmp_path / "left" / "tree" / "link"))
     app.left.refresh()
     _point_at(app.left, "tree")
-    scripted = _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+    scripted = _ScriptedDialogs(monkeypatch, prompt=["/"])
 
     app._copy()
 
-    assert read(str(tmp_path / "right" / "tree" / "a.txt")) == "A"
+    assert _zip_contents(path)["tree/a.txt"] == b"A"
     assert "1 symlinked directory skipped" in app.message
     assert "link" in scripted.last_message
 
 
 def test_a_move_that_skipped_a_link_says_the_source_was_kept(app, tmp_path,
                                                              monkeypatch):
+    path = _into_archive(app, tmp_path)
     write(str(tmp_path / "left" / "tree" / "a.txt"), "A")
     (tmp_path / "left" / "tree" / "sub").mkdir()
     for name in ("link", "link2"):
@@ -157,12 +161,13 @@ def test_a_move_that_skipped_a_link_says_the_source_was_kept(app, tmp_path,
                    str(tmp_path / "left" / "tree" / name))
     app.left.refresh()
     _point_at(app.left, "tree")
-    _ScriptedDialogs(monkeypatch, prompt=[str(tmp_path / "right")])
+    _ScriptedDialogs(monkeypatch, prompt=["/"])
 
     app._move()
 
-    assert read(str(tmp_path / "right" / "tree" / "a.txt")) == "A"
-    assert "2 symlinked directories skipped, source kept" in app.message
+    assert _zip_contents(path)["tree/a.txt"] == b"A"
+    assert "2 symlinked directories skipped" in app.message
+    assert app.message.endswith(", source kept")
     assert (tmp_path / "left" / "tree" / "a.txt").exists()
 
 

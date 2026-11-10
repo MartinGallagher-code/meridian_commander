@@ -48,6 +48,8 @@ class _FakeSftp:
         self.closed = False
         self.files: dict = {}
         self.posix_rename_supported = True
+        #: What readlink answers, by path.
+        self.link_targets: dict = {}
 
     def normalize(self, path):
         return self.home
@@ -92,6 +94,17 @@ class _FakeSftp:
 
     def rename(self, src, dst):
         self.calls.append(("rename", src, dst))
+
+    def chmod(self, path, mode):
+        self.calls.append(("chmod", path, mode))
+
+    def symlink(self, source, dest):
+        self.calls.append(("symlink", source, dest))
+
+    def readlink(self, path):
+        self.calls.append(("readlink", path))
+        # As paramiko: None for a path the server says is not a link.
+        return self.link_targets.get(path)
 
     def close(self):
         self.closed = True
@@ -1078,3 +1091,32 @@ def test_connecting_without_paramiko_explains_what_to_install(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", no_paramiko)
     with pytest.raises(FileSystemError, match="pip install paramiko"):
         _open_ssh_client("web1", "deploy", None, 22)
+
+
+# -- permissions and links (MC-011) -------------------------------------------
+
+def test_sftp_sets_only_the_permission_bits(sftp_fs):
+    """Set-user-ID and the file type stay out of what is sent."""
+    fs, sftp, _ = sftp_fs()
+    assert fs.can_chmod and fs.can_symlink
+    fs.chmod("/srv/run.sh", 0o104755)
+    assert ("chmod", "/srv/run.sh", 0o755) in sftp.calls
+
+
+def test_sftp_makes_a_link_target_first(sftp_fs):
+    """paramiko takes the target first; OpenSSH reads it that way round."""
+    fs, sftp, _ = sftp_fs()
+    fs.symlink("../shared/data", "/srv/app/data")
+    assert ("symlink", "../shared/data", "/srv/app/data") in sftp.calls
+
+
+def test_sftp_reads_a_link(sftp_fs):
+    fs, sftp, _ = sftp_fs()
+    sftp.link_targets["/srv/current"] = "releases/42"
+    assert fs.readlink("/srv/current") == "releases/42"
+
+
+def test_sftp_says_when_a_path_is_not_a_link(sftp_fs):
+    fs, _, _ = sftp_fs()
+    with pytest.raises(FileSystemError, match="not a symbolic link"):
+        fs.readlink("/srv/plain.txt")

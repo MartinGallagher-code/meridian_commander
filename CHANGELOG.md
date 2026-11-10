@@ -33,6 +33,50 @@ own section here, so not every version below is published to PyPI.
 - **`F9`'s "this looks too big" check counts what a filter hides**, since the
   sync walks the whole directory whatever the pane shows. (MC-012)
 
+## [1.9.0] — 2026-11-10
+
+### Fixed
+
+- **`F5` and `F6` no longer replace a file without asking.** A copy or move
+  onto a file that was already there wrote over it with no question, a rename
+  (`r`, or a move within one filesystem) did the same, every copy came out
+  with the default mode — a script copied to a server was no longer
+  executable — and a symbolic link arrived as the file it pointed at.
+  (MC-011)
+
+### Added
+
+- **Overwrite, skip, or overwrite if older — once or for all.** An existing
+  target stops the transfer with both files' sizes and times and asks:
+  Overwrite (`o`), Overwrite all (`a`), Overwrite if older (`i`), Overwrite
+  all older (`l`), Skip (`s`), Skip all (`n`) or Cancel (`c`, `Esc`). "Older"
+  means older by more than sync's two seconds, and an age that cannot be read
+  keeps what is there. A directory that is already there is merged, its files
+  asked about one by one; a move that skipped anything keeps its source; `r`
+  asks before taking a name another file has. `F9` does not ask. (MC-011)
+- **Copies keep their permissions.** The nine `rwx` bits travel with each file
+  and with each directory the copy makes (set-user-ID and set-group-ID do
+  not); a **Keep permissions** switch under the destination field, `Ctrl-P`,
+  turns it off for one transfer. FTP and archives cannot take a mode, and the
+  status line says how many files arrived without one. (MC-011)
+- **Symbolic links are copied as links** wherever both sides can hold one
+  (local, SFTP, SSH), with the same target, relative or absolute, dangling or
+  not. Where the far side cannot, a link to a file is copied as the file and
+  a link to a directory is left, and both are named. (MC-011)
+- **`FileSystem.chmod`, `symlink` and `readlink`**, with `can_chmod` and
+  `can_symlink` saying which backends have them, for plug-ins too. (MC-011)
+
+### Changed
+
+- **SSH and FTP listings keep each file's mode.** The `ls -l` parser read the
+  permission column and threw it away, so an SSH pane could not tell an
+  executable from any other file the way an SFTP pane can: `Enter` on an
+  executable without a `#!` line there now runs it, as it does on SFTP.
+- **A local link that points nowhere is described by itself.** `stat` on one
+  answered "no such file", as if nothing were there; it now reports the link,
+  as the SFTP backend always has, so a copy can reproduce it and a rename
+  knows it is in the way.
+
 ## [1.8.0] — 2026-11-10
 
 ### Added
@@ -875,7 +919,8 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
-[1.10.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.8.0...v1.10.0
+[1.10.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.9.0...v1.10.0
+[1.9.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.5.0...v1.6.0
