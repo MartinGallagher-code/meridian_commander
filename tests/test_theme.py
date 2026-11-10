@@ -37,6 +37,53 @@ def test_a_scheme_only_overrides_roles_that_exist():
             assert role in theme.ROLES, f"{name} names an unknown role {role}"
 
 
+SYNTAX_ROLES = ("synkeyword", "syncomment", "synstring", "synnumber",
+                "synname", "synkey", "synmark")
+
+
+def test_the_syntax_roles_have_a_midnight_colour_and_a_mono_fallback():
+    for role in SYNTAX_ROLES:
+        fg, bg, _extra, _mono = theme.ROLES[role]
+        assert bg == "blue", role
+        assert theme.SCHEMES["midnight"][role][1] == "black", role
+    # Without colour, keywords and defined names stand out and comments
+    # recede; the rest is plain text.
+    assert theme.ROLES["synkeyword"][3] == curses.A_BOLD
+    assert theme.ROLES["synname"][3] == curses.A_BOLD
+    assert theme.ROLES["syncomment"][3] == curses.A_DIM
+
+
+def _look(scheme: str, role: str) -> tuple[int, int, bool]:
+    """What a role looks like: foreground, background, and whether bold."""
+    fg, bg, extra, _mono = theme._resolve(theme.SCHEMES[scheme], role)
+    number, bright = theme._foreground(fg)
+    return number, theme._background(bg), bool((extra | bright) & curses.A_BOLD)
+
+
+@pytest.mark.parametrize("colours", [8, 16, 256])
+@pytest.mark.parametrize("scheme", ["turbo", "midnight"])
+def test_no_two_kinds_of_code_look_alike(monkeypatch, scheme, colours):
+    """On eight colours a bright colour is its base colour in bold, so two
+    shades of one hue, both bold, would be the same thing on screen."""
+    monkeypatch.setattr(theme, "_colours", lambda: colours)
+    looks: dict[tuple, str] = {}
+    for role in ("edit", "editmatch") + SYNTAX_ROLES:
+        look = _look(scheme, role)
+        assert look not in looks, f"{role} looks like {looks.get(look)}"
+        looks[look] = role
+        assert look[0] != look[1], f"{role} is drawn in its background"
+
+
+@pytest.mark.parametrize("scheme", ["turbo", "midnight"])
+def test_every_scheme_fits_the_pairs_of_an_eight_colour_terminal(monkeypatch,
+                                                                 scheme):
+    """Sixty-four pairs, the first of them the terminal's own: past that,
+    the last roles in the table would lose their colour."""
+    monkeypatch.setattr(theme, "_colours", lambda: 8)
+    pairs = {_look(scheme, role)[:2] for role in theme.ROLES}
+    assert len(pairs) < 64
+
+
 def test_init_hands_out_a_pair_per_colour_combination():
     def run(stdscr):
         theme.init("turbo")

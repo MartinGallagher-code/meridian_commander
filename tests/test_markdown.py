@@ -579,3 +579,11 @@ def test_ordinary_lines_still_wrap_around_an_unwrappable_one(fs, tmp_path):
     view._reflow(12)
     assert any(len(line) <= 12 for line in view.lines)
     assert any(len(line) > 12 for line in view.lines)
+
+
+def test_markdown_is_never_coloured_as_code(fs, tmp_path):
+    """The rendering owns the styles, whatever the first line says."""
+    write(str(tmp_path / "run.md"), "#!/bin/sh\n\nSome *prose*.\n")
+    doc = MarkdownView(fs, str(tmp_path / "run.md"))
+    assert doc.language is None
+    assert "K" not in "".join(doc.styles)

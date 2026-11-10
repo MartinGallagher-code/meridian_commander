@@ -809,6 +809,47 @@ stays an ordinary listing. Symlinked directories are counted as the link
 rather than followed — following would count the target twice, and a loop for
 ever — so they keep saying `<DIR>`.
 
+## Code and configuration files in colour
+
+`F3` on a script or a configuration file colours it by its syntax, the way an
+editor would: keywords, strings, comments, numbers, the names a `def` or a
+`class` defines, configuration keys, and markers such as decorators, section
+headers, YAML anchors and tags each get a colour of their own from the scheme.
+A commented-out line, a string that never closes, or which key a value belongs
+to can then be seen at a glance.
+
+| Language | Known by |
+| --- | --- |
+| Python | `.py`, `.pyi`, `.pyw`, or a `#!` line naming `python` or `pypy` |
+| Shell | `.sh`, `.bash`, `.zsh`, `.ksh`, `.bashrc`, `.profile`, `.zshrc` and the other shell dotfiles, or a `#!` line naming `sh`, `bash`, `zsh`, `dash` or `ksh` |
+| YAML | `.yml`, `.yaml` |
+| JSON | `.json`, `.jsonc` (with `//` and `/* */` comments), `.json5`, `.jsonl`, `.ndjson`, `.geojson` |
+| TOML | `.toml`, `Pipfile`, `Cargo.lock`, `poetry.lock` |
+| INI | `.ini`, `.cfg`, `.conf`, `.cnf`, systemd's `.service`/`.socket`/`.timer`, `.desktop`, `.gitconfig`, `.editorconfig` and the like |
+
+Suffixes are matched in any letter case, and `/usr/bin/env` is looked through
+on a `#!` line, so `#!/usr/bin/env python3` is Python. Everything else — a
+`.txt`, a log, a script in a language not listed — is drawn exactly as before.
+
+- **`c` turns the colour off**, and on again. The footer shows `[c]olour`
+  whenever there is colour to turn off.
+- **Search, wrapping, line numbers and sideways scrolling** work as on any
+  file, each colour staying on its own characters; search matches are drawn
+  over the colour.
+- **Multi-line constructs** are followed from line to line: Python's
+  triple-quoted strings, shell here-documents and quotes nested in `$(...)`,
+  YAML's `|` and `>` block scalars, TOML's multi-line strings and arrays. One
+  that never closes colours the rest of the file as the language would read
+  it, and nothing worse.
+- **A file over 2 MiB opens plain**, at once, with `[plain: over 2 MiB]` in
+  the title, so a generated file or a log with a code suffix does not hold up
+  `F3`.
+- **Remote panes** are coloured the same as local ones.
+
+The colours are the scheme's own (see [Look and feel](look-and-feel.md)):
+`mono`, or a terminal without colour, shows keywords in bold and comments dim.
+The built-in editor (`F4`) does not colour yet.
+
 ## Viewing with your own pager
 
 `F3` opens the built-in viewer, and for a text file **Options ▸ Viewer** can
@@ -822,6 +863,8 @@ deck, PDF, image or markdown file keeps the browser built for it, whatever the
 setting says: a
 pager handed a `.xlsx` shows you the bytes of a zip file, and choosing a pager
 is an answer about text rather than a request to give up the other viewers.
+Code and configuration files *are* text, so the pager gets them — without the
+built-in viewer's colours; `bat --paging=always` colours them its own way.
 
 The rest matches `F4`: the terminal is handed over while the pager runs, and on
 a remote pane the file is fetched to a private temporary copy (mode `0700`,
@@ -970,8 +1013,8 @@ walk to the neighbouring menu without closing the bar.
 
 In the **viewer**: `/` (or F7) searches — smart case (a lowercase pattern is
 case-insensitive), matches highlighted, `n`/`N` next/previous with wrap-around;
-`l` toggles line numbers, `w` toggles wrapping, arrows/PgUp/PgDn scroll, `Q`
-quits. Wrapping breaks at spaces and keeps the file's own line numbering, so a
+`l` toggles line numbers, `w` toggles wrapping, `c` turns a code file's
+colour off and on, arrows/PgUp/PgDn scroll, `Q` quits. Wrapping breaks at spaces and keeps the file's own line numbering, so a
 paragraph occupying six rows is still one numbered line to search and jump to.
 In the **Markdown viewer**: everything the text viewer does, plus `r` to
 switch between the rendered view and the file as it was written.
