@@ -201,6 +201,13 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   other. `n`/`N` jump between blocks of differences. Built in rather than a
   call out to `vimdiff`, so a local file compares against an SFTP, SSH, FTP or
   in-archive one with nothing fetched to disk first.
+- **Quick view** (`Ctrl-Q`, Command ▸ Quick view) — the other pane shows the
+  file under the cursor in the viewer `F3` would open, and follows the cursor:
+  text, Markdown, documents, decks, sheets, tables, PDFs and images (in
+  half-blocks), a directory as a summary. A remote file is fetched once the
+  cursor settles, and a large one waits to be asked. `Tab` moves into it to
+  scroll, `Enter` opens the full viewer, and `Ctrl-Q` gives the pane back as
+  it was. Single mode shows both panes while it is on.
 - **Head and tail in a pane** (`h`) — the pane becomes the first and last lines
   of whatever the **other** pane's cursor is on, with a rule between them
   counting what was skipped, and it **follows that cursor** as you move it: ten

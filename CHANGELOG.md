@@ -12,6 +12,28 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.13.0] — 2026-11-10
+
+### Added
+
+- **Quick view: `Ctrl-Q` shows the file under the cursor in the other pane**,
+  in the viewer `F3` would open — text, Markdown, documents, decks, sheets,
+  tables, PDFs and images — and follows the cursor as it moves. A directory
+  shows a summary and a file that will not open says why. Remote files are
+  fetched once the cursor settles; a file a viewer reads whole is fetched only
+  up to 2 MiB remote or 32 MiB local before it waits to be asked; text is read
+  only as far as a pane can use. `Tab` moves into it to scroll, `Enter` opens
+  the full viewer, `Ctrl-Q` gives the pane back as it was; single mode shows
+  both panes while it is on. Images are drawn in half-blocks there, so no
+  Sixel or kitty pixels are left behind when the cursor moves on. Also on
+  **Command ▸ Quick view**. (MC-015)
+
+### Changed
+
+- **`Viewer.LIMIT`** is the cap on how much of a file the text viewer reads,
+  a class attribute where it was a module constant, so a smaller viewer can
+  read less. (MC-015)
+
 ## [1.12.0] — 2026-11-10
 
 ### Added
@@ -956,6 +978,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.13.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.9.0...v1.10.0

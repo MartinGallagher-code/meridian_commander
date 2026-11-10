@@ -57,7 +57,7 @@ def test_a_file_that_will_not_open_is_reported(fs, tmp_path):
 
 
 def test_a_huge_file_is_capped_and_flagged(fs, tmp_path, monkeypatch):
-    monkeypatch.setattr(viewer_mod, "MAX_VIEW_BYTES", 20)
+    monkeypatch.setattr(viewer_mod.Viewer, "LIMIT", 20)
     path = tmp_path / "big.txt"
     path.write_text("x" * 100)
     view = Viewer(fs, str(path))
@@ -66,7 +66,7 @@ def test_a_huge_file_is_capped_and_flagged(fs, tmp_path, monkeypatch):
 
 
 def test_a_file_exactly_at_the_cap_is_not_flagged(fs, tmp_path, monkeypatch):
-    monkeypatch.setattr(viewer_mod, "MAX_VIEW_BYTES", 20)
+    monkeypatch.setattr(viewer_mod.Viewer, "LIMIT", 20)
     path = tmp_path / "exact.txt"
     path.write_text("y" * 20)
     assert Viewer(fs, str(path)).truncated is False
@@ -546,7 +546,7 @@ def test_a_binary_file_with_a_code_name_shows_every_character(fs, tmp_path):
 
 def test_a_code_file_cut_at_the_cap_is_still_coloured(fs, tmp_path,
                                                       monkeypatch):
-    monkeypatch.setattr(viewer_mod, "MAX_VIEW_BYTES", 30)
+    monkeypatch.setattr(viewer_mod.Viewer, "LIMIT", 30)
     write(str(tmp_path / "cut.py"), 'x = """a string the cap cuts in two"""\n')
     view = Viewer(fs, str(tmp_path / "cut.py"))
     assert view.truncated is True
