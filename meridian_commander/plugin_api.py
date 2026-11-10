@@ -173,6 +173,18 @@ class PluginContext:
         except Exception:
             pass
 
+    def toggle_single(self) -> None:
+        """Switch between one pane on screen and two, as ``z`` does.
+
+        For a plugin that consumes every key, so ``z`` never reaches the
+        application: the terminal offers it as Ctrl-] z.  One pane turned on
+        this way is the plugin's own zoom, and ends when the plugin closes.
+        """
+        try:
+            self.app._toggle_single(self.own_panel)
+        except Exception:
+            pass
+
 
 class PanePlugin:
     """Base class for pane plugins.

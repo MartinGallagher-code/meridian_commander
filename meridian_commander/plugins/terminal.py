@@ -22,10 +22,12 @@ the emulator implements.  ``!`` still hands a program the whole real terminal.
 Keys: every key goes to the program -- F1-F12, PgUp/PgDn and Esc included.
 ``Ctrl-]`` is the one key the terminal keeps, and it opens a small menu in the
 pane's footer: ``Tab`` switches to the other pane (the shell keeps running;
-Tab or a click comes back), ``q`` closes the terminal, ``PgUp`` scrolls back
-through what went off the top, and ``Ctrl-]`` again sends a literal Ctrl-] to
-the program.  The mouse wheel scrolls back too.  Exiting the shell (``exit``
-/ Ctrl-D) closes it as well.
+Tab or a click comes back), ``z`` zooms the terminal to the full width and
+back (single mode, as ``z`` does in a file pane), ``q`` closes the terminal,
+``PgUp`` scrolls back through what went off the top, and ``Ctrl-]`` again
+sends a literal Ctrl-] to the program.  The mouse wheel scrolls back too.
+Exiting the shell (``exit`` / Ctrl-D) closes it as well, and ends a zoom
+made with ``Ctrl-]`` ``z``.
 """
 
 from __future__ import annotations
@@ -476,6 +478,10 @@ class TerminalPlugin(PanePlugin):
         self.menu = False
         if key == 9:                                 # Tab: the other pane
             self.ctx.focus_other()
+        elif key in (ord("z"), ord("Z")):            # zoom: one pane or two
+            # The app's own z, which the shell would otherwise get.  The
+            # new width reaches the program on the next draw, as a resize.
+            self.ctx.toggle_single()
         elif key in (ord("q"), ord("Q")):            # close the terminal
             self.on_exit()
             return False
@@ -584,7 +590,7 @@ class TerminalPlugin(PanePlugin):
         if self.status:
             return f" {self.status} "
         if self.menu:
-            return " Tab: pane  q: close  PgUp: scroll  Esc "
+            return " Tab pane  z zoom  q close  PgUp scroll "
         if self.scroll:
             return f" scrollback, {self.scroll} lines up  Esc: live "
         return " Ctrl-]: Tab pane  q close  PgUp scroll "

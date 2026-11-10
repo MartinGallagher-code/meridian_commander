@@ -14,13 +14,16 @@ import time
 import pytest
 
 from meridian_commander import theme, vt
-from meridian_commander.plugin_api import PluginContext
+from meridian_commander.app import App
+from meridian_commander.plugin_api import PanePlugin, PluginContext
 from meridian_commander.plugins import terminal
 from meridian_commander.plugins.terminal import (
     MENU_KEY, Colours, TerminalPlugin, encode_key, nearest16,
 )
 
-from support import _FakeRemoteBackend, terminal_text, with_curses_screen
+from support import (
+    _FakeRemoteBackend, _ScriptedDialogs, terminal_text, with_curses_screen,
+)
 
 
 # -- keys ----------------------------------------------------------------------
@@ -751,7 +754,7 @@ def test_drawing_a_pane_too_short_for_any_screen(remote):
 def test_the_footer_shows_the_menu_the_history_and_the_exit(remote):
     plugin, _ = remote
     plugin.handle_key(MENU_KEY)
-    assert "Tab: pane  q: close  PgUp: scroll  Esc" in _render(plugin)[0]
+    assert " Tab pane  z zoom  q close  PgUp scroll " in _render(plugin)[0]
     plugin.handle_key(27)
     _history(plugin)
     plugin.wheel(4)
@@ -1054,3 +1057,330 @@ def test_output_wrapped_by_a_narrow_pane_reads_as_one_line():
     unfinished = vt.Screen(2, 4)
     unfinished.feed(b"abcdefgh")
     assert terminal_text(unfinished) == "abcdefgh"
+
+
+# -- Ctrl-] z: the terminal at the full width, and back --------------------------
+#
+# The zoom is single mode (z), reached from inside the terminal, where z
+# itself goes to the shell: the terminal gets the whole width and keeps the
+# menu bar, its header and footer, the hint line and the F-key bar.
+
+def _zoom(app):
+    """Ctrl-] then z, through the app, as the keyboard sends them."""
+    app.handle_key(MENU_KEY)
+    app.handle_key(ord("z"))
+
+
+def _layout(app):
+    return app._panes_on_screen()
+
+
+def _real_app(tmp_path, script, rows=24, cols=80, single=False):
+    """Run ``script(app)`` against an App on a real curses screen."""
+    def run(stdscr):
+        return script(App(stdscr, str(tmp_path / "left"),
+                          str(tmp_path / "right"), single=single))
+
+    return with_curses_screen(rows, cols, run)
+
+
+@pytest.mark.parametrize("key", [ord("z"), ord("Z")])
+def test_ctrl_bracket_then_z_zooms_and_again_unzooms(remote, app, key):
+    plugin, channel = remote
+    assert plugin.handle_key(MENU_KEY) is True
+    assert plugin.handle_key(key) is True
+    assert plugin.menu is False
+    assert app.single is True
+    assert _layout(app) == [app.left]
+    assert app.message == "Single pane -- Ctrl-] z shows both"
+    plugin.handle_key(MENU_KEY)
+    plugin.handle_key(key)
+    assert app.single is False
+    assert _layout(app) == [app.left, app.right]
+    assert app.message == "Two panes"
+    assert app.active is app.left
+    assert channel.sent == b""            # nothing of it reached the shell
+
+
+def test_zooming_from_single_mode_gives_two_panes_and_back(remote, app):
+    plugin, _ = remote
+    app.left.plugin = plugin
+    app._toggle_single()                  # z first: the terminal is alone
+    _zoom(app)
+    assert app.single is False
+    assert _layout(app) == [app.left, app.right]
+    _zoom(app)
+    assert app.single is True
+    assert _layout(app) == [app.left]
+    assert app.active is app.left
+
+
+def test_zooming_leaves_the_other_pane_as_it_was(remote, app, tmp_path):
+    plugin, _ = remote
+    app.left.plugin = plugin
+    other = app.right
+    other.move_to([e.name for e in other.entries].index("sub"))
+    other.toggle_select()
+    other.move_to([e.name for e in other.entries].index("file.txt"))
+
+    class _Counter(PanePlugin):
+        name = "Counter"
+        uses_other_pane = False
+        wants_timer = True
+        ticks = 0
+
+        def tick(self):
+            self.ticks += 1
+
+        def draw(self, stdscr, y, x, h, w):
+            pass
+
+        def handle_key(self, key):
+            return True
+
+    counter = _Counter(PluginContext(app=app, own_panel=other,
+                                     other_panel=app.left))
+    other.plugin = counter
+    _zoom(app)
+    assert _layout(app) == [app.left]
+    app._tick_plugins()                   # out of sight, and still running
+    assert counter.ticks == 1
+    _zoom(app)
+    assert other.path == str(tmp_path / "right")
+    assert other.current_name() == "file.txt"
+    assert other.selected == {"sub"}
+    assert other.plugin is counter
+
+
+def test_ctrl_bracket_tab_while_zoomed_shows_both_until_it_is_back(remote,
+                                                                   app):
+    plugin, _ = remote
+    app.left.plugin = plugin
+    _zoom(app)
+    app.handle_key(MENU_KEY)
+    app.handle_key(9)                     # Ctrl-] Tab: to the file pane
+    assert app.active is app.right
+    assert _layout(app) == [app.left, app.right]
+    app.handle_key(9)                     # Tab back: zoomed again
+    assert app.active is app.left
+    assert _layout(app) == [app.left]
+    assert app.single is True
+
+
+def test_the_other_menu_entries_still_work_while_zoomed(remote, app):
+    plugin, channel = remote
+    app.left.plugin = plugin
+    _zoom(app)
+    _history(plugin)
+    app.handle_key(MENU_KEY)
+    app.handle_key(curses.KEY_PPAGE)
+    assert plugin.scroll == plugin._page()
+    app.handle_key(27)                    # back to the live screen
+    app.handle_key(MENU_KEY)
+    app.handle_key(MENU_KEY)
+    assert channel.sent == b"\x1d"
+    assert app.single is True
+
+
+def test_ctrl_bracket_q_on_a_zoomed_terminal_ends_the_zoom(remote, app):
+    plugin, channel = remote
+    app.left.plugin = plugin
+    _zoom(app)
+    assert app.single is True
+    app.handle_key(MENU_KEY)
+    app.handle_key(ord("q"))
+    assert channel.closed is True
+    assert app.left.plugin is None
+    assert app.single is False
+    assert _layout(app) == [app.left, app.right]
+    assert app.active is app.left
+
+
+def test_a_zoomed_remote_shell_that_exits_ends_the_zoom(remote, app):
+    plugin, channel = remote
+    app.left.plugin = plugin
+    _zoom(app)
+    channel._exit_ready = True            # the shell exited on its own
+    plugin.tick()
+    assert plugin.done is True
+    assert app.single is True             # still showing what it printed
+    app.handle_key(ord("x"))              # "press any key to close"
+    assert app.left.plugin is None
+    assert app.single is False
+
+
+def test_exit_in_a_zoomed_local_shell_ends_the_zoom(app, monkeypatch):
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    app.handle_key(ord("t"))
+    plugin = app.left.plugin
+    try:
+        _zoom(app)
+        assert app.single is True
+        _type(plugin, "exit")
+        assert _wait_for(plugin, lambda: plugin.done)
+        app.handle_key(ord("x"))
+        assert app.left.plugin is None
+        assert app.single is False
+        assert _layout(app) == [app.left, app.right]
+    finally:
+        app._close_plugin(app.left)
+
+
+def test_single_mode_chosen_with_z_outlives_the_terminal(remote, app):
+    plugin, _ = remote
+    app._toggle_single()                  # z in the file pane
+    app.left.plugin = plugin
+    app.handle_key(MENU_KEY)
+    app.handle_key(ord("q"))
+    assert app.left.plugin is None
+    assert app.single is True
+
+
+def test_a_zoom_taken_over_by_z_outlives_the_terminal(remote, app):
+    plugin, _ = remote
+    app.left.plugin = plugin
+    _zoom(app)
+    app.handle_key(MENU_KEY)
+    app.handle_key(9)                     # to the file pane...
+    app.handle_key(ord("z"))              # ...two panes, by hand
+    app.handle_key(ord("z"))              # ...and one again, by hand
+    app.handle_key(9)                     # back to the terminal
+    app.handle_key(MENU_KEY)
+    app.handle_key(ord("q"))
+    assert app.single is True
+
+
+def test_the_menu_footer_lists_z_and_fits_half_an_80_column_screen(remote):
+    plugin, _ = remote
+    assert len(plugin._footer()) <= 40
+    plugin.handle_key(MENU_KEY)
+    footer = plugin._footer()
+    assert "z zoom" in footer
+    assert len(footer) <= 40
+    _history(plugin)
+    plugin.handle_key(27)
+    plugin.wheel(4)
+    assert len(plugin._footer()) <= 40
+
+
+def test_toggle_single_on_an_app_without_single_mode_does_nothing():
+    class _Plain:
+        single = False
+
+    plain = _Plain()
+    PluginContext(app=plain, own_panel="mine",
+                  other_panel="theirs").toggle_single()
+    assert plain.single is False
+
+
+def test_zooming_tells_a_remote_shell_its_new_size(app, tmp_path):
+    channel = _FakeChannel()
+
+    def script(real):
+        real.left.plugin = TerminalPlugin(_remote_ctx(real, channel))
+        sizes = []
+        for step in range(3):
+            if step:
+                _zoom(real)
+            real.draw()
+            sizes.append(channel.resized)
+        real._close_plugin(real.left)
+        return sizes
+
+    # (width, height): half the screen, all of its width, half again.  The
+    # height is the screen's less the menu bar, the pane's header and
+    # footer, the hint line and the F-key bar.
+    assert _real_app(tmp_path, script) == [(40, 19), (80, 19), (40, 19)]
+
+
+def test_zooming_tells_a_local_shell_its_new_size(app, tmp_path, monkeypatch):
+    monkeypatch.setenv("SHELL", "/bin/sh")
+
+    def script(real):
+        real.handle_key(ord("t"))
+        plugin = real.left.plugin
+        try:
+            real.draw()
+            _zoom(real)
+            real.draw()
+            _type(plugin, "stty size")
+            wide = _wait_for(plugin, lambda: "19 80" in _shown(plugin))
+            _zoom(real)
+            real.draw()
+            _type(plugin, "stty size")
+            narrow = _wait_for(plugin, lambda: "19 40" in _shown(plugin))
+            return wide, narrow
+        finally:
+            real._close_plugin(real.left)
+
+    assert _real_app(tmp_path, script) == (True, True)
+
+
+def test_a_zoomed_terminal_is_drawn_across_the_whole_width(app, tmp_path):
+    channel = _FakeChannel()
+
+    def script(real):
+        plugin = real.left.plugin = TerminalPlugin(_remote_ctx(real, channel))
+        real.draw()
+        _zoom(real)
+        real.draw()                       # the resize: the program redraws
+        plugin.screen.feed(b"x" * 70)
+        real.handle_key(MENU_KEY)         # and the menu is open
+        real.draw()
+        rows = [real.stdscr.instr(row, 0).decode() for row in range(24)]
+        boxes = list(real._panel_boxes)
+        real.handle_key(27)
+        _zoom(real)
+        real.draw()
+        unzoomed = [real.stdscr.instr(row, 0).decode() for row in range(24)]
+        real._close_plugin(real.left)
+        return rows, boxes, unzoomed
+
+    rows, boxes, unzoomed = _real_app(tmp_path, script)
+    assert len(boxes) == 1 and boxes[0][1:] == (1, 0, 21, 80)
+    assert "File" in rows[0]                         # the menu bar stays
+    assert rows[1].startswith(" [terminal] ")
+    assert rows[2].startswith("x" * 70)              # past the half-way mark
+    assert rows[21].startswith(" Tab pane  z zoom  q close  PgUp scroll ")
+    assert "Single pane -- Ctrl-] z shows both" in rows[22]
+    assert "right pane hidden" in rows[22]
+    assert "Quit" in rows[23]                         # and the F-key bar
+    # Unzoomed: the terminal is back in the left half, the right pane beside.
+    assert unzoomed[2].startswith("x" * 40)
+    assert "x" * 41 not in unzoomed[2]
+
+
+def test_resizing_a_zoomed_terminal_keeps_the_zoom(app, tmp_path):
+    channel = _FakeChannel()
+
+    def script(real):
+        real.left.plugin = TerminalPlugin(_remote_ctx(real, channel))
+        _zoom(real)
+        real.draw()
+        sizes = [channel.resized]
+        for rows, cols in ((30, 100), (8, 24)):
+            curses.resizeterm(rows, cols)
+            real.handle_key(curses.KEY_RESIZE)
+            real.draw()
+            sizes.append(channel.resized)
+        still = real.single and _layout(real) == [real.left]
+        real._close_plugin(real.left)
+        return sizes, still
+
+    sizes, still = _real_app(tmp_path, script)
+    assert sizes == [(80, 19), (100, 25), (24, 3)]
+    assert still
+
+
+def test_the_help_and_the_opening_hint_say_how_to_zoom(app, monkeypatch):
+    dialogs_seen = _ScriptedDialogs(monkeypatch)
+    app._help()
+    assert "Ctrl-] then Tab other pane, z zoom" in dialogs_seen.all_text
+    assert "Ctrl-] z, and closing the terminal ends it" in dialogs_seen.all_text
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    app.handle_key(ord("t"))
+    try:
+        assert "z: zoom" in app.message
+        assert len(app.message) <= 78     # the hint line of 80 columns
+    finally:
+        app._close_plugin(app.left)

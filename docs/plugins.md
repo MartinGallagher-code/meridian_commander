@@ -155,5 +155,11 @@ class Uptime(InputOutputPlugin):
 Leave it out and the plug-in gets both panes, which is always safe; nothing
 else about the contract changes.
 
+A plug-in that takes every key, as the terminal does, can still offer the
+application's own pane keys from a menu of its own: `ctx.focus_other()` moves
+the keyboard to the other pane (`Tab`), and `ctx.toggle_single()` switches
+between one pane and two (`z`). One pane turned on with `toggle_single()` is
+the plug-in's zoom, and goes back to two when the plug-in closes.
+
 The [API reference](api.md) documents `PluginContext`, `PanePlugin` and
 `InputOutputPlugin` in full.

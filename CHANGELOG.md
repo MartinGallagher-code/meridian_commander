@@ -46,6 +46,20 @@ day the version was cut.
 
 ### Added
 
+- **`Ctrl-]` `z` zooms the terminal in a pane to the full width.** vim,
+  less, top and htop want all the room there is, and the pane terminal had
+  half the width; single mode (`z`) gave it the whole width, but from inside
+  the terminal `z` goes to the shell, so getting there took `Ctrl-]` `Tab`,
+  `z`, `Tab`. Now `z` is in the terminal's own `Ctrl-]` menu and does what
+  `z` does in a file pane: the terminal gets every column (80 on an
+  80-column screen, the menu bar, footer, hint line and F-key bar staying
+  where they are), the program is told its new size and redraws to fit, and
+  `Ctrl-]` `z` again brings both panes back. `Ctrl-]` `Tab` still goes to the
+  other pane with the shell kept beside it, and coming back zooms it again.
+  Closing the terminal ends a zoom made this way. Plug-ins get the same
+  service as `ctx.toggle_single()`. In the menu's footer, the in-app help,
+  the README and the manual. (MC-006)
+
 - **`/` searches a pane by name.** Every letter in a pane is a hotkey, so
   there was no way to type a name and get to it. `/` now turns on a search
   mode in which typing is a name: the cursor jumps to the first entry whose
