@@ -44,6 +44,9 @@ viewer =
 ; the other kept out of sight (Tab flips to it).  z switches between the two
 ; while running, as does Options > Single pane.
 panes = 2
+; Columns in each pane: short (name, size, time) or long, which adds the
+; mode and the owner.  Also switchable while running, from Options.
+listing = short
 
 [plugins]
 ; Extra directories to search for plug-ins, colon-separated.
@@ -267,6 +270,22 @@ def single_pane() -> bool:
     """
     parser = load()
     return (parser.get("ui", "panes", fallback="") or "").strip() == "1"
+
+
+def long_listing() -> bool:
+    """Whether ``[ui] listing`` asks for the mode and owner columns.
+
+    Only ``long`` does; anything else is the usual short listing.
+    """
+    parser = load()
+    return (parser.get("ui", "listing", fallback="") or "").strip() == "long"
+
+
+def save_listing(long: bool) -> bool:
+    """Remember the long or short listing chosen from the Options menu."""
+    if long_listing() == long:
+        return True
+    return _save_ui("listing", "long" if long else "short")
 
 
 def extra_plugin_dirs() -> list[str]:

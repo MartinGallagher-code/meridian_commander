@@ -45,11 +45,13 @@ import locale
 import os
 import shlex
 import shutil
+import stat as stat_mod
 import subprocess
 import sys
 import time
 
 from . import dialogs, extedit, presets, runner, shellinit, theme
+from .attributes import AttributeChange, apply_change, common_bits
 from .editor import Editor
 from .filesystems import (
     FileSystem,
@@ -135,6 +137,7 @@ MENUS: list[dict] = [
             {"sep": True},
             {"label": "Make ~d~irectory", "name": "mkdir", "key": "F7"},
             {"label": "Ne~w~ file", "name": "touch", "key": "n"},
+            {"label": "Attri~b~utes...", "name": "attributes", "key": "a"},
             {"label": "De~l~ete", "name": "delete", "key": "F8"},
             {"label": "~T~ag / untag", "name": "tag", "key": "Ins"},
             {"label": "Tag ~g~roup...", "name": "tag_group", "key": "+"},
@@ -179,6 +182,7 @@ MENUS: list[dict] = [
             {"label": "Show ~h~idden files", "name": "hidden", "key": "."},
             {"label": "Director~y~ sizes", "name": "sizes", "key": "u"},
             {"label": "Single ~p~ane", "name": "single", "key": "z"},
+            {"label": "~L~ong listing", "name": "long"},
             {"sep": True},
             {"label": "~C~olours...", "name": "colours"},
             {"label": "~E~ditor...", "name": "editor"},
@@ -332,6 +336,10 @@ class App:
                  right_path: str | None = None, single: bool = False) -> None:
         self.stdscr = stdscr
         self._backends: list[FileSystem] = []
+        from . import config as _config
+
+        #: Whether panes show a mode and an owner column (Options).
+        self.long_listing = _config.long_listing()
 
         left_fs = LocalFileSystem()
         right_fs = LocalFileSystem()
@@ -636,12 +644,20 @@ class App:
                     double=active, close=False,
                     footer=footer, footer_role=footer_role)
 
-        name_w = max(4, inner_w - 20)
+        # The long listing puts a mode and an owner between the size and the
+        # time, and the time gives way first when the pane is too narrow for
+        # all of them: at 80 columns and two panes, a name is worth more than
+        # a date.
+        long = self.long_listing
+        show_last = not long or inner_w - 27 - 13 >= 16
+        name_w = max(4, inner_w - (27 if long else 7) - (13 if show_last else 0))
         # With sizes on, the Modify column gives its room to a bar: hunting
         # for space is the one job where a file's age is the least useful
         # thing on the row and its share of the directory is the most.
         last_col = "Share" if panel.show_sizes else "Modify time"
-        title = f" {'Name'.ljust(name_w)}{'Size':>6} {last_col:>12}"
+        title = (f" {'Name'.ljust(name_w)}{'Size':>6}"
+                 + (f" {'Mode':<10} {'Owner':<8}" if long else "")
+                 + (f" {last_col:>12}" if show_last else ""))
         theme.paint(stdscr, y + 1, x + 1, title, "panelhead", inner_w)
         biggest = panel.biggest() if panel.show_sizes else 0
 
@@ -678,8 +694,11 @@ class App:
                                  theme.glyph("block"), theme.glyph("shade"))
             else:
                 tail = f"{human_time(entry.mtime)[:12]:>12}"
-            line = (f"{marker}{ljust(display, name_w)}{rjust(size_s, 6)} "
-                    f"{tail}")
+            line = f"{marker}{ljust(display, name_w)}{rjust(size_s, 6)}"
+            if long:
+                line += f" {self._mode_text(entry)} {ljust(entry.owner, 8)}"
+            if show_last:
+                line += f" {tail}"
 
             if is_cursor:
                 role = ("panelcursortag" if tagged else
@@ -701,6 +720,13 @@ class App:
         theme.scrollbar(stdscr, y + 2, x + w - 1, body_h, panel.top, body_h,
                         len(panel.entries),
                         role="scroll" if active else "framenc")
+
+    @staticmethod
+    def _mode_text(entry) -> str:
+        """``-rwxr-xr-x`` for the long listing, blank where nothing is known."""
+        if entry.name == Panel.PARENT or not entry.mode:
+            return " " * 10
+        return stat_mod.filemode(entry.mode)
 
     def _panel_footer(self, panel: Panel) -> str:
         """The text along a pane's bottom frame.
@@ -886,6 +912,8 @@ class App:
             "tag_group": self._tag_group,
             "untag_group": self._untag_group,
             "invert": self._invert_tags,
+            "attributes": self._attributes,
+            "long": self._toggle_long,
             "find": self._find_files,
             "connect": self._open_location,
             "presets": self._presets_menu,
@@ -1017,6 +1045,8 @@ class App:
             panel.clear_selection()
         elif key == ord("*"):  # tag what is untagged, and the other way round
             self._invert_tags()
+        elif key == ord("a"):  # permissions, owner and group
+            self._attributes()
         elif key == 27:  # Esc: the menu bar; Alt+letter: a menu by name
             self._menu_key(key)
         elif key == 21:  # Ctrl-U swap panes
@@ -1192,6 +1222,83 @@ class App:
             return
         panel.invert_selection()
         self._set_message(f"Tags inverted: {len(panel.selected)} tagged")
+
+    def _attributes(self) -> None:
+        """Show and change the permissions, owner and group of what is tagged.
+
+        The bits every entry agrees on are shown as they are, the others as
+        mixed, and a mixed bit left alone stays each entry's own.  A change
+        below directories is confirmed first, as a delete is, and can be
+        cancelled; an entry that refuses -- a file that is not yours to give
+        away -- is named at the end rather than stopping the rest.
+        """
+        panel = self.active
+        if panel.plugin is not None:
+            self._set_message("Attributes work on a directory listing")
+            return
+        targets = panel.selected_entries()
+        if not targets:
+            return
+        fs = panel.fs
+        if not fs.can_chmod:
+            dialogs.message(self.stdscr, "Attributes",
+                            f"{fs.label()} cannot change permissions.",
+                            error=True)
+            return
+        on, off = common_bits([t.mode for t in targets])
+        owners = {t.owner for t in targets}
+        groups = {t.group for t in targets}
+        owner = owners.pop() if len(owners) == 1 else ""
+        group = groups.pop() if len(groups) == 1 else ""
+        subject = (targets[0].name if len(targets) == 1
+                   else f"{len(targets)} items{self._not_shown(panel)}")
+        choice = dialogs.attributes(
+            self.stdscr, "Attributes", subject, on, off, owner, group,
+            can_chown=fs.can_chown,
+            has_dirs=any(t.is_dir and not t.is_symlink for t in targets))
+        if choice is None:
+            return
+        if choice.recursive and not dialogs.confirm(
+                self.stdscr, "Attributes",
+                f"Change {subject} and everything under it?"):
+            return
+        change = AttributeChange(
+            on=choice.on, off=choice.off,
+            owner=choice.owner if choice.owner != owner else "",
+            group=choice.group if choice.group != group else "",
+            recursive=choice.recursive)
+        paths = [(fs.join(panel.path, t.name), t) for t in targets]
+        dlg = dialogs.ProgressDialog(self.stdscr, "Attributes")
+        try:
+            done, failures = apply_change(
+                fs, paths, change,
+                progress=lambda count, label: dlg.update(count, 0, label),
+                cancel=dlg.cancelled)
+        except OperationCancelled:
+            done, failures = -1, []
+        finally:
+            dlg.close()
+        panel.refresh()
+        if failures:
+            more = len(failures) - 8
+            dialogs.message(self.stdscr, "Attributes: not changed",
+                            "\n".join(failures[:8])
+                            + (f"\n... and {more} more" if more > 0 else ""),
+                            error=True)
+        elif done < 0:
+            self._set_message("Attributes cancelled")
+        else:
+            self._set_message(f"Attributes changed on {done} item(s)")
+
+    def _toggle_long(self) -> None:
+        """Show the mode and owner columns, or not, and remember it."""
+        from . import config as config_mod
+
+        self.long_listing = not self.long_listing
+        saved = config_mod.save_listing(self.long_listing)
+        self._set_message(("Long listing" if self.long_listing
+                           else "Short listing")
+                          + ("" if saved else "  (could not be saved)"))
 
     def _end_search(self) -> None:
         """Turn the search mode off, leaving the cursor where it is."""
@@ -2930,6 +3037,7 @@ class App:
             "  Backspace/Left parent directory\n"
             "  Insert / Space tag file    -  untag all    *  invert\n"
             "  + / \\          tag / untag the names matching a pattern\n"
+            "  a              permissions, owner and group of what is tagged\n"
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
             "  Ctrl-G         go to path   Ctrl-T  sort order\n"
             "  Esc            the menu bar (Alt+F, Alt+C, Alt+O, Alt+H\n"

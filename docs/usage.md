@@ -1002,6 +1002,31 @@ Midnight Commander's three keys, over what the pane shows:
 - **A pattern that matches nothing** says so and changes nothing. `..` is never
   tagged, and with a filter on, the names it hides keep the tags they had.
 
+### Permissions, owner and group
+
+**`a`** (or **File ▸ Attributes…**) shows the permissions of the entry under
+the cursor, or of the tagged entries, and changes them.
+
+- **Nine boxes and an octal number**, two views of one value: the arrows (or
+  `Tab`) move between the boxes and `Space` flips one, and typing octal digits
+  sets all nine at once — the last three typed count, so `7`, `5`, `5` is
+  `755`. Each follows the other as you go.
+- **Tagged entries that disagree** show the bits they share as they are and
+  the others as `[~]`, mixed, and as `?` in the octal. A mixed bit left alone
+  stays each entry's own; flipping it sets it for all of them.
+- **Owner and group** are shown, and `o` and `g` change them where the pane
+  can: on a local or SSH pane by name, on SFTP by number, which is all SFTP
+  takes. Only root may give a file away, and a group must be one of your own;
+  a refusal is named at the end rather than hidden.
+- **`r` changes everything under a tagged directory too**, after asking as a
+  delete does. The walk does not follow symbolic links it meets, as
+  `chmod -R` does not; the change can be cancelled, and what would not change
+  is listed at the end.
+- **FTP and archives** cannot change a mode, and say so.
+
+**Options ▸ Long listing** adds a mode and an owner column to every pane, and
+is remembered (`[ui] listing`, see [Configuration](configuration.md)).
+
 ## Key bindings
 
 Keys are read decoded, so anywhere text is typed — the editor, a rename or
@@ -1021,6 +1046,7 @@ where it should.)
 | `Backspace` / `←` | parent directory | `F6` | move to other pane |
 | `Insert` / `Space` | tag file | `F7` | make directory |
 | `n` | new (empty) file here | `r` | rename the file under the cursor |
+| `a` | permissions, owner and group (see below) | | |
 | `x` | extract the archive into the other pane | `/` | search this pane by name (see above) |
 | `F` | filter: show only the names matching a pattern (see above) | | |
 | `D` | compare both panes' files | `h` | head + tail of the other pane's file, in this pane |

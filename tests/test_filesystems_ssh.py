@@ -747,3 +747,24 @@ def test_an_ssh_listing_knows_which_files_are_executable(ssh_fs):
     by_name = {e.name: e for e in fs.listdir("/srv")}
     assert by_name["run.sh"].mode & 0o777 == 0o755
     assert by_name["secret"].mode & 0o777 == 0o600
+
+
+# -- owners (MC-014) ------------------------------------------------------------
+
+@pytest.mark.parametrize("owner, group, command", [
+    ("deploy", "www", "chown deploy:www /srv/f"),
+    ("deploy", "", "chown deploy /srv/f"),
+    ("", "www", "chgrp www /srv/f"),
+])
+def test_ssh_chown(ssh_fs, owner, group, command):
+    fs, client = ssh_fs()
+    assert fs.can_chown
+    fs.chown("/srv/f", owner, group)
+    assert client.commands[-1] == command
+
+
+def test_ssh_chown_with_nothing_to_change_runs_nothing(ssh_fs):
+    fs, client = ssh_fs()
+    before = len(client.commands)
+    fs.chown("/srv/f")
+    assert len(client.commands) == before

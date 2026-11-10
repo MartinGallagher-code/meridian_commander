@@ -16,6 +16,7 @@ the sync engine are written once and work across any pair of backends.
 | --- | --- |
 | `filesystems.py` | `FileSystem` interface + Local / SFTP / SSH / FTP backends |
 | `operations.py` | streaming copy, recursive copy, move |
+| `attributes.py` | permission bits and owners: working out a change, and making it over a tree |
 | `sync.py` | bidirectional sync plan + execution |
 | `plugin_api.py` | pane plug-in API (`PanePlugin`, `InputOutputPlugin`, context) |
 | `plugins/` | plug-in discovery + built-in plug-ins |

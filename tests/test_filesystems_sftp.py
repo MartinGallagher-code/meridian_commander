@@ -98,6 +98,9 @@ class _FakeSftp:
     def chmod(self, path, mode):
         self.calls.append(("chmod", path, mode))
 
+    def chown(self, path, uid, gid):
+        self.calls.append(("chown", path, uid, gid))
+
     def symlink(self, source, dest):
         self.calls.append(("symlink", source, dest))
 
@@ -1120,3 +1123,32 @@ def test_sftp_says_when_a_path_is_not_a_link(sftp_fs):
     fs, _, _ = sftp_fs()
     with pytest.raises(FileSystemError, match="not a symbolic link"):
         fs.readlink("/srv/plain.txt")
+
+
+# -- owners (MC-014) ------------------------------------------------------------
+
+def test_sftp_listing_gives_owners_as_numbers(sftp_fs):
+    attr = _Attr("f")
+    attr.st_uid, attr.st_gid = 1000, 50
+    bare = _Attr("g")
+    fs, _, _ = sftp_fs(_FakeSftp(listing=[attr, bare]))
+    by_name = {e.name: e for e in fs.listdir("/srv")}
+    assert (by_name["f"].owner, by_name["f"].group) == ("1000", "50")
+    assert (by_name["g"].owner, by_name["g"].group) == ("", "")
+
+
+def test_sftp_chown_keeps_the_id_left_blank(sftp_fs):
+    current = _Attr("f")
+    current.st_uid, current.st_gid = 1000, 50
+    fs, sftp, _ = sftp_fs(_FakeSftp(stats={"/srv/f": current}))
+    assert fs.can_chown
+    fs.chown("/srv/f", group="33")
+    fs.chown("/srv/f", owner="0")
+    assert ("chown", "/srv/f", 1000, 33) in sftp.calls
+    assert ("chown", "/srv/f", 0, 50) in sftp.calls
+
+
+def test_sftp_chown_wants_numbers(sftp_fs):
+    fs, _, _ = sftp_fs()
+    with pytest.raises(FileSystemError, match="numeric owner and group ids"):
+        fs.chown("/srv/f", owner="deploy")
