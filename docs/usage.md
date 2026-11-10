@@ -571,6 +571,55 @@ eighty-column screen this way. `↑`/`↓` step to the neighbouring rows (of tho
 the filters keep, in the order shown), `PgUp`/`PgDn` scroll a long record, and
 `Enter` or `q` returns to the table.
 
+**Freezing columns.** `F` freezes the cursor's column and every column left of
+it at the left edge: panning right then moves only the columns after them, so a
+host name stays beside the fortieth column of its row. A rule (`│`) marks where
+the frozen columns end, and `F` again unfreezes them. The frozen columns may
+take up to two-thirds of the screen, so there is always room to pan the rest; `F`
+further right than that says it is too wide, and if the screen later shrinks the
+frozen columns that no longer fit are left out.
+
+**Hiding columns.** `-` hides the cursor's column, and `+` brings back every
+hidden one. The title counts them (`26 columns (3 hidden)`). Hidden columns are
+skipped by the arrows, `Home`/`End` and `/`, and left out of a row's record,
+which ends by naming them (`(hidden: note, area; + shows them)`). Filters and
+sort keys on a hidden column keep working.
+
+**A column summary.** `i` summarises the cursor's column over the rows the filters
+keep:
+
+```
+ Column: price -- numbers -- 4 rows -- fruit.tsv
+ Holds     numbers
+ Rows      4
+ Empty     1
+ Distinct  3 values
+ Minimum   0.25
+ Maximum   10.5
+ Mean      4.583333333
+ Median    3
+
+ Most frequent: Enter keeps the rows holding one, ! hides them
+  1  3
+  1  10.5
+  1  0.25
+```
+
+- **What it holds:** numbers, dates (ISO 8601, `2026-11-10` or with a time),
+  text, or nothing. A column counts as numbers exactly when `s` would sort it as
+  numbers, so the two never disagree.
+- **How many rows, how many empty, and how many different values.**
+- **For numbers:** the minimum, maximum, mean and median, and a histogram of ten
+  equal ranges, its bars scaled to the screen (`PgDn` scrolls to it on a short
+  one).
+- **The ten most frequent values**, with their counts. They are counted exactly
+  as written, so `Paris` and `paris` are two. `↑`/`↓` pick one; `Enter` (or `=`)
+  goes back to the table keeping only the rows holding it, and `!` hides them
+  instead — the same filters `=` and `!` make in the table.
+
+`←`/`→` summarise the neighbouring columns, and `q`, `Esc` or `i` return to the
+table.
+
 **Reading.** TSV, `.tab` and `.psv` are split on their delimiter and nothing
 else: a `"` in a TSV cell is just a character, as the format says. A `.csv`
 goes through Python's `csv` module, so a quoted comma or line break stays in
@@ -947,9 +996,12 @@ In the **table browser** (TSV, CSV): the spreadsheet grid's movement, `/`,
 `n`/`N` and `w`, plus `f` to filter, `=`/`!` to keep or hide the rows holding
 the cursor's value, `Backspace` to drop the last filter and `0` to clear them,
 `s` to sort by the cursor's column (again for descending, again for neither),
-`Enter` for the row as a record (`↑`/`↓` step rows, `Enter`/`q` return), `H` to
-read the first line as data, `c` for the column colours, `#` for the comment
-lines above the table, `q` quits.
+`Enter` for the row as a record (`↑`/`↓` step rows, `Enter`/`q` return), `i`
+for a summary of the cursor's column (`↑`/`↓` pick a value, `Enter`/`=` keep its
+rows, `!` hide them, `←`/`→` other columns), `F` to freeze the columns up to the
+cursor's, `-` to hide a column and `+` to show them all, `H` to read the first
+line as data, `c` for the column colours, `#` for the comment lines above the
+table, `q` quits.
 In the **terminal pane** (`t`): every key goes to the program. `Ctrl-]` then
 `Tab` switches to the other pane, `z` zooms the terminal to the full width and
 back, `q` closes the terminal, `PgUp` (or `[`)

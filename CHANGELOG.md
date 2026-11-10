@@ -12,6 +12,24 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.7.0] — 2026-11-10
+
+### Added
+
+- **The table browser finds its way across a wide file.** `F` freezes the
+  cursor's column and those left of it at the left edge, behind a rule, so a
+  host name stays in view while the other columns pan past; `F` again
+  unfreezes. The frozen columns may take up to two-thirds of the screen.
+  `-` hides the cursor's column and `+` brings every hidden one back: hidden
+  columns are skipped by the arrows and by `/`, counted in the title, and
+  left out of a row's record, which names them. `i` summarises the cursor's
+  column over the rows the filters keep: what it holds (numbers, ISO dates,
+  text), how many rows are empty and how many values distinct; the minimum,
+  maximum, mean, median and a ten-range histogram for numbers; and the ten
+  most frequent values, where `Enter` keeps the rows holding one and `!`
+  hides them. A column counts as numbers in the summary exactly when the
+  sort treats it as numbers. (MC-008)
+
 ## [1.6.0] — 2026-11-10
 
 ### Added
@@ -804,6 +822,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.7.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/552dc66...v1.4.0
