@@ -133,7 +133,7 @@ def test_scripts_are_declared():
 def test_the_two_versions_agree():
     """pyproject and __init__ must name the same version.
 
-    Releasing means bumping both by hand, and the halves fail differently
+    Every pull request bumps both by hand, and the halves fail differently
     when they drift: pyproject decides what PyPI is asked to accept, while
     ``__version__`` is what ``meridian --version`` reports to the user. A
     stale ``__version__`` ships a package that misreports itself; a stale

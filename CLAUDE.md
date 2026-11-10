@@ -25,11 +25,17 @@ which keeps every project's tickets as files and moves each one Backlog → In P
    <shared_tools clone>/scripts/ticket.py new meridian_commander "Imperative title" --request "the request, in the user's own words"
    ~~~
 
+**Every change moves the version**, however small: a pull request into `main` raises
+it in every place it is written and opens `CHANGELOG.md` with that version's own
+dated section, never an "Unreleased" heading left for later. CI fails a pull request
+whose version is not greater than its base branch's. This file's own section on the
+version says where it is written.
+
 The board: https://claude.ai/artifact/HrB3RpVpqGGQS7UZgZsMJm
 
 ## Checks
 
-The four in `CONTRIBUTING.md`, and the manual's build. CI
+The four in `CONTRIBUTING.md`, the version check, and the manual's build. CI
 (`.github/workflows/publish.yml`) runs all of them on every pull request:
 
 ```bash
@@ -38,11 +44,30 @@ pytest
 coverage run -m pytest && coverage report    # fail_under = 100 (Linux, 3.10+)
 ruff check .
 mypy meridian_commander
+bash tests/check_version.sh origin/main      # the version moved past main's
 python -m sphinx -b html -W docs docs/_build/html
 ```
 
-Every pull request adds an entry under `## [Unreleased]` in `CHANGELOG.md`
-and does not bump the version: releases are cut separately (`PUBLISHING.md`).
+## Every change moves the version
+
+The owner's rule (shared_tools BN-002): **whenever this project changes, its version
+changes with it**, however small the change: code, tests, docs or CI. A pull request
+into `main` carries its own bump and its own `CHANGELOG.md` section, never an
+"Unreleased" heading left for later.
+
+- Patch for fixes, docs, tests and CI; minor for anything new a user can use; major
+  only when something that worked stops working the way it did.
+- In the same pull request: `pyproject.toml` (`version`) and
+  `meridian_commander/__init__.py` (`__version__`), and a `## [X.Y.Z] — YYYY-MM-DD`
+  section at the top of `CHANGELOG.md`, with its link at the foot of the file.
+  `tests/check_version.sh` fails if any of them disagree.
+- The **version** job in CI fails a pull request whose version is not greater than its
+  base branch's, and a push to `main` whose version is not greater than what `main` had
+  before it. If `main` moves while a pull request is open, rebase and bump again.
+- Publishing is a separate step, and a person's call: a `v*` tag, a manual dispatch,
+  or a merge with `[release]` in its commit message runs `publish.yml`'s publish job
+  (`PUBLISHING.md`). A number that is never published is fine; a change with no
+  number is not.
 
 ## Bundling this repo
 

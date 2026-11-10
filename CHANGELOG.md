@@ -9,7 +9,10 @@ Releases before this file existed are reconstructed from the commit history,
 so they group what shipped rather than reproducing every commit. Dates are the
 day the version was cut.
 
-## [Unreleased]
+From 1.5.0 on, every pull request into `main` moves the version and adds its
+own section here, so not every version below is published to PyPI.
+
+## [1.5.0] — 2026-11-10
 
 ### Changed
 
@@ -43,6 +46,14 @@ day the version was cut.
   default to see whether a key's sequence follows; Meridian now sets 25 ms,
   so leaving insert mode in vim in the terminal pane, or closing a dialog,
   is immediate. An `ESCDELAY` in the environment is left as the user set it.
+- **Every change moves the version.** A pull request now raises the version
+  in `pyproject.toml` and `meridian_commander/__init__.py` and opens this file
+  with its own numbered, dated section, instead of adding to an "Unreleased"
+  one that waited for a release; 1.5.0 numbers everything merged since 1.4.0.
+  `tests/check_version.sh` checks that the two places and this file agree, and
+  a new `version` job in CI fails a pull request whose version is not greater
+  than its base branch's. Publishing to PyPI is unchanged, and still a
+  person's step. (shared_tools BN-002)
 
 ### Added
 
@@ -732,9 +743,13 @@ same history PyPI already has; see PUBLISHING.md.
 asks for this one to be cut by pushing "v1.4.0". Those two links resolve once
 that tag exists; cutting it the "[release]" way instead would leave them
 pointing at nothing.
+
+1.5.0 and later link to tags in the same way. Every pull request now moves the
+version, so not every version is published or tagged, and the link of one
+that never is points at nothing; its section above still says what changed.
 -->
 
-[Unreleased]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.4.0...HEAD
+[1.5.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/552dc66...v1.4.0
 [1.3.0]: https://github.com/MartinGallagher-code/meridian_commander/commit/552dc66
 [1.2.0]: https://github.com/MartinGallagher-code/meridian_commander/commit/7c6792d
