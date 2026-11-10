@@ -43,6 +43,7 @@ from __future__ import annotations
 import curses
 import locale
 import os
+import posixpath
 import shlex
 import shutil
 import stat as stat_mod
@@ -72,6 +73,7 @@ from .operations import (
     count_tree,
     move_path,
     overlapping,
+    same_place,
 )
 from .archive import ArchiveFileSystem, archive_stem, is_archive, open_archive
 from .browsers import has_own_browser, viewer_for
@@ -139,6 +141,7 @@ MENUS: list[dict] = [
             {"label": "Make ~d~irectory", "name": "mkdir", "key": "F7"},
             {"label": "Ne~w~ file", "name": "touch", "key": "n"},
             {"label": "Attri~b~utes...", "name": "attributes", "key": "a"},
+            {"label": "Lin~k~...", "name": "link", "key": "l"},
             {"label": "De~l~ete", "name": "delete", "key": "F8"},
             {"label": "~T~ag / untag", "name": "tag", "key": "Ins"},
             {"label": "Tag ~g~roup...", "name": "tag_group", "key": "+"},
@@ -916,6 +919,7 @@ class App:
             "untag_group": self._untag_group,
             "invert": self._invert_tags,
             "attributes": self._attributes,
+            "link": self._link,
             "long": self._toggle_long,
             "find": self._find_files,
             "connect": self._open_location,
@@ -1051,6 +1055,8 @@ class App:
             self._invert_tags()
         elif key == ord("a"):  # permissions, owner and group
             self._attributes()
+        elif key == ord("l"):  # make a symbolic link, or change one's target
+            self._link()
         elif key == 17:  # Ctrl-Q: the other pane shows the cursor's file
             self._quick_view()
         elif key == 27:  # Esc: the menu bar; Alt+letter: a menu by name
@@ -1295,6 +1301,119 @@ class App:
             self._set_message("Attributes cancelled")
         else:
             self._set_message(f"Attributes changed on {done} item(s)")
+
+    def _link(self) -> None:
+        """Make symbolic links in the other pane, or change a link's target.
+
+        On a link (and nothing tagged) it edits where that link points.
+        Otherwise each tagged entry, or the one under the cursor, gets a link
+        of its name in the other pane, relative by default -- a relative link
+        keeps working when the tree it is in moves.  Both panes have to be on
+        one machine: a link whose target is on another one is never what was
+        meant, and is refused with that reason.
+        """
+        panel, other = self.active, self.other
+        if panel.plugin is not None:
+            self._set_message("Links work on a directory listing")
+            return
+        cursor = panel.current()
+        if not panel.selected and cursor is not None and cursor.is_symlink:
+            self._edit_link(panel, cursor.name)
+            return
+        targets = panel.selected_entries()
+        if not targets:
+            return
+        if not same_place(panel.fs, other.fs):
+            dialogs.message(self.stdscr, "Link",
+                            "The two panes are on different machines, and a "
+                            "link\ncan only point at a path on its own.",
+                            error=True)
+            return
+        fs = other.fs
+        if not fs.can_symlink:
+            dialogs.message(self.stdscr, "Link",
+                            f"{fs.label()}: links are not supported here.",
+                            error=True)
+            return
+        relative = dialogs.Toggle("Relative", "r")
+        if len(targets) == 1:
+            where = dialogs.prompt(
+                self.stdscr, "Link", f"Link to '{targets[0].name}' at:",
+                default=fs.join(other.path, targets[0].name),
+                toggles=[relative])
+        else:
+            where = dialogs.prompt(
+                self.stdscr, "Link", f"Link {len(targets)} items into:",
+                default=other.path, toggles=[relative])
+        if not where:
+            return
+        where = fs.normpath(other.resolve(where))
+        made, errors = 0, []
+        for entry in targets:
+            source = panel.fs.join(panel.path, entry.name)
+            link = where if len(targets) == 1 else fs.join(where, entry.name)
+            target = source
+            if relative.on:
+                rel = (os.path.relpath if fs.sep == os.sep else posixpath.relpath)
+                target = rel(source, fs.dirname(link))
+            try:
+                if self._make_link(fs, target, link):
+                    made += 1
+            except Exception as exc:
+                errors.append(f"{fs.basename(link)}: {exc}")
+        other.refresh()
+        if errors:
+            dialogs.message(self.stdscr, "Link errors", "\n".join(errors[:8]),
+                            error=True)
+        else:
+            self._set_message(f"Made {made} link(s)")
+
+    def _make_link(self, fs: FileSystem, target: str, link: str) -> bool:
+        """Make ``link`` point at ``target``; asks before replacing anything.
+
+        False when the answer was to leave what is there.
+        """
+        try:
+            existing = fs.stat(link)
+        except Exception:
+            existing = None
+        if existing is not None:
+            if existing.is_dir and not existing.is_symlink:
+                raise FileSystemError("a directory of that name is in the way")
+            if not dialogs.confirm(self.stdscr, "Link",
+                                   f"'{fs.basename(link)}' already exists.\n"
+                                   f"Replace it with a link?"):
+                return False
+            fs.remove(link)
+        fs.symlink(target, link)
+        return True
+
+    def _edit_link(self, panel: Panel, name: str) -> None:
+        """Point the link ``name`` somewhere else, keeping its name."""
+        fs = panel.fs
+        path = fs.join(panel.path, name)
+        if not fs.can_symlink:
+            dialogs.message(self.stdscr, "Link",
+                            f"{fs.label()}: links are not supported here.",
+                            error=True)
+            return
+        try:
+            current = fs.readlink(path)
+        except Exception as exc:
+            dialogs.message(self.stdscr, "Link", str(exc), error=True)
+            return
+        target = dialogs.prompt(self.stdscr, "Link",
+                                f"'{name}' points at:", default=current)
+        if not target or target == current:
+            return
+        try:
+            fs.remove(path)
+            fs.symlink(target, path)
+        except Exception as exc:
+            dialogs.message(self.stdscr, "Link error", str(exc), error=True)
+            return
+        panel.refresh(keep_name=name)
+        self._set_message(f"{name} -> {target}")
 
     def _toggle_long(self) -> None:
         """Show the mode and owner columns, or not, and remember it."""
@@ -3076,6 +3195,7 @@ class App:
             "  a              permissions, owner and group of what is tagged\n"
             "  Ctrl-Q         quick view: the other pane shows the cursor's file\n"
             "  Ctrl-T         sort: name, natural (run_2 < run_10), ext, size, time\n"
+            "  l              link in the other pane; on a link, change its target\n"
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
             "  Ctrl-G         go to path   Ctrl-T  sort order\n"
             "  Esc            the menu bar (Alt+F, Alt+C, Alt+O, Alt+H\n"

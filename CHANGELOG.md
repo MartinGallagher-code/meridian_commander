@@ -12,6 +12,17 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.15.0] — 2026-11-10
+
+### Added
+
+- **`l` makes symbolic links** (also **File ▸ Link…**): one in the other pane
+  to the entry under the cursor, or to each tagged one, relative by default
+  (`Ctrl-R` in the prompt makes it absolute), with the name editable. On a
+  link, `l` changes its target. Both panes must be on one machine; FTP and
+  archives say links are not supported there; an existing name is asked about
+  and a directory in the way is refused. (MC-017)
+
 ## [1.14.0] — 2026-11-10
 
 ### Added
@@ -989,6 +1000,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.15.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.11.0...v1.12.0

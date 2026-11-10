@@ -113,6 +113,13 @@ A symbolic link is copied as a link, pointing exactly where the original did —
 a relative target stays relative — whenever both sides can hold one: local,
 SFTP and SSH panes can. A link that points nowhere is copied as it is.
 
+**Making one:** `l` makes a link in the other pane to the entry under the
+cursor, or to each tagged one, relative by default (`Ctrl-R` in the prompt
+switches to absolute), named as the entry is unless you edit the name. On a
+link, `l` changes where it points instead. Both panes have to be on one machine
+— a link can only point at a path on its own — and an existing name is asked
+about before it is replaced.
+
 Where the far side cannot hold a link (FTP, archives), a link to a **file** is
 copied as the file it points at, and a link to a **directory** is left alone:
 descending into it would copy its target a second time — and, for a link that

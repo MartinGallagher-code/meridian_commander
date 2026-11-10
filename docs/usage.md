@@ -1074,7 +1074,7 @@ where it should.)
 | `Backspace` / `←` | parent directory | `F6` | move to other pane |
 | `Insert` / `Space` | tag file | `F7` | make directory |
 | `n` | new (empty) file here | `r` | rename the file under the cursor |
-| `a` | permissions, owner and group (see below) | | |
+| `a` | permissions, owner and group (see below) | `l` | link in the other pane; on a link, change its target |
 | `x` | extract the archive into the other pane | `/` | search this pane by name (see above) |
 | `F` | filter: show only the names matching a pattern (see above) | | |
 | `D` | compare both panes' files | `h` | head + tail of the other pane's file, in this pane |
