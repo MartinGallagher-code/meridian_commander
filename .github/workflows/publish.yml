@@ -3,7 +3,8 @@
 # Publishing uses PyPI "trusted publishing" (OIDC) -- see PUBLISHING.md for
 # the one-time PyPI-side setup. The publish job runs on version tags
 # (v1.2.3) or when the workflow is dispatched manually from the Actions tab;
-# ordinary pushes and pull requests just run the test suite and a build.
+# ordinary pushes and pull requests just run the test suite, the version check
+# and a build.
 
 name: publish
 
@@ -126,6 +127,37 @@ jobs:
           else
             python -m coverage report
           fi
+
+  # Every change moves the version (shared_tools BN-002). The first step fails
+  # when pyproject.toml and __init__.py disagree, or CHANGELOG.md does not open
+  # with that version, numbered and dated. On a pull request the second fails
+  # unless the version is greater than the base branch's; on a push to main the
+  # third fails unless it is greater than what main was before the push -- two
+  # pull requests that each took the same number pass their own checks and are
+  # caught only there. It gates nothing else: publishing is unchanged.
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Every place the version is written agrees
+        run: bash tests/check_version.sh
+      - name: The version moved past the base branch's
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          git fetch --depth=1 origin "$BASE"
+          bash tests/check_version.sh FETCH_HEAD
+      - name: The version moved past main's before this push
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          case "$BEFORE" in ''|0000000000000000000000000000000000000000) exit 0 ;; esac
+          git fetch --depth=1 origin "$BEFORE"
+          bash tests/check_version.sh FETCH_HEAD
 
   build:
     needs: [lint, docs, test]

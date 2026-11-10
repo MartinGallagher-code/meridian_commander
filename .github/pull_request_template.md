@@ -18,8 +18,12 @@ same branch make both harder to review.
 
 ## Notes for the reviewer
 
-- [ ] Added an entry under `## [Unreleased]` in `CHANGELOG.md`
-- [ ] Did not bump the version (releases are cut separately)
+- [ ] Moved the version in `pyproject.toml` and `meridian_commander/__init__.py`,
+      however small the change (patch for fixes, docs, tests and CI; minor for
+      anything new)
+- [ ] Opened `CHANGELOG.md` with that version's own `## [X.Y.Z] — YYYY-MM-DD`
+      section, never an "Unreleased" one, and its link at the foot
+- [ ] `bash tests/check_version.sh origin/main` passes
 
 <!--
 If the change touches drawing or key handling, say which terminal you tried it

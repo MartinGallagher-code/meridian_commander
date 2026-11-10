@@ -19,7 +19,8 @@ stdlib fallback), pytest, coverage, ruff and mypy.
 ## What CI will check
 
 Run all four before opening a pull request; they are quick, and they are
-exactly what the workflow runs.
+what the workflow runs, beside the version check (see
+[Pull requests](#pull-requests)) and the manual's build.
 
 ```bash
 pytest                                  # about half a minute
@@ -134,9 +135,18 @@ plugin_api.py` have the details.
 - Describe what the change does and why the old behaviour was wrong. The
   commit history is the project's explanation of itself; a message that says
   only "fix bug" throws that away.
-- Add the changelog entry under `## [Unreleased]` in `CHANGELOG.md`.
-- Do not bump the version. Releases are cut separately — see
-  [PUBLISHING.md](PUBLISHING.md).
+- Move the version, however small the change — code, tests, docs or CI.
+  Patch for fixes, docs, tests and CI; minor for anything new a user can use;
+  major only when something that worked stops working the way it did. Raise it
+  in both `pyproject.toml` and `meridian_commander/__init__.py`, and open
+  `CHANGELOG.md` with a section of its own, `## [X.Y.Z] — YYYY-MM-DD`, never an
+  "Unreleased" one. `bash tests/check_version.sh origin/main` checks all three
+  and that the version is greater than `main`'s, and the `version` job in CI
+  runs it. If `main` moves while the pull request is open, rebase and bump
+  again.
+- A bump is not a release. Publishing to PyPI is a separate step that a
+  maintainer takes — see [PUBLISHING.md](PUBLISHING.md) — and a version that
+  is never published is fine.
 
 ## Reporting bugs
 

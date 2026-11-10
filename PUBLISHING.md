@@ -22,14 +22,20 @@ distribution name is **`meridian-commander`**; the import package is
 
 ## Releasing a new version
 
-1. Bump the version in **both** places (keep them identical — the test suite
-   checks that they are, and PyPI refuses a version it already has):
+There is nothing to bump at release time. Every pull request already moves
+the version and opens `CHANGELOG.md` with that version's own dated section
+(see "Pull requests" in [CONTRIBUTING.md](CONTRIBUTING.md)), and CI fails one
+that does not. A release publishes the version `main` already carries.
+Whether and when to publish is a maintainer's call, and a version that is
+never published is fine.
+
+1. Check the version on `main` is one PyPI does not have yet — it refuses a
+   version it already has. It is written in **both** places, and the test
+   suite and `tests/check_version.sh` check that they agree and that
+   `CHANGELOG.md` opens with it:
    - `pyproject.toml` → `[project] version`
    - `meridian_commander/__init__.py` → `__version__`
-2. Move everything under `## [Unreleased]` in `CHANGELOG.md` into a new
-   section for the version, dated today, and add the link at the foot of the
-   file.
-3. Run the checks locally:
+2. Run the checks locally:
 
    ```bash
    pip install -e ".[dev]"
@@ -37,15 +43,16 @@ distribution name is **`meridian-commander`**; the import package is
    coverage run -m pytest && coverage report
    ruff check .
    mypy meridian_commander
+   bash tests/check_version.sh
    python -m build            # builds sdist + wheel into dist/
    twine check dist/*
    ```
 
-4. Commit, tag and push:
+3. Tag that commit on `main` with its version, and push the tag:
 
    ```bash
    git tag v1.0.0
-   git push origin main v1.0.0
+   git push origin v1.0.0
    ```
 
    With trusted publishing configured, the `publish.yml` workflow runs the
