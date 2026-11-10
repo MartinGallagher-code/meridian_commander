@@ -97,6 +97,78 @@ def test_a_character_no_number_can_carry_reaches_the_shell(key):
     assert encode_key(key) == key.encode("utf-8")
 
 
+# -- Ctrl-, Alt- and Shift- with the cursor keys -------------------------------
+
+@pytest.mark.parametrize("name, expected", [
+    ("kUP5", b"\x1b[1;5A"), ("kDN3", b"\x1b[1;3B"),
+    ("kRIT7", b"\x1b[1;7C"), ("kLFT5", b"\x1b[1;5D"), ("kLFT3", b"\x1b[1;3D"),
+    ("kHOM6", b"\x1b[1;6H"), ("kEND4", b"\x1b[1;4F"),
+    ("kIC5", b"\x1b[2;5~"), ("kDC3", b"\x1b[3;3~"),
+    ("kPRV5", b"\x1b[5;5~"), ("kNXT7", b"\x1b[6;7~"),
+    ("kUP2", b"\x1b[1;2A"), ("kLFT8", b"\x1b[1;8D"),
+    # rxvt names Shift-Up and Shift-Down with no number, as standard terminfo
+    # names Shift-Left kLFT: a name with no number is the key with Shift.
+    ("kUP", b"\x1b[1;2A"), ("kDN", b"\x1b[1;2B"),
+])
+def test_a_modified_key_is_sent_in_xterms_form(name, expected):
+    """What xterm sends -- the program is told it is talking to one --
+    whatever the outer terminal sent for the key."""
+    assert terminal.modified_sequence(name) == expected
+
+
+@pytest.mark.parametrize("name", [
+    "kFND5", "kcbt2", "kpADD", "kxIN", "ka2", "kUP1", "kUP0", "kUP9",
+    "kUP10", "kLFT55", "kUP5x", "KEY_LEFT", "UNKNOWN KEY", "",
+])
+def test_a_name_that_is_not_a_modified_key_has_no_sequence(name):
+    assert terminal.modified_sequence(name) is None
+
+
+def test_the_modified_keys_come_from_the_terminals_own_terminfo():
+    """curses numbers these keys when it starts, from the extended names in
+    the terminal's terminfo entry, so the numbers are looked up rather than
+    written down.  Every test screen is xterm-256color, which names Ctrl-,
+    Alt- and both together with each arrow, Home, End, Ins, Del, PgUp and
+    PgDn -- and, being xterm, sends for each exactly what the program must be
+    sent."""
+    def read(stdscr):
+        stdscr.keypad(True)         # what numbers them, as the app does first
+        found = {}
+        for code, sent in terminal.modified_keys().items():
+            name = curses.keyname(code).decode()
+            found[name] = (sent, curses.tigetstr(name))
+        return found
+
+    found = with_curses_screen(5, 20, read)
+    wanted = {base + modifier
+              for base in ("kUP", "kDN", "kLFT", "kRIT", "kHOM", "kEND",
+                           "kIC", "kDC", "kPRV", "kNXT")
+              for modifier in "34567"}
+    assert wanted <= set(found)
+    for name, (sent, outer) in found.items():
+        assert sent == outer, name
+
+
+def test_a_terminal_that_names_no_modified_keys_has_none(monkeypatch):
+    # screen-256color and vt100 name none: what such a terminal sends for
+    # Ctrl-Left reaches the application as separate keys, and the program
+    # gets those bytes as they came.
+    monkeypatch.setattr(curses, "keyname", lambda code: b"")
+    assert terminal.modified_keys() == {}
+
+
+def test_before_curses_has_started_there_are_no_modified_keys(monkeypatch):
+    asked = []
+
+    def not_started(code):
+        asked.append(code)
+        raise curses.error("must call initscr() first")
+
+    monkeypatch.setattr(curses, "keyname", not_started)
+    assert terminal.modified_keys() == {}
+    assert len(asked) == 1          # not once for every number in the range
+
+
 # -- a plug-in on a fake SSH channel --------------------------------------------
 
 class _FakeChannel:
@@ -337,6 +409,43 @@ def test_a_key_with_nothing_to_send_sends_nothing(remote):
     assert channel.sent == b""
 
 
+def test_ctrl_and_alt_arrows_reach_the_program(app):
+    """They used to be dropped: curses reports them under numbers of its own,
+    which had no entry here, so word jumps did nothing in vim or the shell.
+    The modifier form does not change with application cursor keys."""
+    def press(stdscr):
+        stdscr.keypad(True)
+        channel = _FakeChannel()
+        plugin = TerminalPlugin(_remote_ctx(app, channel))
+        channel.sent = b""
+        codes = {curses.keyname(code).decode(): code
+                 for code in plugin._modified}
+        try:
+            for name in ("kLFT5", "kRIT3"):     # Ctrl-Left, Alt-Right
+                assert plugin.handle_key(codes[name]) is True
+            plugin.screen.feed(b"\x1b[?1h")     # what vim asks for
+            for name in ("kUP7", "kDC5"):       # Ctrl-Alt-Up, Ctrl-Del
+                plugin.handle_key(codes[name])
+        finally:
+            plugin.on_exit()
+        return channel.sent
+
+    sent = with_curses_screen(5, 20, press)
+    assert sent == b"\x1b[1;5D\x1b[1;3C\x1b[1;7A\x1b[3;5~"
+
+
+def test_a_modified_key_the_terminal_did_not_name_sends_nothing(app,
+                                                               monkeypatch):
+    monkeypatch.setattr(curses, "keyname", lambda code: b"")
+    channel = _FakeChannel()
+    plugin = TerminalPlugin(_remote_ctx(app, channel))
+    channel.sent = b""
+    assert plugin._modified == {}
+    assert plugin.handle_key(curses.KEY_MAX + 43) is True
+    assert channel.sent == b""
+    plugin.on_exit()
+
+
 # -- the Ctrl-] menu -------------------------------------------------------------
 
 def test_ctrl_bracket_then_tab_switches_pane(remote, app):
@@ -470,6 +579,97 @@ def test_a_scrolled_back_view_stays_put_as_output_arrives(remote):
     channel.reads = [b"more\r\n" * 3]
     plugin.tick()
     assert plugin.scroll == 8
+
+
+# -- the mouse -----------------------------------------------------------------
+
+def test_a_mouse_report_is_left_to_the_application(remote):
+    """The application's mouse handling turns the wheel into wheel() and a
+    click on the other pane into focus.  Answering True kept it from running,
+    so the wheel the help promised never scrolled anything."""
+    plugin, channel = remote
+    assert plugin.handle_key(curses.KEY_MOUSE) is None
+    assert channel.sent == b""
+
+
+def test_a_mouse_report_keeps_the_view_scrolled_back(remote):
+    # While scrolled back any other key returns to the live screen; the wheel
+    # is not a key, and the second turn of it must not undo the first.
+    plugin, _ = remote
+    _history(plugin)
+    plugin.wheel(5)
+    assert plugin.handle_key(curses.KEY_MOUSE) is None
+    assert plugin.scroll == 5
+
+
+def test_a_mouse_report_closes_the_menu(remote):
+    plugin, channel = remote
+    plugin.handle_key(MENU_KEY)
+    assert plugin.handle_key(curses.KEY_MOUSE) is None
+    assert plugin.menu is False
+    assert channel.sent == b""
+
+
+def test_a_mouse_report_does_not_close_a_finished_terminal(remote):
+    # "Press any key to close": the wheel is not a key.
+    plugin, channel = remote
+    plugin._finish()
+    assert plugin.handle_key(curses.KEY_MOUSE) is None
+    assert channel.closed is False
+
+
+_WHEEL_UP = 0x08000000
+_WHEEL_DOWN = 0x10000000
+
+
+@pytest.fixture
+def mouse(remote, app, monkeypatch):
+    """The terminal in the active left pane of an app that has drawn its
+    panes, and a way to send it a mouse report at a place on the screen."""
+    plugin, channel = remote
+    app.left.plugin = plugin
+    app.active = app.left
+    app._panel_boxes = [(app.left, 1, 0, 21, 40), (app.right, 1, 40, 21, 40)]
+    monkeypatch.setattr(curses, "BUTTON4_PRESSED", _WHEEL_UP, raising=False)
+    monkeypatch.setattr(curses, "BUTTON5_PRESSED", _WHEEL_DOWN, raising=False)
+
+    def report(mx, my, bstate):
+        monkeypatch.setattr(curses, "getmouse",
+                            lambda: (0, mx, my, 0, bstate))
+        app.handle_key(curses.KEY_MOUSE)
+
+    return plugin, channel, report
+
+
+def test_the_wheel_scrolls_back_the_active_terminal(mouse):
+    plugin, channel, report = mouse
+    _history(plugin, 200)
+    report(5, 5, _WHEEL_UP)
+    assert plugin.scroll == 3
+    report(5, 5, _WHEEL_UP)
+    assert plugin.scroll == 6
+    report(5, 5, _WHEEL_DOWN)
+    assert plugin.scroll == 3
+    assert channel.sent == b""
+
+
+def test_the_wheel_does_nothing_on_the_alternate_screen(mouse):
+    # less and vim have no history here, and the wheel is not turned into
+    # PgUp for them either.
+    plugin, channel, report = mouse
+    _history(plugin)
+    plugin.screen.feed(b"\x1b[?1049h")
+    report(5, 5, _WHEEL_UP)
+    assert plugin.scroll == 0
+    assert channel.sent == b""
+
+
+def test_a_click_on_the_other_pane_leaves_the_terminal(mouse, app):
+    plugin, channel, report = mouse
+    report(41, 5, curses.BUTTON1_CLICKED)
+    assert app.active is app.right
+    assert app.left.plugin is plugin       # the shell keeps running
+    assert channel.sent == b""
 
 
 # -- busy polling --------------------------------------------------------------

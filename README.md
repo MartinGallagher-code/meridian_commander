@@ -196,13 +196,14 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   (an interactive shell on the pane's existing SSH connection). It is a real
   terminal emulator: colours, `ls --color`, `git diff`, and full-screen
   programs — **vim, less, man, top, htop** — run in the pane and leave it as it
-  was when they exit. Every key goes to the program, F-keys and PgUp/PgDn
-  included; **`Ctrl-]`** opens the terminal's menu: `Tab` switches to the
-  other pane while the shell keeps running (Tab back to return), `z` zooms
-  the terminal to the full width and back (single pane, as `z` is in a file
-  pane; vim, less and top redraw to fit), `q` closes it, `PgUp` scrolls back
-  through what went off the top (so does the mouse wheel). Exiting the shell
-  closes it too. `!` still hands a program the whole real terminal instead.
+  was when they exit. Every key goes to the program, F-keys, PgUp/PgDn and
+  Ctrl-/Alt-arrows included; **`Ctrl-]`** opens the terminal's menu: `Tab`
+  switches to the other pane while the shell keeps running (Tab back to
+  return), `z` zooms the terminal to the full width and back (single pane, as
+  `z` is in a file pane; vim, less and top redraw to fit), `q` closes it,
+  `PgUp` scrolls back through what went off the top (so does the mouse
+  wheel). Exiting the shell closes it too. `!` still hands a program the
+  whole real terminal instead.
 - **Mouse support** — click to select, double-click to open, wheel to scroll,
   and **right-click for a context menu** of actions (view, edit, copy, move,
   rename, delete, tag, mkdir, new file, compare, head+tail, terminal).
