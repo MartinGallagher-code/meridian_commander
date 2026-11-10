@@ -16,6 +16,9 @@ own section here, so not every version below is published to PyPI.
 
 ### Changed
 
+- CI's Linux test matrix runs on `ubuntu-24.04`: `ubuntu-latest` became
+  Ubuntu 26.04 in November 2026, and `setup-python` has no Python 3.9 for
+  it, so the 3.9 job could not start.
 - **Licensing and attribution are now identical across every repository in
   the suite.** The notice said the same thing eleven slightly different ways —
   different badge text, different `--version` wording, five styles of file
