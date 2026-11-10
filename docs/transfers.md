@@ -54,25 +54,70 @@ move be a rename?") misses exactly the case that matters. Paths are compared as
 written, so a symlink pointing back into the source is not caught — resolving
 one would mean asking a backend that may have no way to answer.
 
-## Symlinked directories are left where they are
+## When the target is already there
 
-A symbolic link to a directory is neither a directory nor a file, and a
-transfer can do nothing useful with one. Descending into it would copy the
-target a second time — and, for a link that points at one of its own
-ancestors, for ever. Opening it as a file is an error. Recreating it at the far
-end would leave an empty directory pretending to be a link, and there is no way
-to *make* a symlink through the filesystem interface: local disk, SFTP, FTP and
-archives share one small set of operations, and creating links is not among
-them.
+`F5` and `F6` ask before they replace anything. When a file of the same name
+is already where a copy is going, the transfer stops and shows both — the size
+and time of the one arriving and of the one already there, and which is newer —
+and asks:
 
-So `F5` and `F6` copy everything else and tell you which links they left, by
-name. An `F6` move between two different connections keeps its source in that
-case rather than deleting a link it could not reproduce; a move *within* one
-filesystem is a rename, which moves links intact and has nothing to skip. `F9`
-leaves them out of the sync plan for the same reason.
+| Choice | Key | What it does |
+| --- | --- | --- |
+| Overwrite | `o` | replace this one |
+| Overwrite all | `a` | replace this one and every later one without asking |
+| Overwrite if older | `i` | replace this one only if it is older than the one arriving |
+| Overwrite all older | `l` | the same, for this one and every later one |
+| Skip | `s` | keep the one that is there |
+| Skip all | `n` | keep this one and every later one without asking |
+| Cancel | `c`, `Esc` | stop the transfer here; nothing after it is touched |
 
-A link to a *file* is followed as it always was: copying one gives you the
-file's contents.
+"Older" means older by more than two seconds — the same slack `F9` allows, for
+filesystems that keep times coarsely — and a file whose age cannot be read is
+not older, so the doubtful case keeps what is there. An "all" answer lasts until
+the end of that one transfer, every tagged item and everything inside a
+directory included, and no further.
+
+A directory that is already there is merged into rather than asked about: what
+is inside it is asked about one file at a time. Under a directory the copy made
+itself nothing can be in the way, so nothing is looked up there — on a remote
+pane that saves a round trip per file.
+
+A **move** that skips anything keeps its source. Within one filesystem a move is
+a rename, which every backend would otherwise carry out over an existing file
+without a word; it is asked about in the same way, and Skip leaves both where
+they were. `r` (rename) asks too, before giving a file a name another file
+already has.
+
+`F9` does not ask: sync decides by age, and never deletes.
+
+## Permissions
+
+A copy gets its source's permission bits, so a script copied to a server is
+still executable there. Only the nine `rwx` bits travel: set-user-ID and
+set-group-ID would hand out privileges nobody asked to give, which is why `cp`
+drops them too. A directory the copy makes gets its source's mode once
+everything is inside it — given a read-only mode first, it would refuse its own
+contents — and a directory that was already there keeps its own.
+
+The copy prompt has a **Keep permissions** switch under the destination field,
+on by default; `Ctrl-P` turns it off for that transfer, and the copies then get
+the destination's default mode.
+
+Local, SFTP and SSH panes can set a mode. FTP (whose `SITE CHMOD` is optional)
+and archives cannot, and the status line then says how many files arrived
+without theirs.
+
+## Symbolic links
+
+A symbolic link is copied as a link, pointing exactly where the original did —
+a relative target stays relative — whenever both sides can hold one: local,
+SFTP and SSH panes can. A link that points nowhere is copied as it is.
+
+Where the far side cannot hold a link (FTP, archives), a link to a **file** is
+copied as the file it points at, and a link to a **directory** is left alone:
+descending into it would copy its target a second time — and, for a link that
+points at one of its own ancestors, for ever. Either way you are told which, by
+name, and a move that left one keeps its source.
 
 ## How synchronization works
 

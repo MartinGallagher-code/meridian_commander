@@ -60,7 +60,10 @@ from .filesystems import (
     _split_user_host,
 )
 from .operations import (
+    OVERWRITE,
+    SKIP,
     OperationCancelled,
+    TransferReport,
     copy_contents,
     copy_path,
     count_tree,
@@ -73,7 +76,12 @@ from .compare import Comparison
 from .panel import Panel, Search
 from . import usage
 from .peek import PeekPane
-from .sync import build_sync_plan, execute_sync_plan, survey_directory
+from .sync import (
+    MTIME_TOLERANCE,
+    build_sync_plan,
+    execute_sync_plan,
+    survey_directory,
+)
 from .util import human_size, human_time, ljust, read_key, rjust, typed_char
 
 #: How long curses waits after Esc for the rest of a key's sequence, in ms.
@@ -205,6 +213,98 @@ VIEWER_CHOICES: list[tuple[str, str]] = [
     ("more", "more"),
     ("$PAGER", "$PAGER (whatever the environment names)"),
 ]
+
+
+#: The answers to "the target is already there", as (label, key, rule, for
+#: the rest of the transfer too).  ``older`` overwrites only a target older
+#: than its source; ``None`` is Cancel.
+CONFLICT_CHOICES: list[tuple[str, str, str | None, bool]] = [
+    ("Overwrite", "o", OVERWRITE, False),
+    ("Overwrite all", "a", OVERWRITE, True),
+    ("Overwrite if older", "i", "older", False),
+    ("Overwrite all older", "l", "older", True),
+    ("Skip", "s", SKIP, False),
+    ("Skip all", "n", SKIP, True),
+    ("Cancel", "c", None, False),
+]
+
+
+class TransferConflicts:
+    """Asks before a transfer replaces something, and remembers "all".
+
+    One per transfer: an "all" answer holds for the rest of it -- every item
+    tagged, and everything inside a directory being copied -- and for nothing
+    after it.  Handed to :func:`~meridian_commander.operations.copy_path` and
+    :func:`~meridian_commander.operations.move_path` as their ``on_conflict``.
+    """
+
+    def __init__(self, stdscr, verb: str) -> None:
+        self.stdscr = stdscr
+        self.verb = verb
+        #: The answer given for all, once there is one.
+        self.rule: str | None = None
+
+    def __call__(self, target: str, source, existing) -> str:
+        rule = self.rule
+        if rule is None:
+            rule = self._ask(target, source, existing)
+        if rule == "older":
+            return OVERWRITE if self.older(existing, source) else SKIP
+        return rule
+
+    @staticmethod
+    def older(existing, source) -> bool:
+        """Whether ``existing`` is older than ``source`` by more than slack.
+
+        The same two seconds sync allows, for filesystems that keep times
+        coarsely; and a time either side cannot report is not older, so the
+        doubtful case keeps what is there.
+        """
+        if existing.mtime is None or source.mtime is None:
+            return False
+        return source.mtime - existing.mtime > MTIME_TOLERANCE
+
+    def _ask(self, target: str, source, existing) -> str:
+        name = os.path.basename(target.rstrip("/\\")) or target
+        if existing.mtime is None or source.mtime is None:
+            age = ""
+        elif self.older(existing, source):
+            age = "   older"
+        elif self.older(source, existing):
+            age = "   newer"
+        else:
+            age = "   same age"
+        text = (f"{name} is already there.\n"
+                f"Replace with: {human_size(source.size).strip():>7}  "
+                f"{human_time(source.mtime)}\n"
+                f"Existing:     {human_size(existing.size).strip():>7}  "
+                f"{human_time(existing.mtime)}{age}")
+        choice = dialogs.menu(self.stdscr, f"{self.verb}: already there",
+                              [label for label, _, _, _ in CONFLICT_CHOICES],
+                              keys=[key for _, key, _, _ in CONFLICT_CHOICES],
+                              text=text)
+        self._uncover()
+        if choice is None:
+            raise OperationCancelled()
+        _, _, rule, for_all = CONFLICT_CHOICES[choice]
+        if rule is None:
+            raise OperationCancelled()
+        if for_all:
+            self.rule = rule
+        return rule
+
+    def _uncover(self) -> None:
+        """Repaint what the question covered.
+
+        It is taller than the progress window it opened over, which redraws
+        only itself, so the question's top and bottom rows would otherwise
+        stay on the screen until the transfer ended.
+        """
+        try:
+            self.stdscr.touchwin()
+            self.stdscr.noutrefresh()
+        except (AttributeError, curses.error):
+            pass   # no screen to repaint: a stand-in in a test
 
 
 def menu_layout() -> list[tuple[int, int]]:
@@ -1739,12 +1839,39 @@ class App:
             return
         src = panel.fs.join(panel.path, entry.name)
         dst = panel.fs.join(panel.path, new_name)
+        if self._rename_would_replace(panel.fs, src, dst) and not dialogs.confirm(
+                self.stdscr, "Rename",
+                f"'{new_name}' already exists.\nReplace it?"):
+            return
         try:
             panel.fs.rename(src, dst)
             self._reload_after_change(panel, keep_name=new_name)
             self._set_message(f"Renamed to {new_name}")
         except Exception as exc:
             dialogs.message(self.stdscr, "Rename error", str(exc), error=True)
+
+    @staticmethod
+    def _rename_would_replace(fs: FileSystem, src: str, dst: str) -> bool:
+        """Whether renaming ``src`` to ``dst`` would replace something else.
+
+        Every backend's rename replaces an existing file without a word, so
+        that is asked first.  Not a directory in the way -- a rename onto one
+        that holds anything fails and says so -- and not ``src`` itself under
+        another case on a disk that ignores case, where renaming ``readme`` to
+        ``README`` finds "README" already there and it is the same file.
+        """
+        try:
+            existing = fs.stat(dst)
+        except Exception:
+            return False
+        if existing.is_dir and not existing.is_symlink:
+            return False
+        if isinstance(fs, LocalFileSystem):
+            try:
+                return not os.path.samefile(src, dst)
+            except OSError:
+                return True
+        return True
 
     def _find_files(self) -> None:
         """Search the active pane's tree; browse results, jump/view/edit."""
@@ -2192,8 +2319,9 @@ class App:
             prompt_label = f"{verb} '{sources[0].name}' to{where}:"
         else:
             prompt_label = f"{verb} {len(sources)} items to{where}:"
+        keep_mode = dialogs.Toggle("Keep permissions", "p")
         dest = dialogs.prompt(self.stdscr, f"{verb}", prompt_label,
-                              default=default_dest)
+                              default=default_dest, toggles=[keep_mode])
         if dest is None:
             return
         dst_fs = dst_panel.fs
@@ -2223,10 +2351,12 @@ class App:
 
         cancelled = False
         errors: list[str] = []
-        #: Symlinked directories the transfer could not reproduce.  Named
-        #: rather than left unmentioned: the alternative is a copy that looks
-        #: complete and is not.
-        skipped: list[str] = []
+        #: What the transfer could not do exactly as asked -- targets kept,
+        #: links it could not make, modes it could not set.  Named rather than
+        #: left unmentioned: the alternative is a copy that looks complete and
+        #: is not.
+        report = TransferReport()
+        conflicts = TransferConflicts(self.stdscr, verb)
         #: Moved sources, deleted only once the destination's batch has closed
         #: cleanly: an archive has not written its copies until then.
         moved: list[str] = []
@@ -2244,13 +2374,19 @@ class App:
 
                         try:
                             if move:
-                                skipped += move_path(
+                                move_path(
                                     src_panel.fs, src, dst_fs, target,
-                                    progress, dlg.cancelled, deferred=moved)
+                                    progress, dlg.cancelled, deferred=moved,
+                                    on_conflict=conflicts,
+                                    keep_mode=keep_mode.on, links=True,
+                                    report=report)
                             else:
-                                skipped += copy_path(
+                                copy_path(
                                     src_panel.fs, src, dst_fs, target,
-                                    progress, dlg.cancelled)
+                                    progress, dlg.cancelled,
+                                    on_conflict=conflicts,
+                                    keep_mode=keep_mode.on, links=True,
+                                    report=report)
                         except OperationCancelled:
                             cancelled = True
                             break
@@ -2278,14 +2414,20 @@ class App:
         else:
             self._set_message(
                 f"{verb} complete: {len(sources)} item(s)"
-                + self._skipped_note(skipped, move))
-        if skipped:
+                + self._transfer_note(report, move))
+        if report.links_left:
             dialogs.message(
                 self.stdscr, f"{verb}: symlinked directories",
                 "These are links, not directories, and there is no way to "
                 "make a link on the other side, so they were left alone:\n"
-                + "\n".join(skipped[:8])
+                + "\n".join(report.links_left[:8])
                 + ("\n\nThe source was kept." if move else ""))
+        if report.links_as_files:
+            dialogs.message(
+                self.stdscr, f"{verb}: links copied as files",
+                "The other side cannot hold a symbolic link, so these were "
+                "copied as the files they point at:\n"
+                + "\n".join(report.links_as_files[:8]))
 
     @staticmethod
     def _delete_sources(fs: FileSystem, paths: list[str],
@@ -2308,13 +2450,23 @@ class App:
             errors.append(str(exc))
 
     @staticmethod
-    def _skipped_note(skipped: list[str], move: bool) -> str:
-        """The tail of the status line when symlinked directories were left."""
-        if not skipped:
+    def _transfer_note(report: TransferReport, move: bool) -> str:
+        """The tail of the status line: what was not done exactly as asked."""
+        notes = []
+        if report.kept:
+            notes.append(f"{len(report.kept)} existing kept")
+        if report.links_left:
+            count = len(report.links_left)
+            notes.append(f"{count} symlinked "
+                         f"director{'y' if count == 1 else 'ies'} skipped")
+        if report.links_as_files:
+            notes.append(f"{len(report.links_as_files)} link(s) copied as files")
+        if report.modes_lost:
+            notes.append(f"permissions not kept on {len(report.modes_lost)}")
+        if not notes:
             return ""
-        count = len(skipped)
-        note = f" -- {count} symlinked director{'y' if count == 1 else 'ies'} skipped"
-        return note + (", source kept" if move else "")
+        kept_source = move and (report.kept or report.links_left)
+        return " -- " + ", ".join(notes) + (", source kept" if kept_source else "")
 
     def _extract(self) -> None:
         """Unpack the archive here, or the tagged ones, into the other pane.
@@ -2741,6 +2893,10 @@ class App:
             "  F4/4/e  Edit      F5/5/c  Copy           F6/6/m  Move\n"
             "  F7/7    Mkdir     F8/8/d  Delete          F9/9/s  Sync\n"
             "  F10/0/q Quit\n"
+            "\n"
+            "  F5/F6 ask before replacing a file (overwrite, skip, if\n"
+            "  older; once or for all), keep permissions (Ctrl-P in the\n"
+            "  prompt drops them) and copy symbolic links as links.\n"
             "\n"
             "  Mouse: click to select, double-click to open, wheel to\n"
             "  scroll, right-click for a context menu of actions.\n"

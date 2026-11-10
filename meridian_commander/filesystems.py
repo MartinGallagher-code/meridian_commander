@@ -205,6 +205,35 @@ class FileSystem(abc.ABC):
     def rename(self, src: str, dst: str) -> None:
         """Rename within the same filesystem (used for same-fs moves)."""
 
+    # -- permissions and links --------------------------------------------
+    #: Whether :meth:`chmod` can set permission bits on this backend.
+    can_chmod: bool = False
+    #: Whether :meth:`symlink` and :meth:`readlink` work on this backend.
+    can_symlink: bool = False
+
+    def chmod(self, path: str, mode: int) -> None:
+        """Set ``path``'s permission bits to ``mode & 0o777``.
+
+        Only the nine ``rwx`` bits: a copy that carried set-user-ID or
+        set-group-ID across would hand out privileges nobody asked to give,
+        which is why ``cp`` drops them too.  A backend that cannot change a
+        mode -- FTP, whose ``SITE CHMOD`` is optional, and archives -- keeps
+        this default and says so, and ``can_chmod`` lets a caller ask first.
+        """
+        raise FileSystemError(f"{self.label()} cannot change permissions")
+
+    def symlink(self, target: str, path: str) -> None:
+        """Make ``path`` a symbolic link to ``target``, as ``ln -s`` does.
+
+        ``target`` is stored exactly as given, relative or absolute, so a link
+        copied from one place to another points where the original did.
+        """
+        raise FileSystemError(f"{self.label()} cannot make symbolic links")
+
+    def readlink(self, path: str) -> str:
+        """What the symbolic link at ``path`` points to, as it was written."""
+        raise FileSystemError(f"{self.label()} cannot read symbolic links")
+
     @contextlib.contextmanager
     def batch(self):
         """Group a run of writes so the backend can finish them in one go.
@@ -299,7 +328,19 @@ class LocalFileSystem(FileSystem):
         return entries
 
     def stat(self, path: str) -> DirEntry:
-        st = os.stat(path)
+        """One entry's details, describing the target as ``os.stat`` does.
+
+        A link that resolves to nothing falls back to the link's own details,
+        as the SFTP backend's ``stat`` does, rather than reporting that there
+        is nothing there: there is, and a copy that is about to write over it
+        or reproduce it has to know.
+        """
+        try:
+            st = os.stat(path)
+        except FileNotFoundError:
+            if not os.path.islink(path):
+                raise
+            st = os.lstat(path)
         return DirEntry(
             name=os.path.basename(os.path.normpath(path)),
             is_dir=stat_mod.S_ISDIR(st.st_mode),
@@ -338,6 +379,18 @@ class LocalFileSystem(FileSystem):
 
     def rename(self, src: str, dst: str) -> None:
         os.rename(src, dst)
+
+    can_chmod = True
+    can_symlink = True
+
+    def chmod(self, path: str, mode: int) -> None:
+        os.chmod(path, mode & 0o777)
+
+    def symlink(self, target: str, path: str) -> None:
+        os.symlink(target, path)
+
+    def readlink(self, path: str) -> str:
+        return os.readlink(path)
 
 
 # ---------------------------------------------------------------------------
@@ -881,6 +934,25 @@ class SFTPFileSystem(FileSystem):
             # Older servers lack the posix-rename extension.
             self._sftp.rename(src, dst)
 
+    can_chmod = True
+    can_symlink = True
+
+    def chmod(self, path: str, mode: int) -> None:
+        self._sftp.chmod(path, mode & 0o777)
+
+    def symlink(self, target: str, path: str) -> None:
+        # paramiko sends the target first and the link second.  The SFTP
+        # draft says the opposite, and OpenSSH's server -- which nearly every
+        # server is -- reads them the paramiko way, so this is the order that
+        # makes the link the right way round where it matters.
+        self._sftp.symlink(target, path)
+
+    def readlink(self, path: str) -> str:
+        target = self._sftp.readlink(path)
+        if target is None:
+            raise FileSystemError(f"not a symbolic link: {path}")
+        return target
+
     def close(self) -> None:
         try:
             # The write session, when there is a distinct one, goes first: it
@@ -950,13 +1022,13 @@ def _parse_unix_ls_line(line: str) -> "DirEntry | None":
     if not line.strip():
         return None
     m = re.match(
-        r"^([\-dlbcps])[rwxsStT\-]{9}[\+@\.]?\s+\d+\s+\S+\s+\S+\s+"
+        r"^([\-dlbcps])([rwxsStT\-]{9})[\+@\.]?\s+\d+\s+\S+\s+\S+\s+"
         r"(\d+(?:,\s*\d+)?)\s+(\S+\s+\d+\s+[\d:]+)\s+(.+)$",
         line,
     )
     if not m:
         return None
-    type_ch, size_s, date_s, name = m.groups()
+    type_ch, perms, size_s, date_s, name = m.groups()
     is_link = type_ch == "l"
     is_dir = type_ch == "d"
     size = 0 if "," in size_s else int(size_s)
@@ -968,7 +1040,36 @@ def _parse_unix_ls_line(line: str) -> "DirEntry | None":
         is_symlink=is_link,
         size=size,
         mtime=_parse_ls_date(date_s),
+        mode=_ls_mode(type_ch, perms),
     )
+
+
+#: The file-type bits for each ``ls -l`` type character.
+_LS_TYPES = {
+    "-": stat_mod.S_IFREG, "d": stat_mod.S_IFDIR, "l": stat_mod.S_IFLNK,
+    "b": stat_mod.S_IFBLK, "c": stat_mod.S_IFCHR, "p": stat_mod.S_IFIFO,
+    "s": stat_mod.S_IFSOCK,
+}
+
+#: The extra bit an ``s``/``S`` or ``t``/``T`` stands for, by position.
+_LS_SPECIAL = {2: stat_mod.S_ISUID, 5: stat_mod.S_ISGID, 8: stat_mod.S_ISVTX}
+
+
+def _ls_mode(type_ch: str, perms: str) -> int:
+    """The ``st_mode`` an ``ls -l`` line's ``drwxr-xr-x`` column stands for.
+
+    Kept rather than thrown away, so a listing over SSH or FTP knows what a
+    local or SFTP one does: which files are executable (Enter runs them) and
+    what mode a copy should be given.  A lowercase ``s`` or ``t`` is the
+    special bit *and* execute; the capital letter is the special bit alone.
+    """
+    mode = _LS_TYPES[type_ch]
+    for position, char in enumerate(perms):
+        if char in "rwxst":
+            mode |= 1 << (8 - position)
+        if char in "sStT":
+            mode |= _LS_SPECIAL.get(position, 0)
+    return mode
 
 
 def _link_name(text: str, size: int) -> str:
@@ -1585,6 +1686,20 @@ class SSHFileSystem(FileSystem):
 
     def rename(self, src: str, dst: str) -> None:
         self._run(f"mv {self._q(src)} {self._q(dst)}")
+
+    can_chmod = True
+    can_symlink = True
+
+    def chmod(self, path: str, mode: int) -> None:
+        self._run(f"chmod {mode & 0o777:o} {self._q(path)}")
+
+    def symlink(self, target: str, path: str) -> None:
+        # "--": the target is whatever a link held, and one beginning with a
+        # dash would otherwise be read as an option.
+        self._run(f"ln -s -- {self._q(target)} {self._q(path)}")
+
+    def readlink(self, path: str) -> str:
+        return self._run(f"readlink {self._q(path)}").rstrip("\n")
 
     def close(self) -> None:
         _close_ssh_client(self._client)

@@ -8,7 +8,8 @@ in the repository covers the same ground from the contributor's side.
 
 Every location — local, SFTP, SSH shell, FTP — implements one small `FileSystem`
 interface (`listdir`, `stat`, streaming `open_read`/`open_write`, and the
-mutating operations). Because the interface is uniform, the copy/move engine and
+mutating operations, `chmod`, `symlink` and `readlink` among them for the
+backends whose `can_chmod` and `can_symlink` say they can). Because the interface is uniform, the copy/move engine and
 the sync engine are written once and work across any pair of backends.
 
 | Module | Responsibility |
