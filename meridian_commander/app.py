@@ -18,7 +18,7 @@ Key bindings (also shown in the F1 help screen)::
 
     Tab            switch active pane          F1   help
     Up/Down        move cursor                 F2   open / connect location
-    PgUp/PgDn      page                        F3   view (md/xlsx/docx/pptx)
+    PgUp/PgDn      page                        F3   view (md/xlsx/tsv/docx/...)
     Home/End       first / last                F4   edit file
     Enter / Right  enter dir/archive/view      F5   copy  ->  other pane
     Backspace/Left parent directory            F6   move  ->  other pane
@@ -2718,6 +2718,8 @@ class App:
             "                 other pane is on, and follows its cursor;\n"
             "                 +/- more/fewer lines, Esc gives the pane back\n"
             "  F3 on .xlsx    spreadsheet grid: Tab sheet, / find, w width\n"
+            "  F3 on .tsv/.csv  table: f filter, =/! this value, Bksp/0\n"
+            "                 unfilter, s sort, Enter row, H header, c colour\n"
             "  F3 on .docx    document view: headings, lists, tables, w wrap\n"
             "  F3 on .pptx    slide browser: Tab slide, t notes, / find\n"
             "  F3 on .md      markdown rendered; r shows the source\n"
@@ -2728,8 +2730,8 @@ class App:
             "  Options>Editor   F4 opens vi/vim/$EDITOR instead of the\n"
             "                   built-in editor\n"
             "  Options>Viewer   F3 opens less/$PAGER instead of the built-in\n"
-            "                   viewer, for plain text (a spreadsheet, deck,\n"
-            "                   document, PDF or image keeps its own)\n"
+            "                   viewer, for plain text (a spreadsheet, table,\n"
+            "                   deck, document, PDF or image keeps its own)\n"
             "\n"
             "  Function keys -- each also has digit and letter aliases,\n"
             "  for terminals that swallow the F-keys:\n"
