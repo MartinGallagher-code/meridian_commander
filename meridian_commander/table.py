@@ -43,6 +43,8 @@ TABLE_SUFFIXES = (".tsv", ".tab", ".psv", ".csv")
 MAX_BYTES = 16 * 1024 * 1024
 MAX_ROWS = 50_000
 CHUNK = 64 * 1024
+#: Comment lines are looked for among this many lines at the top of a file.
+PREAMBLE_LINES = 1000
 
 #: Suffixes whose delimiter is known and which are split without quoting.
 _SPLIT = {".tsv": "\t", ".tab": "\t", ".psv": "|"}
@@ -71,6 +73,8 @@ class Table:
     delimiter: str
     quoted: bool = False        # read through the csv module
     truncated: bool = False
+    #: The comment lines set aside from the top of the file.
+    comments: list[str] = field(default_factory=list)
 
     @property
     def delimiter_name(self) -> str:
@@ -101,7 +105,8 @@ def read_bytes(fs, path: str) -> tuple[bytes, bool]:
     works on every pane: local, SFTP, SSH, FTP and inside an archive.
     """
     max_bytes = MAX_BYTES
-    max_lines = MAX_ROWS + 1          # the header, and every row kept
+    # The header, every row kept, and room for comment lines above them.
+    max_lines = MAX_ROWS + 1 + PREAMBLE_LINES
     stream = fs.open_read(path)
     chunks: list[bytes] = []
     total = newlines = 0
@@ -132,9 +137,12 @@ def sniff_delimiter(text: str) -> str:
     """The delimiter of a ``.csv``: whichever candidate the first line has most of.
 
     The first line is usually the header, which is the line least likely to
-    hold a stray delimiter inside a value.  Ties go to the comma.
+    hold a stray delimiter inside a value.  Comment lines above it are passed
+    over, being prose.  Ties go to the comma.
     """
-    first = next((line for line in text[:CHUNK].split("\n") if line.strip()), "")
+    lines = [line for line in text[:CHUNK].split("\n") if line.strip()]
+    first = next((line for line in lines if not line.startswith("#")),
+                 lines[0] if lines else "")
     return max(_CANDIDATES, key=first.count)
 
 
@@ -156,6 +164,29 @@ def parse(text: str, delimiter: str, quoted: bool) -> list[list[str]]:
         lines.pop()
     return [(line[:-1] if line.endswith("\r") else line).split(delimiter)
             for line in lines]
+
+
+def split_preamble(records: list[list[str]]
+                   ) -> tuple[list[list[str]], list[list[str]]]:
+    """The comment lines at the top of a file, and the records after them.
+
+    The suite's own tools open a results file with ``#`` lines saying which
+    run it came from.  Read as the table, the first of them became the
+    header and every row was marked as having the wrong number of fields.
+    So blank lines and lines starting with ``#`` at the top are set aside --
+    except a last ``#`` line that splits into as many fields as the line
+    after it, which is a header written as a comment (VCF's ``#CHROM``,
+    BED's ``#chrom``) and stays the header.
+    """
+    skip = 0
+    limit = min(len(records), PREAMBLE_LINES)
+    while skip < limit and (records[skip] == [""]
+                            or records[skip][0].startswith("#")):
+        skip += 1
+    if 0 < skip < len(records) and records[skip - 1] != [""] \
+            and len(records[skip - 1]) == len(records[skip]) > 1:
+        skip -= 1
+    return records[:skip], records[skip:]
 
 
 def read_table(fs, path: str) -> Table:
@@ -180,9 +211,12 @@ def read_table(fs, path: str) -> Table:
         # The cut was made at a line break, and in CSV a line break can sit
         # inside a quoted cell: the last record may be the front of one.
         records.pop()
+    preamble, records = split_preamble(records)
     limit = MAX_ROWS + 1
     truncated = more or len(records) > limit
-    return Table(records[:limit], delimiter, quoted, truncated)
+    return Table(records[:limit], delimiter, quoted, truncated,
+                 [delimiter.join(record) for record in preamble
+                  if record != [""]])
 
 
 # -- display widths ------------------------------------------------------------

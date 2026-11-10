@@ -471,6 +471,37 @@ def test_filters_carry_across_the_header_setting(fruit):
     assert _shown(fruit) == ["apple", "fig", "plum"]
 
 
+# -- comment lines ------------------------------------------------------------------
+NOTED = "# from a tool\n# second line\nfruit\tprice\napple\t3\n"
+
+
+def test_comment_lines_are_counted_in_the_title(fs, tmp_path):
+    view = make(fs, tmp_path, NOTED)
+    assert view.labels() == ["fruit", "price"]
+    assert "2 comment lines above (#)" in _text(view, cols=80)
+    assert "comment line" not in _text(make(fs, tmp_path, FRUIT, "plain.tsv"),
+                                       cols=80)
+
+
+def test_the_comment_key_shows_them(monkeypatch, fs, tmp_path):
+    view = make(fs, tmp_path, NOTED)
+    shown = []
+    monkeypatch.setattr(dialogs, "message",
+                        lambda stdscr, title, text, **k: shown.append(text))
+    _run(monkeypatch, view, [ord("#"), ord("q")])
+    assert shown == ["# from a tool\n# second line"]
+
+
+def test_the_comment_key_says_when_there_are_none(monkeypatch, fruit):
+    window = _run(monkeypatch, fruit, [ord("#"), ord("q")])
+    assert "no comment lines" in window.text
+
+
+def test_a_file_of_nothing_but_comments_says_so(fs, tmp_path):
+    view = make(fs, tmp_path, "# only a note\n")
+    assert "nothing but comment lines" in _text(view)
+
+
 # -- colour -----------------------------------------------------------------------
 def _cell_attrs(drawn, y):
     return [a[3] for a in drawn if a[0] == y and len(a) > 3]

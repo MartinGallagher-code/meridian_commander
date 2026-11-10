@@ -27,11 +27,12 @@ own section here, so not every version below is published to PyPI.
   filters stack; `=`/`!` keep or hide the rows holding the cursor's value;
   `s` sorts, stably, by the cursor's column; `Enter` shows a row as a record,
   one field per line. TSV is split on tabs without quoting, CSV goes through
-  the `csv` module with its delimiter taken from the first line, rows with
-  the wrong number of fields are marked, and the read stops at 50,000 rows or
-  16 MB with `[truncated]` in the title. It works on remote panes and inside
-  archives, and the configured pager no longer takes these files, as it does
-  not take a spreadsheet. (MC-007)
+  the `csv` module with its delimiter taken from the first line, `#` comment
+  lines at the top are set aside rather than read as the header (`#` shows
+  them), rows with the wrong number of fields are marked, and the read
+  stops at 50,000 rows or 16 MB with `[truncated]` in the title. It works on
+  remote panes and inside archives, and the configured pager no longer takes
+  these files, as it does not take a spreadsheet. (MC-007)
 
 ## [1.5.0] — 2026-11-10
 

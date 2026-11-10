@@ -57,7 +57,8 @@ ENTER_KEYS = (10, 13, curses.KEY_ENTER)
 BACKSPACE_KEYS = (curses.KEY_BACKSPACE, 127, 8)
 
 FOOTER_KEYS = ("Enter row  [f]ilter  =/! this value  Bksp/0 unfilter  "
-               "[s]ort  [/]find  [H]eader  [c]olour  [w]idth  [q]uit")
+               "[s]ort  [/]find  [H]eader  [c]olour  [w]idth  [#]comments  "
+               "[q]uit")
 RECORD_KEYS = "Up/Down row  PgUp/PgDn scroll  Enter/q back to the table"
 # Scrolled "to the end" of a record; drawing clamps it to the last screenful,
 # which only drawing knows the height of.
@@ -344,6 +345,8 @@ class TableView:
         if self.error:
             return f"Cannot read: {self.error}"
         if not self.records:
+            if self.table.comments:
+                return "(nothing but comment lines; # shows them)"
             return "(this file is empty)"
         if not self.data_rows():
             return "(nothing below the header; H reads the first line as data)"
@@ -392,8 +395,12 @@ class TableView:
                     labels[key.column] + theme.glyph("down" if key.descending
                                                      else "up")
                     for key in self.view.keys))
-            parts.append(f"{_count(self.ncols, 'column')}, "
-                         f"{self.table.delimiter_name}")
+            shape = (f"{_count(self.ncols, 'column')}, "
+                     f"{self.table.delimiter_name}")
+            comments = len(self.table.comments)
+            if comments:
+                shape += f", {_count(comments, 'comment line')} above (#)"
+            parts.append(shape)
         theme.paint(win, 0, 0, clean(" -- ".join(parts) + " "), "keybar", width)
 
     def _draw_headers(self, win, gutter: int, columns) -> None:
@@ -541,6 +548,17 @@ class TableView:
             if pattern and not self.find_next(1):
                 self.notice = f" '{pattern}' not found "
 
+    def _show_comments(self, stdscr) -> None:
+        """The comment lines set aside from the top of the file, in a box."""
+        from . import dialogs
+
+        if not self.table.comments:
+            self.notice = " no comment lines at the top of this file "
+            return
+        dialogs.message(stdscr, "Comments above the table",
+                        "\n".join(clean(line) for line in self.table.comments))
+        curses.curs_set(0)
+
     def _prompt_filter(self, stdscr) -> None:
         from . import dialogs
 
@@ -596,6 +614,8 @@ class TableView:
             self.cycle_width()
         elif key in (ord("/"), curses.KEY_F7):
             self._prompt_search(stdscr)
+        elif key == ord("#"):
+            self._show_comments(stdscr)
         elif key == ord("n"):
             if self.search and not self.find_next(1):
                 self.notice = " no match "

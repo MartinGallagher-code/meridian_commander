@@ -533,6 +533,13 @@ is shorter than four characters; the table sizes each column from its values:
   delimiter it used. A row with more or fewer fields than the first line is
   marked with `!` beside its number rather than silently padded, and the footer
   says how many fields it has.
+- **Comment lines at the top are set aside.** The suite's own tools open a
+  results file with `#` lines saying which run it came from; read as the table,
+  the first of them would be the header. Blank lines and `#` lines at the top
+  are left out of the table instead, the title counts them (`2 comment lines
+  above (#)`), and `#` shows them. A last `#` line that has as many fields as
+  the line after it is a header written as a comment (VCF's `#CHROM`) and stays
+  the header. A `#` line further down is an ordinary row.
 
 **Filtering.** `f` asks for a filter and keeps only the rows that match:
 
@@ -941,7 +948,8 @@ In the **table browser** (TSV, CSV): the spreadsheet grid's movement, `/`,
 the cursor's value, `Backspace` to drop the last filter and `0` to clear them,
 `s` to sort by the cursor's column (again for descending, again for neither),
 `Enter` for the row as a record (`↑`/`↓` step rows, `Enter`/`q` return), `H` to
-read the first line as data, `c` for the column colours, `q` quits.
+read the first line as data, `c` for the column colours, `#` for the comment
+lines above the table, `q` quits.
 In the **terminal pane** (`t`): every key goes to the program. `Ctrl-]` then
 `Tab` switches to the other pane, `z` zooms the terminal to the full width and
 back, `q` closes the terminal, `PgUp` (or `[`)

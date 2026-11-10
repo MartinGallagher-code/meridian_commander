@@ -34,6 +34,7 @@ from meridian_commander.table import (
     read_table,
     sniff_delimiter,
     sort_rows,
+    split_preamble,
     wrap,
 )
 
@@ -114,6 +115,7 @@ def test_a_file_exactly_at_the_byte_limit_is_not_truncated(tmp_path, monkeypatch
 
 def test_reading_stops_once_there_are_more_lines_than_rows_kept(tmp_path, monkeypatch):
     monkeypatch.setattr(table, "MAX_ROWS", 2)
+    monkeypatch.setattr(table, "PREAMBLE_LINES", 0)
     monkeypatch.setattr(table, "CHUNK", 4)
     path = write_bytes(tmp_path / "a.tsv", b"h\n1\n2\n3\n4\n5\n6\n7\n8\n9\n")
     fs = CountingFS()
@@ -210,6 +212,55 @@ def test_an_empty_csv_is_taken_to_be_comma_separated():
 
 def test_sniffing_skips_blank_leading_lines():
     assert sniff_delimiter("\n  \nfruit;price\napple;3\n") == ";"
+
+
+def test_sniffing_passes_over_comment_lines():
+    assert sniff_delimiter("# made by a tool, on a day\nfruit;price\n") == ";"
+    # A file that is all comment is judged by its first line.
+    assert sniff_delimiter("# a;b;c\n") == ";"
+
+
+# -- comment lines at the top ---------------------------------------------------
+def test_comment_lines_at_the_top_are_set_aside(fs, tmp_path):
+    write(str(tmp_path / "run.tsv"),
+          "# made by a tool\n\n# two fruits\nfruit\tprice\napple\t3\n")
+    read = read_table(fs, str(tmp_path / "run.tsv"))
+    assert read.comments == ["# made by a tool", "# two fruits"]
+    assert read.records == [["fruit", "price"], ["apple", "3"]]
+
+
+def test_a_header_written_as_a_comment_stays_the_header():
+    records = [["##format 2"], ["#city", "pop"], ["Oslo", "709037"]]
+    assert split_preamble(records) == ([["##format 2"]],
+                                       [["#city", "pop"], ["Oslo", "709037"]])
+
+
+def test_a_one_field_comment_over_one_field_rows_is_still_a_comment():
+    assert split_preamble([["# note"], ["1"]]) == ([["# note"]], [["1"]])
+
+
+def test_a_comment_line_further_down_is_a_row():
+    records = [["a"], ["# not at the top"], ["1"]]
+    assert split_preamble(records) == ([], records)
+
+
+def test_a_file_of_nothing_but_comments(fs, tmp_path):
+    write(str(tmp_path / "c.csv"), "# only, notes\n\n# here\n")
+    read = read_table(fs, str(tmp_path / "c.csv"))
+    assert read.records == [] and len(read.comments) == 2
+
+
+def test_comments_are_looked_for_only_near_the_top(monkeypatch):
+    monkeypatch.setattr(table, "PREAMBLE_LINES", 2)
+    records = [["# a"], ["# b"], ["# c"], ["x"]]
+    assert split_preamble(records) == (records[:2], records[2:])
+
+
+def test_comment_lines_do_not_count_against_the_row_limit(fs, tmp_path, monkeypatch):
+    monkeypatch.setattr(table, "MAX_ROWS", 2)
+    write(str(tmp_path / "a.tsv"), "# one\n# two\n# three\nh\n1\n2\n")
+    read = read_table(fs, str(tmp_path / "a.tsv"))
+    assert read.records == [["h"], ["1"], ["2"]] and read.truncated is False
 
 
 def test_a_semicolon_csv_is_read_as_one(fs, tmp_path):
