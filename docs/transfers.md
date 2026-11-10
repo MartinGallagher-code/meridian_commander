@@ -126,6 +126,43 @@ descending into it would copy its target a second time — and, for a link that
 points at one of its own ancestors, for ever. Either way you are told which, by
 name, and a move that left one keeps its source.
 
+## In the background
+
+Switch **Background** on in the `F5`/`F6` prompt (`Ctrl-B`) and the copy or move
+becomes a *job*: it runs while the panes, the viewers and every other key go on
+working. The status line shows the jobs running and waiting, the bytes they
+have done and how fast; when one ends, the panes it changed are reloaded and the
+status line says how it went.
+
+- **The question comes first.** A job cannot stop to ask, so before it starts
+  you choose, for everything in it, what happens to a target that is already
+  there: **Overwrite**, **Overwrite if older** (the same two seconds of slack
+  as above), or **Skip**.
+- **`J` lists the jobs** in the active pane — running, waiting, paused, done,
+  failed and cancelled — with how far each has got. `p` pauses or resumes the
+  one under the cursor, `c` cancels it, and `Enter` shows its errors. Errors
+  stay with their job rather than popping up over whatever you are doing.
+- **Cancelling** stops a job at the next chunk and removes the file it was
+  writing, so nothing half-written is left behind. Whatever it had already
+  finished stays where it landed.
+- **Pausing** holds the job at the next chunk, with the file it is on still
+  open, until you resume it.
+- **One at a time between the same two places.** Jobs from one location to
+  another run in the order they were started; jobs between different places
+  run side by side.
+- **A remote side gets a connection of its own**, opened when the job is
+  queued with the details the pane was opened with — asking for a password if
+  the agent and keys will not do — and closed when the job ends. Browsing that
+  host is never held up behind a job.
+- **Archives cannot take part**: an archive is rewritten as a whole, so a copy
+  into or out of one runs in the foreground as before.
+- **Quitting** with jobs still running or waiting asks whether to **wait for
+  them** (Meridian quits when the last one ends; `J` shows them meanwhile) or
+  **cancel them and quit**.
+
+Background delete, background sync and resuming a job after a restart are not
+done.
+
 ## How synchronization works
 
 `F9` builds a plan by walking both panes' directory trees:

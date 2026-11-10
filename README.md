@@ -106,6 +106,13 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   A copy from an SFTP pane to
   the *same* server writes down a second channel, so the read and the write
   never contend (see [Copying on one connection](https://meridian-commander.readthedocs.io/en/latest/transfers.html)).
+- **Copy and move in the background** — switch **Background** on in the
+  `F5`/`F6` prompt (`Ctrl-B`), say once what to do with a target that is
+  already there, and the panes stay usable while it runs. The status line
+  shows the jobs, bytes done and speed; `J` lists them, to pause, resume,
+  cancel, or read a job's errors. Jobs between the same two places run one at
+  a time, and a remote one uses a connection of its own. Quitting with jobs
+  left asks whether to wait or cancel them.
 - **Bidirectional directory sync** (`F9`) — compares the two panes and copies
   the newest version of each file in whichever direction is needed, so both
   sides end up holding the latest of everything. Nothing is deleted; you get a

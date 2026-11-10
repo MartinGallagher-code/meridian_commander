@@ -844,6 +844,9 @@ class SFTPFileSystem(FileSystem):
         self.host = host              # as typed: may be an ssh-config alias
         self.port = port
         self.typed_username = username or _split_user_host(host)[0]
+        #: The key named when connecting, for a second connection (a job's).
+        self.key_filename = key_filename if isinstance(key_filename, str) \
+            else ""
         self._client = _open_ssh_client(host, username, password, port,
                                         key_filename)
         # Show the username the connection actually authenticated as.
@@ -1564,6 +1567,9 @@ class SSHFileSystem(FileSystem):
         self.host = host              # as typed: may be an ssh-config alias
         self.port = port
         self.typed_username = username or _split_user_host(host)[0]
+        #: The key named when connecting, for a second connection (a job's).
+        self.key_filename = key_filename if isinstance(key_filename, str) \
+            else ""
         self._read_templates = list(self.READ_TEMPLATES)
         self._write_templates = list(self.WRITE_TEMPLATES)
         self._client = _open_ssh_client(host, username, password, port,

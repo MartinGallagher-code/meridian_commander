@@ -563,7 +563,8 @@ def test_appendix_c_on_the_branch(app, tmp_path, monkeypatch):
     assert _mode(tmp_path / "right" / "run.sh") == 0o755
     assert read(str(tmp_path / "right" / "run.sh")).startswith("#!/bin/sh")
     assert os.readlink(tmp_path / "right" / "link.sh") == "run.sh"
-    assert scripted.prompt_toggles[0] == [("Keep permissions", True)]
+    assert scripted.prompt_toggles[0] == [("Keep permissions", True),
+                                          ("Background", False)]
     assert app.message == "Copy complete: 2 item(s)"
 
 
