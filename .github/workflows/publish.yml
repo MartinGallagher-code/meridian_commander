@@ -60,15 +60,20 @@ jobs:
       # the rest of the matrix finish rather than cancelling it.
       fail-fast: false
       matrix:
-        # ubuntu-latest became 26.04 in November 2026, and setup-python has
-        # no 3.9 for it; 24.04 still has every version in the matrix
-        # (quarterdeck QD-014 did the same).
-        os: [ubuntu-24.04]
+        os: [ubuntu-latest]
         # Every version the classifiers in pyproject.toml promise. Claiming
         # support for one that nothing runs is how a release ships broken to
         # exactly the people who read the metadata.
         python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        exclude:
+          # ubuntu-latest became Ubuntu 26.04 in November 2026, and
+          # actions/setup-python has no 3.9 for it: the job stopped before
+          # installing anything.  24.04 still has 3.9, so it runs there.
+          - os: ubuntu-latest
+            python-version: "3.9"
         include:
+          - os: ubuntu-24.04
+            python-version: "3.9"
           # macOS is a supported platform in the classifiers, and it is the
           # one where this project's foundations differ: a BSD curses with
           # its own terminfo, and Apple's pty. One job on the oldest and one

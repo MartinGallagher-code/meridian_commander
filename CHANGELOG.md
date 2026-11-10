@@ -16,9 +16,9 @@ own section here, so not every version below is published to PyPI.
 
 ### Changed
 
-- CI's Linux test matrix runs on `ubuntu-24.04`: `ubuntu-latest` became
+- CI's Python 3.9 Linux job runs on `ubuntu-24.04`: `ubuntu-latest` became
   Ubuntu 26.04 in November 2026, and `setup-python` has no Python 3.9 for
-  it, so the 3.9 job could not start.
+  it, so the job stopped before installing anything.
 - **Licensing and attribution are now identical across every repository in
   the suite.** The notice said the same thing eleven slightly different ways —
   different badge text, different `--version` wording, five styles of file
@@ -163,6 +163,22 @@ own section here, so not every version below is published to PyPI.
 
 ### Fixed
 
+- **Ctrl- and Alt-arrows did nothing in the terminal pane.** curses reports
+  Ctrl-Left, Alt-Left (Option-Left on a Mac) and the rest under numbers it
+  hands out when it starts, from the outer terminal's terminfo entry, and the
+  terminal had no entry for any of them, so they were dropped: moving a word
+  at a time did nothing in vim or at the shell prompt. The terminal now looks
+  those numbers up by name when it opens and sends each key as xterm does
+  (`ESC [1;5D` for Ctrl-Left) — the arrows, `Home` and `End` with any of
+  `Shift`, `Alt` and `Ctrl`, and `Ins`, `Del`, `PgUp` and `PgDn` likewise. A
+  terminal that names none of them (screen, vt100) sends its own bytes for
+  them, and those reach the program as they came.
+- **The mouse wheel did not scroll the terminal pane back,** though the help
+  and the manual said it did, and a click on the other pane did not switch to
+  it. The terminal took every mouse report as a key it had nothing to send for,
+  so the application's mouse handling never ran. Mouse reports now go to the
+  application, and one that arrives while scrolled back no longer drops the
+  view to the live screen as "any other key" did.
 - **An image with many colours was drawn partly in the wrong ones.** On
   ncurses 6 `COLOR_PAIRS` is 65,536 and the image viewer handed out pair
   numbers that high, but a curses attribute holds only eight bits of pair:

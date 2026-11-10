@@ -19,13 +19,15 @@ cursor addressing, scroll regions and the alternate screen all work, so
 was when they exit.  The shell is told ``TERM=xterm-256color``, which is what
 the emulator implements.  ``!`` still hands a program the whole real terminal.
 
-Keys: every key goes to the program -- F1-F12, PgUp/PgDn and Esc included.
+Keys: every key goes to the program -- F1-F12, PgUp/PgDn, Esc, and the
+arrows, Home and End with Ctrl, Alt or Shift included.
 ``Ctrl-]`` is the one key the terminal keeps, and it opens a small menu in the
 pane's footer: ``Tab`` switches to the other pane (the shell keeps running;
 Tab or a click comes back), ``q`` closes the terminal, ``PgUp`` scrolls back
 through what went off the top, and ``Ctrl-]`` again sends a literal Ctrl-] to
-the program.  The mouse wheel scrolls back too.  Exiting the shell (``exit``
-/ Ctrl-D) closes it as well.
+the program.  The mouse wheel scrolls back too, and a click on the other
+pane switches to it.  Exiting the shell (``exit`` / Ctrl-D) closes it as
+well.
 """
 
 from __future__ import annotations
@@ -117,15 +119,78 @@ for _n, _letter in zip(range(13, 17), b"PQRS"):
 for _n, _code in zip(range(17, 25), (15, 17, 18, 19, 20, 21, 23, 24)):
     _SHIFTED_KEYS[curses.KEY_F0 + _n] = b"\x1b[%d;2~" % _code
 
+#: Ctrl-, Alt- and the other modified cursor keys, by their terminfo names.
+#: ``kLFT5`` is Ctrl-Left: the number is xterm's modifier code, 1 plus 1 for
+#: Shift, 2 for Alt and 4 for Ctrl.  It is sent as ``ESC [1;5D``, and Ins,
+#: Del, PgUp and PgDn as ``ESC [3;5~`` -- in either cursor-key mode, as xterm
+#: does.
+_MODIFIED_LETTERS = {"kUP": b"A", "kDN": b"B", "kRIT": b"C", "kLFT": b"D",
+                     "kHOM": b"H", "kEND": b"F"}
+_MODIFIED_TILDES = {"kIC": 2, "kDC": 3, "kPRV": 5, "kNXT": 6}
+
+#: How far past ``KEY_MAX`` to look for them.  ncurses numbers a terminal's
+#: extended keys from there, one number for each extended string in its
+#: terminfo entry: on xterm they end at 577, and no entry has a thousand.
+_EXTENDED_KEYS = 1024
+
+
+def modified_sequence(name: str) -> bytes | None:
+    """What xterm sends for the modified key terminfo calls ``name``.
+
+    The program is told it is talking to xterm, so this is what it gets,
+    whatever the outer terminal sent for the key -- rxvt's Ctrl-Left is
+    ``ESC O d``.  A name with no number is the key with Shift: rxvt calls
+    Shift-Up ``kUP``, as standard terminfo calls Shift-Left ``kLFT``.
+    """
+    base = name.rstrip("2345678")
+    modifier = name[len(base):]
+    if len(modifier) > 1:
+        return None
+    level = int(modifier or 2)
+    if base in _MODIFIED_LETTERS:
+        return b"\x1b[1;%d%s" % (level, _MODIFIED_LETTERS[base])
+    if base in _MODIFIED_TILDES:
+        return b"\x1b[%d;%d~" % (_MODIFIED_TILDES[base], level)
+    return None
+
+
+def modified_keys() -> dict[int, bytes]:
+    """The modified cursor keys the outer terminal has, by the key code curses
+    reports for each, and what to send for it.
+
+    curses gives these keys their numbers when it starts, from the extended
+    names in the terminal's terminfo entry, so the numbers are not fixed: on
+    xterm Ctrl-Left is 554, another terminal numbers it differently, and
+    screen or vt100 name none at all.  So each number is looked up by name.
+    ncurses numbers them the first time a window is put in keypad mode, which
+    the application does before anything else; until then, and before curses
+    has started at all, the table is empty.
+    """
+    table: dict[int, bytes] = {}
+    for code in range(curses.KEY_MAX, curses.KEY_MAX + _EXTENDED_KEYS):
+        try:
+            name = curses.keyname(code)
+        except curses.error:
+            return {}
+        sequence = modified_sequence(name.decode("ascii", "replace"))
+        if sequence is not None:
+            table[code] = sequence
+    return table
+
 
 def encode_key(key: int | str, app_cursor: bool = False,
-               app_keypad: bool = False) -> bytes:
+               app_keypad: bool = False,
+               modified: dict[int, bytes] | None = None) -> bytes:
     """The bytes xterm would send for ``key``, in the program's key modes.
 
-    Nothing comes back for a key code with no meaning to a program -- a
-    resize, a mouse report -- because encoding one sent a stray letter to the
+    ``modified`` is the outer terminal's own numbering of its Ctrl- and Alt-
+    keys, from :func:`modified_keys`.  Nothing comes back for a key code with
+    no meaning to a program -- a resize, a mouse report, a modified key the
+    terminal did not name -- because encoding one sent a stray letter to the
     shell, where the next Enter would have run it.
     """
+    if isinstance(key, int) and modified and key in modified:
+        return modified[key]
     if key in _CURSOR_KEYS:
         lead = b"\x1bO" if app_cursor else b"\x1b["
         return lead + _CURSOR_KEYS[key]
@@ -328,6 +393,7 @@ class TerminalPlugin(PanePlugin):
         self._chan = None       # paramiko channel
         self._busy_at = 0.0
         self._colours: Colours | None = None
+        self._modified = modified_keys()
 
         fs = self.ctx.own_fs
         path = self.ctx.own_path
@@ -455,6 +521,13 @@ class TerminalPlugin(PanePlugin):
 
     # -- keys ----------------------------------------------------------------
     def handle_key(self, key: int | str):
+        if key == curses.KEY_MOUSE:
+            # The application's: it turns the wheel into wheel() and a click
+            # on the other pane into focus.  Taking it here meant neither ever
+            # happened, and while scrolled back a wheel report counted as
+            # "any other key" and dropped the view back to the live screen.
+            self.menu = False
+            return None
         if self.done:
             self.on_exit()
             return False
@@ -465,7 +538,8 @@ class TerminalPlugin(PanePlugin):
         if key == MENU_KEY:
             self.menu = True
             return True
-        data = encode_key(key, self.screen.app_cursor, self.screen.app_keypad)
+        data = encode_key(key, self.screen.app_cursor, self.screen.app_keypad,
+                          self._modified)
         if data:
             self._busy_at = time.monotonic()
             self._send(data)
