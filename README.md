@@ -210,8 +210,12 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   two ends are kept, so a multi-gigabyte log costs what a short one does.
 - **New file** (`n`) and **rename** (`r`) — `touch` and a rename without
   leaving for a shell; an existing file is restamped, never emptied.
-- **Tag multiple files** (`Insert`/`Space`, `+` all, `-` none) for batch
-  copy/move/delete.
+- **Tag multiple files** for batch copy/move/delete: `Insert`/`Space` one at a
+  time; `+` the names matching a pattern (pre-filled with `*`, so `+` Enter
+  tags every file), `\` untags by pattern, `-` untags everything and `*`
+  inverts — Midnight Commander's keys. Patterns are globs or plain text with
+  the search's smart case, and a **Files only** switch (`Ctrl-F`, on by
+  default) keeps `*.tsv` from taking a directory called `old.tsv`.
 - **Find files** (`f`) — search the pane's tree by substring or glob (remote
   panes included, cancellable) and get a **browsable result list**: view or
   edit a hit right from the list, or press Enter to jump the pane to the
