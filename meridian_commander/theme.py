@@ -156,6 +156,21 @@ ROLES: dict[str, tuple[str, str, int, int]] = {
     "diffdel": ("lightred", "blue", curses.A_BOLD, curses.A_BOLD),
     "diffchange": ("white", "blue", curses.A_BOLD, curses.A_BOLD),
     "difffill": ("darkgray", "black", 0, curses.A_DIM),
+
+    # -- code and configuration files, coloured by their syntax -------------
+    # No two of these, nor the plain text ("edit"), look alike even on an
+    # eight-colour terminal, where a bright colour is its base colour in
+    # bold.  Borland's own editor is the model: keywords white, comments
+    # grey, the rest of the code yellow.  Last in the table, so a terminal
+    # short of pairs gives up these before anything the program relies on;
+    # without colour, keywords and defined names are bold, comments dim.
+    "synkeyword": ("white", "blue", curses.A_BOLD, curses.A_BOLD),
+    "syncomment": ("lightgray", "blue", 0, curses.A_DIM),
+    "synstring": ("lightgreen", "blue", 0, _NORMAL),
+    "synnumber": ("lightmagenta", "blue", 0, _NORMAL),
+    "synname": ("lightred", "blue", curses.A_BOLD, curses.A_BOLD),
+    "synkey": ("lightcyan", "blue", 0, _NORMAL),
+    "synmark": ("cyan", "blue", 0, _NORMAL),
 }
 
 #: The scheme used when none is asked for, or when one is asked for by a name
@@ -210,6 +225,15 @@ SCHEMES: dict[str, dict[str, tuple[str, str, int, int]]] = {
         "diffdel": ("lightred", "black", curses.A_BOLD, curses.A_BOLD),
         "diffchange": ("white", "black", curses.A_BOLD, curses.A_BOLD),
         "difffill": ("darkgray", "darkgray", 0, curses.A_DIM),
+        # Plain text is grey here, so keywords take yellow and comments,
+        # which would vanish in dark grey, take cyan.
+        "synkeyword": ("yellow", "black", curses.A_BOLD, curses.A_BOLD),
+        "syncomment": ("cyan", "black", 0, curses.A_DIM),
+        "synstring": ("lightgreen", "black", 0, _NORMAL),
+        "synnumber": ("lightmagenta", "black", 0, _NORMAL),
+        "synname": ("lightred", "black", curses.A_BOLD, curses.A_BOLD),
+        "synkey": ("lightcyan", "black", 0, _NORMAL),
+        "synmark": ("green", "black", 0, _NORMAL),
     },
 
     # A monochrome adapter, for the purists -- and for anyone reading over a

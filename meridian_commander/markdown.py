@@ -496,6 +496,10 @@ class MarkdownView(Viewer):
     style code per character alongside the text it already understands.
     """
 
+    # The styles here come from the rendering; a README that opens with a
+    # "#!" line is still a README.
+    SYNTAX = False
+
     def __init__(self, fs, path: str) -> None:
         self.show_source = False
         self._raw: list[str] = []

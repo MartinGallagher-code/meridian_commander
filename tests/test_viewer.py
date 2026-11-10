@@ -8,11 +8,14 @@ import curses
 
 import pytest
 
-from meridian_commander import dialogs, viewer as viewer_mod
+from meridian_commander import dialogs, highlight, theme, viewer as viewer_mod
 from meridian_commander.filesystems import LocalFileSystem
 from meridian_commander.viewer import Viewer
 
-from support import script_newwin, with_curses_screen, write
+from support import (
+    _FakeRemoteBackend, _KeyScript, _NoLocalPath, script_newwin,
+    with_curses_screen, write,
+)
 
 
 @pytest.fixture
@@ -469,3 +472,233 @@ def test_the_wrap_key_reflows_what_is_drawn(monkeypatch, fs, tmp_path):
     assert view.wrap is True
     # Every drawn row fits the screen, which is the whole point.
     assert all(len(a[2]) <= 40 for a in window.drawn if len(a) > 2)
+
+
+# -- syntax colour -------------------------------------------------------------
+
+SCRIPT = "import os\n# note\ndef main():\n    return 'done'\n"
+
+
+@pytest.fixture
+def script(fs, tmp_path):
+    write(str(tmp_path / "tool.py"), SCRIPT)
+    return Viewer(fs, str(tmp_path / "tool.py"))
+
+
+@pytest.fixture
+def restore_theme():
+    """Put the colours back the way the rest of the suite expects them."""
+    scheme = theme.current
+    yield
+    theme.init(scheme)
+
+
+def _writes(view, rows=10, cols=60):
+    """Every write the viewer makes to the screen: (y, x, text, attr)."""
+    def run(stdscr):
+        window = _KeyScript(curses.newwin(rows, cols, 0, 0), [])
+        view.draw(window)
+        return window.drawn
+    return with_curses_screen(rows + 2, cols + 2, run)
+
+
+def test_a_code_file_is_coloured(script):
+    assert script.language == highlight.PYTHON
+    assert script.styles == ["KKKKKK   ", "MMMMMM", "KKK FFFF   ",
+                             "    KKKKKK SSSSSS", ""]
+    assert script.row_styles == script.styles
+
+
+def test_a_plain_file_has_no_styles_at_all(sample):
+    assert sample.language is None and sample.plain_reason == ""
+    assert sample.styles == [] and sample.row_styles == []
+
+
+def test_a_script_with_no_suffix_is_known_by_its_first_line(fs, tmp_path):
+    write(str(tmp_path / "deploy"), "#!/bin/sh\necho hi\n")
+    view = Viewer(fs, str(tmp_path / "deploy"))
+    assert view.language == highlight.SHELL
+    assert view.styles[1] == "KKKK   "
+
+
+def test_a_code_file_that_will_not_open_still_says_why(fs, tmp_path):
+    view = Viewer(fs, str(tmp_path / "missing.py"))
+    assert view.error is not None
+    assert view.language is None and view.styles == []
+    assert "Cannot open file" in _render(view)
+
+
+def test_a_code_file_on_a_remote_pane_is_coloured_the_same(tmp_path):
+    write(str(tmp_path / "far.py"), SCRIPT)
+    for backend in (_FakeRemoteBackend(), _NoLocalPath()):
+        view = Viewer(backend, str(tmp_path / "far.py"))
+        assert view.language == highlight.PYTHON
+        assert view.styles[2] == "KKK FFFF   "
+
+
+def test_a_binary_file_with_a_code_name_shows_every_character(fs, tmp_path):
+    path = tmp_path / "blob.py"
+    path.write_bytes(bytes(range(256)) * 64 + b'"""\xff\xfe never closed')
+    view = Viewer(fs, str(path))
+    assert view.error is None and view.language == highlight.PYTHON
+    assert [len(s) for s in view.styles] == [len(line) for line in view.source]
+
+
+def test_a_code_file_cut_at_the_cap_is_still_coloured(fs, tmp_path,
+                                                      monkeypatch):
+    monkeypatch.setattr(viewer_mod, "MAX_VIEW_BYTES", 30)
+    write(str(tmp_path / "cut.py"), 'x = """a string the cap cuts in two"""\n')
+    view = Viewer(fs, str(tmp_path / "cut.py"))
+    assert view.truncated is True
+    assert view.styles == ["    " + "S" * 26]
+
+
+def test_wrapping_cuts_the_colour_with_the_text(fs, tmp_path):
+    line = "x = 'a long string that has to wrap' + 12345  # and a comment"
+    write(str(tmp_path / "long.py"), line + "\n")
+    view = Viewer(fs, str(tmp_path / "long.py"))
+    style = view.styles[0]
+    view.toggle_wrap()
+    view._flow = None
+    view._reflow(16)
+    spans = viewer_mod.wrap_spans(line, 16)
+    assert len(spans) > 2
+    assert view.lines[:len(spans)] == [line[a:b] for a, b in spans]
+    assert view.row_styles[:len(spans)] == [style[a:b] for a, b in spans]
+
+
+def test_c_turns_the_colour_off_and_back_on(monkeypatch, script):
+    coloured = list(script.styles)
+    _run(monkeypatch, script, [ord("c"), ord("q")])
+    assert script.colour is False
+    assert script.styles == [] and script.row_styles == []
+    _run(monkeypatch, script, [ord("C"), ord("q")])
+    assert script.colour is True
+    assert script.styles == coloured and script.row_styles == coloured
+
+
+def test_turning_the_colour_off_keeps_the_place_and_the_wrap(script):
+    script.wrap = True
+    script._flow = None
+    script._reflow(6)
+    rows, script.top = list(script.lines), 3
+    script.toggle_colour()
+    assert script.lines == rows and script.top == 3 and script.wrap
+    assert script.row_styles == []
+    script.toggle_colour()
+    assert len(script.row_styles) == len(rows)
+
+
+def test_c_on_a_plain_file_is_left_for_a_viewer_that_wants_it(monkeypatch,
+                                                             sample):
+    seen = []
+    monkeypatch.setattr(sample, "_other_key", seen.append)
+    _run(monkeypatch, sample, [ord("c"), ord("q")])
+    assert seen == [ord("c")]
+    assert sample.colour is True and sample.styles == []
+
+
+def test_the_footer_offers_the_colour_key_only_where_there_is_colour(script,
+                                                                    sample):
+    assert "[c]olour" in _render(script, cols=78)
+    assert "[c]olour" not in _render(sample, cols=78)
+
+
+def test_a_file_over_the_colour_limit_opens_plain_and_says_why(monkeypatch,
+                                                              fs, tmp_path):
+    monkeypatch.setattr(highlight, "MAX_COLOUR_BYTES", 1024 * 1024)
+    lexed = []
+    monkeypatch.setattr(highlight, "highlight",
+                        lambda *args: lexed.append(args) or [])
+    write(str(tmp_path / "big.py"), "x = 1\n" * 200_000)       # 1.1 MiB
+    view = Viewer(fs, str(tmp_path / "big.py"))
+    assert lexed == []                      # not even started
+    assert view.language == highlight.PYTHON and view.styles == []
+    assert view.plain_reason == "plain: over 1 MiB"
+    assert "View: big.py [plain: over 1 MiB]" in _render(view, cols=60)
+    assert "[c]olour" not in view._hints()
+    view.toggle_colour()
+    assert view.notice == "plain: over 1 MiB" and view.styles == []
+
+
+def test_a_file_right_at_the_colour_limit_is_coloured(monkeypatch, fs,
+                                                      tmp_path):
+    monkeypatch.setattr(highlight, "MAX_COLOUR_BYTES", 6 * 1000)
+    write(str(tmp_path / "edge.py"), "x = 1\n" * 1000)
+    view = Viewer(fs, str(tmp_path / "edge.py"))
+    assert view.plain_reason == "" and view.styles[0] == "    N"
+
+
+def test_a_lexer_that_trips_leaves_the_file_plain(monkeypatch, fs, tmp_path):
+    def trip(language, lines):
+        raise ValueError("a lexer bug")
+
+    monkeypatch.setattr(highlight, "highlight", trip)
+    write(str(tmp_path / "tool.py"), SCRIPT)
+    view = Viewer(fs, str(tmp_path / "tool.py"))
+    assert view.error is None and view.source[0] == "import os"
+    assert view.styles == [] and view.plain_reason == "plain: could not colour"
+
+
+def test_each_run_is_drawn_in_its_own_colour(script):
+    drawn = {w[2]: w[3] for w in _writes(script) if len(w) > 3}
+    assert drawn["import"] == theme.attr("synkeyword")
+    assert drawn["# note"] == theme.attr("syncomment")
+    assert drawn["main"] == theme.attr("synname")
+    assert drawn["'done'"] == theme.attr("synstring")
+    assert drawn[" os"] == theme.attr("edit")
+
+
+def test_search_matches_are_drawn_over_the_colour(script):
+    script.set_search("return")
+    writes = [w for w in _writes(script) if len(w) > 3 and w[2] == "return"]
+    assert writes[0][3] == theme.attr("synkeyword")
+    assert writes[-1][3] == theme.attr("editmatch")
+    assert writes[-1][:2] == writes[0][:2]   # the same cells, overdrawn
+
+
+def test_scrolling_sideways_keeps_each_colour_on_its_characters(script):
+    script.left = 4
+    script.show_line_numbers = False
+    drawn = [w for w in _writes(script) if len(w) > 3]
+    assert (4, 0, "return", theme.attr("synkeyword")) in drawn
+    assert (3, 0, " main():", theme.attr("edit")) not in drawn
+    assert (3, 0, "main", theme.attr("synname")) in drawn
+
+
+@pytest.mark.parametrize("scheme", ["turbo", "midnight", "mono"])
+def test_a_coloured_file_is_drawn_in_every_scheme(script, restore_theme,
+                                                  scheme):
+    roles = ("edit", "synkeyword", "syncomment", "synname", "synstring")
+
+    def run(stdscr):
+        theme.init(scheme)
+        window = _KeyScript(curses.newwin(10, 60, 0, 0), [])
+        script.draw(window)
+        return window.drawn, {role: theme.attr(role) for role in roles}
+
+    drawn, attrs = with_curses_screen(12, 62, run)
+    by_text = {w[2]: w[3] for w in drawn if len(w) > 3}
+    assert by_text["def"] == attrs["synkeyword"]
+    assert by_text["# note"] == attrs["syncomment"]
+    if scheme == "mono":
+        assert attrs["synkeyword"] == curses.A_BOLD
+        assert attrs["syncomment"] == curses.A_DIM
+        assert attrs["synstring"] == attrs["edit"] == curses.A_NORMAL
+    else:
+        assert len(set(attrs.values())) == len(roles)
+
+
+def test_a_terminal_out_of_colour_pairs_still_draws_the_code(monkeypatch,
+                                                             script,
+                                                             restore_theme):
+    def run(stdscr):
+        monkeypatch.setattr(curses, "COLOR_PAIRS", 8)
+        theme.init("turbo")
+        window = _KeyScript(curses.newwin(10, 60, 0, 0), [])
+        script.draw(window)
+        return window.drawn, theme.attr("synkeyword")
+
+    drawn, keyword = with_curses_screen(12, 62, run)
+    assert keyword == curses.A_BOLD          # its monochrome fallback
+    assert ("def" in [w[2] for w in drawn if len(w) > 2])

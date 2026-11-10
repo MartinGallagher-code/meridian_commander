@@ -10,13 +10,17 @@ Search follows ``less`` conventions: ``/`` (or F7) prompts for a pattern,
 ``n``/``N`` jump to the next/previous matching line with wrap-around, and all
 matches on screen are highlighted.  A pattern typed in lowercase searches
 case-insensitively; any uppercase letter makes it case-sensitive (smart case).
+
+Code and configuration files -- Python, shell, YAML, JSON, TOML, INI -- are
+coloured by their syntax (:mod:`~meridian_commander.highlight`), and ``c``
+turns that off and back on.  Every other file is drawn exactly as before.
 """
 
 from __future__ import annotations
 
 import curses
 
-from . import theme
+from . import highlight, theme
 from .filesystems import FileSystem
 from .util import read_key
 
@@ -32,6 +36,14 @@ STYLE_ROLES = {
     "C": "editcode",     # `code`
     "D": "editdim",      # rules, quotes, URLs
     "U": "editlink",     # link text
+    # Code and configuration files, coloured by their syntax (highlight.py).
+    "K": "synkeyword",   # keywords, shell builtins
+    "S": "synstring",    # strings, here-documents, block scalars, values
+    "M": "syncomment",   # comments
+    "N": "synnumber",    # numbers and constants: True, null, false
+    "F": "synname",      # the name a def or a class defines
+    "V": "synkey",       # configuration keys, shell variables
+    "P": "synmark",      # decorators, section headers, anchors, tags
 }
 
 
@@ -42,6 +54,10 @@ def style_attr(code: str) -> int:
 
 
 class Viewer:
+    #: Whether this viewer colours code by its syntax.  The Markdown viewer
+    #: says no: its styles come from a rendering, not from the source.
+    SYNTAX = True
+
     def __init__(self, fs: FileSystem, path: str) -> None:
         self.fs = fs
         self.path = path
@@ -62,6 +78,15 @@ class Viewer:
         #: Source lines that must not be wrapped -- a table or a code block
         #: is a shape, and reflowing it destroys the thing being shown.
         self.nowrap: set[int] = set()
+        #: The language the file is written in, if it is one the viewer can
+        #: colour; None for plain text.
+        self.language: str | None = None
+        #: Whether its colour is showing: ``c`` turns it off and back on.
+        self.colour = True
+        #: Why a file in a language the viewer knows is shown plain anyway,
+        #: for the title bar.
+        self.plain_reason = ""
+        self._coloured: list[str] = []
         #: The file's own lines.  Searching and line numbering work in this
         #: space, so a wrapped paragraph stays one line to jump to and keeps
         #: one number however many screen rows it happens to occupy.
@@ -85,7 +110,28 @@ class Viewer:
         text = data.decode("utf-8", errors="replace")
         # Normalise newlines; keep tabs expanded for stable columns.
         text = text.replace("\r\n", "\n").replace("\r", "\n").expandtabs(4)
-        return text.split("\n")
+        lines = text.split("\n")
+        if self.SYNTAX:
+            self._colour_code(lines, len(data))
+        return lines
+
+    def _colour_code(self, lines: list[str], size: int) -> None:
+        """Colour the file by its syntax, if it is code the viewer knows."""
+        self.language = highlight.language_for(self.name, lines[0])
+        if self.language is None:
+            return                          # plain text costs what it did
+        if size > highlight.MAX_COLOUR_BYTES:
+            limit = highlight.MAX_COLOUR_BYTES // (1024 * 1024)
+            self.plain_reason = f"plain: over {limit} MiB"
+            return
+        try:
+            self._coloured = highlight.highlight(self.language, lines)
+        except Exception:
+            # A lexer guesses at a file nobody promised was valid.  Should a
+            # guess ever trip, the file is still worth seeing, uncoloured.
+            self.plain_reason = "plain: could not colour"
+            return
+        self.styles = self._coloured
 
     # -- line flow --------------------------------------------------------
     def _style_of(self, index: int) -> str:
@@ -134,6 +180,19 @@ class Viewer:
                     styles.append(style[start:end])
         self.lines, self.origin, self.first_row = lines, origin, first
         self.row_styles = styles
+
+    def toggle_colour(self) -> None:
+        """Turn the syntax colouring off, or back on."""
+        if not self._coloured:
+            self.notice = self.plain_reason
+            return
+        self.colour = not self.colour
+        self.styles = self._coloured if self.colour else []
+        # The lines themselves do not change, so neither does the position;
+        # only the styles cut to fit them have to be cut again.
+        width = self._flow[1]
+        self._flow = None
+        self._reflow(width)
 
     def toggle_wrap(self) -> None:
         """Turn wrapping on or off, keeping the cursor on the same line."""
@@ -225,6 +284,8 @@ class Viewer:
         title = self._title()
         if self.truncated:
             title += "[truncated] "
+        if self.plain_reason:
+            title += f"[{self.plain_reason}] "
         theme.paint(win, 0, 0, title, "keybar", width)
 
         if self.error:
@@ -269,6 +330,8 @@ class Viewer:
 
     def _hints(self) -> str:
         """The key reminders in the footer."""
+        if self._coloured:
+            return "[/]find  n/N next/prev  [l]#  [w]rap  [c]olour  [q]uit"
         return "[/]find  n/N next/prev  [l]#  [w]rap  [q]uit"
 
     def _other_key(self, key: int) -> None:
@@ -362,6 +425,8 @@ class Viewer:
                 self.show_line_numbers = not self.show_line_numbers
             elif key in (ord("w"), ord("W")):
                 self.toggle_wrap()
+            elif key in (ord("c"), ord("C")) and self.language:
+                self.toggle_colour()
             else:
                 self._other_key(key)
 

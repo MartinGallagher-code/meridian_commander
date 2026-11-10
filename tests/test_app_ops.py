@@ -17,6 +17,7 @@ from meridian_commander import sync as sync_mod
 from meridian_commander.archive import ArchiveFileSystem
 from meridian_commander.filesystems import LocalFileSystem
 from meridian_commander.operations import OperationCancelled
+from meridian_commander.viewer import Viewer
 
 from support import _ScriptedDialogs, read, write, write_tar, write_zip
 
@@ -1336,6 +1337,33 @@ def test_a_file_with_a_browser_of_its_own_keeps_it(app, tmp_path, monkeypatch):
     app._view()
     assert opened == [str(tmp_path / "left" / "book.xlsx")]
     assert ran == []
+
+
+def test_a_code_file_opens_coloured_in_the_built_in_viewer(app, tmp_path,
+                                                          monkeypatch):
+    _files(app, tmp_path, **{"tool.py": "def main():\n    pass\n"})
+    _point_at(app.left, "tool.py")
+    shown = []
+    monkeypatch.setattr(Viewer, "run", lambda self, stdscr: shown.append(self))
+    monkeypatch.setattr(curses, "curs_set", lambda n: None)
+    app._view()
+    (view,) = shown
+    assert type(view) is Viewer
+    assert view.language == "Python" and view.styles[0] == "KKK FFFF   "
+
+
+def test_a_code_file_still_goes_to_the_configured_pager(app, tmp_path,
+                                                        monkeypatch):
+    """Colour is the built-in viewer's; a chosen pager still gets code."""
+    _files(app, tmp_path, **{"tool.py": "pass\n"})
+    _point_at(app.left, "tool.py")
+    opened = []
+    monkeypatch.setattr(app_mod, "viewer_for",
+                        lambda fs, path: opened.append(path))
+    ran = _paging(monkeypatch, app)
+    app._view()
+    assert ran == [["less", str(tmp_path / "left" / "tool.py")]]
+    assert opened == []
 
 
 def test_an_unusable_viewer_setting_falls_back_and_says_so(app, tmp_path,

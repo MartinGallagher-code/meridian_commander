@@ -105,6 +105,12 @@ accelerator letters, green buttons and drop shadows under every dialog — the
 - **File viewer** (`F3`) — scrollable, with **search** (`/`, smart case,
   highlighted matches, `n`/`N` next/previous with wrap-around), toggleable
   line numbers (`l`) and horizontal scrolling; works on remote files too.
+  **Code and configuration files are coloured by their syntax** — Python,
+  shell (sh, bash, zsh, ksh), YAML, JSON, TOML and INI/`.conf`/`.cfg`, known
+  by their suffix, their name (`.bashrc`, `Pipfile`) or their `#!` line:
+  keywords, strings, comments, numbers, keys and the like each in a colour
+  of the scheme's own. `c` turns the colour off and back on; a file over
+  2 MiB opens plain, and the title says why. Stdlib-only.
 - **Archives as directories** — press Enter on a `.zip`, `.tar`, `.tar.gz`
   (or `.jar`, `.whl`, `.tgz`, `.tar.bz2`, `.tar.xz`) and the pane goes *into*
   it. Browse, tag and copy files out with `F5` exactly as from a directory,
