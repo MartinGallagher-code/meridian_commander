@@ -706,8 +706,10 @@ every host has; if a remote host has never heard of it, set `TERM` to
 `xterm` there.
 
 **Keys.** Every key goes to the program, including F1–F12, `PgUp`/`PgDn`,
-`Esc` and `Tab` (completion). One key is the terminal's own, **`Ctrl-]`**,
-which opens a small menu in the pane's footer:
+`Esc`, `Tab` (completion), and the arrows, `Home` and `End` with `Ctrl`, `Alt`
+or `Shift`, which vim and the shell use to move a word at a time. One key is
+the terminal's own, **`Ctrl-]`**, which opens a small menu in the pane's
+footer:
 
 | After `Ctrl-]` | |
 |---|---|
@@ -719,8 +721,9 @@ which opens a small menu in the pane's footer:
 
 While scrolled back, `PgUp`/`PgDn`, the arrows and `Home` move through the
 history, and any other key returns to the live screen without being sent.
-The mouse wheel scrolls back too. Exiting the shell (`exit`, `Ctrl-D`) closes
-the terminal.
+The mouse wheel scrolls back too (a full-screen program such as less keeps no
+history in the pane, so there it does nothing), and a click on the other pane
+switches to it. Exiting the shell (`exit`, `Ctrl-D`) closes the terminal.
 
 **Colours.** The terminal is drawn on your outer terminal's own background —
 usually black — rather than the pane's blue, because `ls --color` paints
