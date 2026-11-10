@@ -125,15 +125,14 @@ def test_cancel_stops_the_walk(fs, tmp_path):
 
 
 def test_owner_and_group_by_name(fs, tmp_path):
-    """Run as root here, so giving a file to root is allowed."""
-    if os.geteuid() != 0:
-        pytest.skip("only root can give a file away")
+    """Giving a file to its own user and group is allowed to anyone, so this
+    runs as it is, root or not -- CI does not run as root."""
     import grp
     import pwd
 
     write(str(tmp_path / "f"), "x")
-    user = pwd.getpwuid(0)[0]
-    group = grp.getgrgid(0)[0]
+    user = pwd.getpwuid(os.geteuid())[0]
+    group = grp.getgrgid(os.getegid())[0]
     done, failures = apply_change(
         fs, [_entry(fs, tmp_path / "f")],
         AttributeChange(on=0, off=0, owner=user, group=group))
