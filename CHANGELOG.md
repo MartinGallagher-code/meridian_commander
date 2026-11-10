@@ -12,6 +12,17 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.14.0] — 2026-11-10
+
+### Added
+
+- **A natural name order** in the `Ctrl-T` menu: runs of digits compare as
+  numbers, so `run_2` comes before `run_10` and `run_100`, and the rest
+  compares case-folded as the name order does. Ties fall back to the plain
+  name, so `file01` and `file1` always come out the same way round.
+  Directories stay first. It is a choice beside the name order, not a
+  replacement for it. (MC-016)
+
 ## [1.13.0] — 2026-11-10
 
 ### Added
@@ -978,6 +989,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.14.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.10.0...v1.11.0

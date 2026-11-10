@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import bisect
 import fnmatch
+import re
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -48,6 +49,22 @@ def name_matches(pattern: str, name: str) -> bool:
     return pattern in subject
 
 
+_DIGITS = re.compile(r"(\d+)")
+
+
+def natural_key(name: str) -> tuple:
+    """Sort ``name`` with its runs of digits as numbers: run_2 < run_10.
+
+    The rest compares case-folded, as the plain name order does.  The plain
+    name comes last, so ``file01`` and ``file1`` -- equal as numbers -- always
+    come out in the same order rather than in whatever order they were listed.
+    """
+    parts: list = _DIGITS.split(name.lower())
+    # Text and numbers alternate, text first, so like always meets like.
+    parts[1::2] = map(int, parts[1::2])
+    return (parts, name)
+
+
 @dataclass
 class Panel:
     fs: FileSystem
@@ -63,7 +80,7 @@ class Panel:
     cursor: int = 0            # index into ``entries`` of the highlight bar
     top: int = 0               # index of the first visible row (scroll offset)
     selected: set[str] = field(default_factory=set)  # tagged entry names
-    sort_key: str = "name"     # name | size | mtime | ext
+    sort_key: str = "name"     # name | natural | size | mtime | ext
     sort_reverse: bool = False
     show_hidden: bool = True    # whether dotfiles are listed
     error: str | None = None
@@ -272,6 +289,8 @@ class Panel:
                 return (e.size or 0)
             if self.sort_key == "mtime":
                 return (e.mtime or 0)
+            if self.sort_key == "natural":
+                return natural_key(e.name)
             if self.sort_key == "ext":
                 name = e.name
                 dot = name.rfind(".")

@@ -1083,7 +1083,7 @@ where it should.)
 | `-` / `*` | untag all / invert the tags | | |
 | `Ctrl-U` | swap panes | `F9` | synchronize panes |
 | `Ctrl-R` | reload panes | `F10` | quit |
-| `Ctrl-G` | go to path | `Ctrl-T` | change sort order |
+| `Ctrl-G` | go to path | `Ctrl-T` | change sort order: name, natural name (`run_2` before `run_10`), extension, size, time |
 | `Esc` | the menu bar | `Alt+F`/`C`/`O`/`H` | a menu by name |
 | `~` | home directory (this pane) | `=` | other pane: same location |
 | `<` / `>` | back / forward through this pane's history | | |
