@@ -360,10 +360,10 @@ def test_only_a_changed_owner_is_sent(app, monkeypatch):
     calls = []
     monkeypatch.setattr(app.left.fs, "chown",
                         lambda path, o="", g="": calls.append((o, g)))
-    _answer(monkeypatch, dialogs.AttributeChoice(0o644, 0o133, owner, "staff",
+    _answer(monkeypatch, dialogs.AttributeChoice(0o644, 0o133, owner, "another",
                                                  False))
     app._attributes()
-    assert calls == [("", "staff")]
+    assert calls == [("", "another")]
 
 
 def test_failures_are_listed(app, monkeypatch):
