@@ -23,6 +23,25 @@ else is built from. Three things follow from having it in one place:
 - **No colour, no problem.** Every role carries a monochrome fallback, so a
   terminal with no colour — or one that has run out of colour pairs — still
   gets the shape of the screen: which strip is chrome, which row is the bar.
+- **Code in colour.** The viewer colours code and configuration files by
+  their syntax (see [Usage](usage.md)) through seven roles of their own,
+  chosen so that no two of them, nor the plain text, look alike even on an
+  eight-colour terminal, where a bright colour is drawn as its base colour
+  in bold:
+
+  | Role | Colours | `turbo` (blue) | `midnight` (black) | `mono` |
+  | --- | --- | --- | --- | --- |
+  | `synkeyword` | keywords, shell builtins | white, bold | yellow, bold | bold |
+  | `syncomment` | comments | light grey | cyan | dim |
+  | `synstring` | strings, here-documents, values | light green | light green | plain |
+  | `synnumber` | numbers, `True`, `null`, `false` | light magenta | light magenta | plain |
+  | `synname` | the name a `def`, `class` or shell function defines | light red, bold | light red, bold | bold |
+  | `synkey` | configuration keys, shell variables | light cyan | light cyan | plain |
+  | `synmark` | decorators, section headers, anchors, tags, `---` | cyan | green | plain |
+
+  The rest of the code stays in the viewer's own colour (yellow on blue in
+  `turbo`, grey on black in `midnight`), as identifiers did in Borland's
+  editor, whose keywords were white and comments grey.
 - **ASCII frames when the encoding needs them.** The box-drawing characters are
   used when the locale can encode them and `+-|` when it cannot. Set
   `MERIDIAN_ASCII=1` to force the plain set on a terminal that claims UTF-8 and

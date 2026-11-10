@@ -12,6 +12,38 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.8.0] — 2026-11-10
+
+### Added
+
+- **The viewer colours code and configuration files by their syntax.** `F3`
+  on Python, shell (sh, bash, zsh, ksh), YAML, JSON (with JSONC's comments),
+  TOML or an INI/`.conf`/`.cfg` file colours its keywords and builtins,
+  strings, comments, numbers and constants, the names `def` and `class`
+  define, keys and shell variables, and decorators, section headers, YAML
+  anchors, aliases, tags and markers -- each in a colour of the scheme's own.
+  A file is known by its suffix (in any case), its name (`.bashrc`,
+  `Pipfile`, `.gitconfig`) or its `#!` line, `/usr/bin/env` looked through,
+  so a script with no suffix is coloured too. Triple-quoted strings,
+  here-documents, quotes nested inside `$(...)`, YAML block scalars and
+  TOML's multi-line strings and arrays are followed across lines; one that
+  never closes colours the rest of the file and nothing worse. Search,
+  wrapping, line numbers and sideways scrolling work as on any file, search
+  matches drawn over the colour. Any other file is drawn exactly as before.
+  The lexers are in a new module, `highlight.py`, standard library only.
+- **`c` turns a code file's colour off, and on again.** The footer shows
+  `[c]olour` where there is colour to turn off.
+- **Seven theme roles for code** (`synkeyword`, `syncomment`, `synstring`,
+  `synnumber`, `synname`, `synkey`, `synmark`), with colours in `turbo` and
+  `midnight` that stay distinct from one another and from plain text even on
+  an eight-colour terminal, and a monochrome fallback: keywords and defined
+  names bold, comments dim.
+- **A code file over 2 MiB opens plain**, at once, with `[plain: over 2 MiB]`
+  in the title, rather than holding up `F3` while it is coloured.
+- With an outside pager chosen (**Options ▸ Viewer**), code files go to it
+  as before, as plain text without the built-in viewer's colours; the F1
+  help and the manual now say so.
+
 ## [1.7.0] — 2026-11-10
 
 ### Added
@@ -822,6 +854,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.8.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.4.0...v1.5.0
