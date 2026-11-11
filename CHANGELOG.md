@@ -12,6 +12,24 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.11.0] — 2026-11-10
+
+### Changed
+
+- **`+` asks for a pattern.** It tagged everything at once; it now asks, as
+  Midnight Commander's does, pre-filled with `*`, so tagging every file is
+  `+` then `Enter` — and only files, unless the **Files only** switch
+  (`Ctrl-F`, on by default) is turned off. `\` untags by pattern instead of
+  being a second "untag all"; `-` still untags everything. (MC-013)
+
+### Added
+
+- **Tag and untag by pattern, and invert the tags** — `+`, `\` and `*`, also
+  in the File menu. A pattern is a glob or plain text with the search's smart
+  case; one that matches nothing says so and changes nothing. They act on
+  what the pane shows, never on `..`, and leave a filter's hidden names as
+  they were. (MC-013)
+
 ## [1.10.0] — 2026-11-10
 
 ### Added
@@ -919,6 +937,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.11.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.7.0...v1.8.0

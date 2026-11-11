@@ -522,6 +522,33 @@ class Panel:
     def select_all(self) -> None:
         self.selected = {e.name for e in self.entries if e.name != self.PARENT}
 
+    def select_matching(self, pattern: str, tag: bool = True,
+                        files_only: bool = True) -> int:
+        """Tag (or untag) every shown entry whose name matches ``pattern``.
+
+        Midnight Commander's Select group and Unselect group.  The rule is
+        :func:`name_matches`, as the filter's is: ``*.tsv`` is a glob, plain
+        text matches anywhere in the name, both with smart case.  Only what
+        the pane shows -- a filter's hidden names are left as they are -- and
+        never ``..``.  ``files_only`` leaves directories out, so ``*.tsv``
+        does not take a directory called ``old.tsv`` with it.  Returns how
+        many entries matched.
+        """
+        names = {e.name for e in self.entries
+                 if e.name != self.PARENT
+                 and not (files_only and e.is_dir)
+                 and name_matches(pattern, e.name)}
+        if tag:
+            self.selected |= names
+        else:
+            self.selected -= names
+        return len(names)
+
+    def invert_selection(self) -> None:
+        """Tag what is untagged and untag what is tagged, over what is shown."""
+        shown = {e.name for e in self.entries if e.name != self.PARENT}
+        self.selected = (self.selected - shown) | (shown - self.selected)
+
     # -- searching --------------------------------------------------------
     def matches(self, pattern: str) -> list[int]:
         """The entries whose names contain ``pattern``, as listing indexes.

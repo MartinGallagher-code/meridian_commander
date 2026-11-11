@@ -23,7 +23,8 @@ Key bindings (also shown in the F1 help screen)::
     Enter / Right  enter dir/archive/view      F5   copy  ->  other pane
     Backspace/Left parent directory            F6   move  ->  other pane
     Insert / Space tag file                    F7   make directory
-    + / -          tag all / untag all         F8   delete
+    + / \\          tag / untag by pattern      F8   delete
+    - / *          untag all / invert the tags
     Ctrl-U         swap panes                  F9   synchronize panes
     Ctrl-R         reload both panes           F10  quit
     Ctrl-G         go to path                  Esc  the menu bar
@@ -136,6 +137,9 @@ MENUS: list[dict] = [
             {"label": "Ne~w~ file", "name": "touch", "key": "n"},
             {"label": "De~l~ete", "name": "delete", "key": "F8"},
             {"label": "~T~ag / untag", "name": "tag", "key": "Ins"},
+            {"label": "Tag ~g~roup...", "name": "tag_group", "key": "+"},
+            {"label": "~U~ntag group...", "name": "untag_group", "key": "\\"},
+            {"label": "~I~nvert tags", "name": "invert", "key": "*"},
             {"sep": True},
             {"label": "~F~ind files...", "name": "find"},
             {"label": "E~x~it", "name": "quit", "key": "F10"},
@@ -879,6 +883,9 @@ class App:
             "touch": self._touch,
             "delete": self._delete,
             "tag": self.active.toggle_select,
+            "tag_group": self._tag_group,
+            "untag_group": self._untag_group,
+            "invert": self._invert_tags,
             "find": self._find_files,
             "connect": self._open_location,
             "presets": self._presets_menu,
@@ -1002,10 +1009,14 @@ class App:
         elif key in (curses.KEY_IC, ord(" ")):
             panel.toggle_select()
             panel.move(1)
-        elif key == ord("+"):
-            panel.select_all()
-        elif key in (ord("-"), ord("\\")):
+        elif key == ord("+"):  # tag the names matching a pattern
+            self._tag_group()
+        elif key == ord("\\"):  # untag the names matching a pattern
+            self._untag_group()
+        elif key == ord("-"):  # untag everything
             panel.clear_selection()
+        elif key == ord("*"):  # tag what is untagged, and the other way round
+            self._invert_tags()
         elif key == 27:  # Esc: the menu bar; Alt+letter: a menu by name
             self._menu_key(key)
         elif key == 21:  # Ctrl-U swap panes
@@ -1137,6 +1148,50 @@ class App:
         """A copy, move or delete's word on tagged items a filter hides."""
         hidden = panel.hidden_tagged
         return f" ({hidden} not shown)" if hidden else ""
+
+    def _tag_group(self) -> None:
+        """Tag the shown names matching a pattern: Midnight Commander's ``+``."""
+        self._group(tag=True)
+
+    def _untag_group(self) -> None:
+        """Untag the shown names matching a pattern: Midnight Commander's ``\\``."""
+        self._group(tag=False)
+
+    def _group(self, tag: bool) -> None:
+        """Ask for a pattern and tag or untag what matches it.
+
+        Pre-filled with ``*``, so ``+`` then Enter tags every file as ``+`` on
+        its own used to -- every *file*: the "Files only" switch, on by
+        default, keeps ``*.tsv`` from taking a directory called ``old.tsv``.
+        A pattern that matches nothing says so and changes nothing.
+        """
+        panel = self.active
+        if panel.plugin is not None:
+            self._set_message("Tagging works on a directory listing")
+            return
+        verb = "Tag" if tag else "Untag"
+        files_only = dialogs.Toggle("Files only", "f")
+        pattern = dialogs.prompt(
+            self.stdscr, f"{verb} group",
+            f"{verb} the names matching (glob or text):", default="*",
+            toggles=[files_only])
+        if not pattern:
+            return
+        count = panel.select_matching(pattern, tag=tag,
+                                      files_only=files_only.on)
+        if not count:
+            self._set_message(f"Nothing matches {pattern}")
+            return
+        self._set_message(f"{verb}ged {count}: {len(panel.selected)} tagged")
+
+    def _invert_tags(self) -> None:
+        """Tag what is untagged and untag what is tagged: mc's ``*``."""
+        panel = self.active
+        if panel.plugin is not None:
+            self._set_message("Tagging works on a directory listing")
+            return
+        panel.invert_selection()
+        self._set_message(f"Tags inverted: {len(panel.selected)} tagged")
 
     def _end_search(self) -> None:
         """Turn the search mode off, leaving the cursor where it is."""
@@ -2873,7 +2928,8 @@ class App:
             "                 script ('#!' line) or executable, with an\n"
             "                 arguments prompt (Esc cancels); view the rest\n"
             "  Backspace/Left parent directory\n"
-            "  Insert / Space tag file    +/-  tag all / untag all\n"
+            "  Insert / Space tag file    -  untag all    *  invert\n"
+            "  + / \\          tag / untag the names matching a pattern\n"
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
             "  Ctrl-G         go to path   Ctrl-T  sort order\n"
             "  Esc            the menu bar (Alt+F, Alt+C, Alt+O, Alt+H\n"
@@ -2947,6 +3003,7 @@ class App:
             "  F7/7    Mkdir     F8/8/d  Delete          F9/9/s  Sync\n"
             "  F10/0/q Quit\n"
             "  F       filter: show only the names matching a pattern\n"
+
             "\n"
             "  F5/F6 ask before replacing a file (overwrite, skip, if\n"
             "  older; once or for all), keep permissions (Ctrl-P in the\n"

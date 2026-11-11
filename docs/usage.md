@@ -985,6 +985,23 @@ It works on the listing the pane already has, so a remote or in-archive pane
 filters without asking the server again. `F` in a file pane is the filter; in
 the table browser, which owns its pane, `F` freezes columns as before.
 
+### Tagging by pattern
+
+Midnight Commander's three keys, over what the pane shows:
+
+- **`+`** asks for a pattern, pre-filled with `*`, and tags every name that
+  matches it — so `+` then `Enter` tags every file. **`\`** asks the same way
+  and untags what matches. **`-`** untags everything, and **`*`** inverts the
+  tags. All three are also in the **File** menu.
+- **Patterns** follow the filter's rule: `*`, `?` or `[` make a glob matched
+  against the whole name (`*.tsv`, `run_?.tsv`), plain text matches anywhere
+  in the name, and a pattern all in lowercase ignores case.
+- **Files only**, under the field and on by default (`Ctrl-F` flips it), leaves
+  directories out, so `*.tsv` does not take a directory called `old.tsv`
+  with it.
+- **A pattern that matches nothing** says so and changes nothing. `..` is never
+  tagged, and with a filter on, the names it hides keep the tags they had.
+
 ## Key bindings
 
 Keys are read decoded, so anywhere text is typed — the editor, a rename or
@@ -1007,7 +1024,8 @@ where it should.)
 | `x` | extract the archive into the other pane | `/` | search this pane by name (see above) |
 | `F` | filter: show only the names matching a pattern (see above) | | |
 | `D` | compare both panes' files | `h` | head + tail of the other pane's file, in this pane |
-| `+` / `-` | tag all / untag all | `F8` | delete |
+| `+` / `\` | tag / untag the names matching a pattern | `F8` | delete |
+| `-` / `*` | untag all / invert the tags | | |
 | `Ctrl-U` | swap panes | `F9` | synchronize panes |
 | `Ctrl-R` | reload panes | `F10` | quit |
 | `Ctrl-G` | go to path | `Ctrl-T` | change sort order |

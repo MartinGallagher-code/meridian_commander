@@ -282,7 +282,9 @@ def test_tagging_keys(app, key):
     assert app.left.cursor >= before
 
 
-def test_tag_all_and_untag_all(app):
+def test_tag_all_and_untag_all(app, monkeypatch):
+    """+ and \\ ask for a pattern (MC-013); the default, *, is everything."""
+    _ScriptedDialogs(monkeypatch, prompt=["*", "*", "*"])
     app.handle_key(ord("+"))
     assert ".." not in app.left.selected
     assert app.left.selected
