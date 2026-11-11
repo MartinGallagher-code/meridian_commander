@@ -6,7 +6,8 @@ Press **`C`** for the configuration menu:
   built-in editor (created with commented defaults on first use). `[ui] scheme`
   is the colour scheme; `[ui] editor` is the external editor `F4` should use
   (blank for the built-in one — see below); `[ui] panes` is how many panes
-  are on screen at start (below); plug-ins read their settings from
+  are on screen at start (below); `[ui] listing` is `long` for the mode and
+  owner columns (below); plug-ins read their settings from
   `[plugin:<name>]` sections; `[plugins] dirs` adds extra plug-in directories.
 - **Edit a plug-in file** lists every discovered plug-in file (built-in and
   user) and opens the chosen one in the editor.
@@ -33,6 +34,22 @@ panes = 1
 Only `1` does this; anything else, blank included, is two panes. `z` and
 **Options ▸ Single pane** change it for the session and do not write the file,
 the way the hidden-files toggle does not.
+
+## `[ui] listing` — the mode and owner columns
+
+`short`, the default, lists each entry's name, size and time. `long` adds its
+mode (`-rwxr-xr-x`) and its owner, between the size and the time:
+
+```ini
+[ui]
+listing = long
+```
+
+**Options ▸ Long listing** switches it while running, and does write the file,
+so the choice outlasts the session. Where a pane is too narrow for every
+column — two panes on an 80-column terminal — the time gives way first, so
+names keep their room. The owner is a name on a local, SSH or FTP pane and a
+number on an SFTP one, which is all SFTP says.
 
 ## `[ui] editor` — using vi, vim or your own editor
 

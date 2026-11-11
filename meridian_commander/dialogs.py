@@ -620,3 +620,105 @@ class ProgressDialog:
 
     def close(self) -> None:
         self.win.nodelay(False)
+
+
+# -- permissions ---------------------------------------------------------------
+
+@dataclass
+class AttributeChoice:
+    """What the attributes dialog was told: bits to set and clear, and the
+    owner, group and recursion it ended with."""
+
+    on: int
+    off: int
+    owner: str
+    group: str
+    recursive: bool
+
+
+#: The rows and columns of the box grid, highest bit first.
+_WHO = ("Owner", "Group", "Other")
+_WHAT = ("read", "write", "exec")
+
+
+def _bit(row: int, col: int) -> int:
+    return 1 << (8 - (row * 3 + col))
+
+
+def attributes(stdscr, title: str, subject: str, on: int, off: int,
+               owner: str = "", group: str = "", can_chown: bool = False,
+               has_dirs: bool = False) -> AttributeChoice | None:
+    """Show and set permission bits as ``rwx`` boxes and in octal.
+
+    ``on`` and ``off`` are the bits every entry agrees on; a bit in neither is
+    mixed, drawn ``[~]``, and stays each entry's own unless it is toggled.
+    The arrows move between the boxes and Space flips one; typing octal
+    digits sets all nine at once, the last three typed counting -- the boxes
+    and the number are two views of one value, so each follows the other.
+    ``o`` and ``g`` ask for a new owner or group where ``can_chown`` allows,
+    ``r`` switches recursion on for directories, Enter applies, Esc cancels.
+    """
+    from .attributes import octal_text
+
+    width, height = 54, 14
+    win = _center(stdscr, height, width)
+    row, col = 0, 0
+    typed = ""
+    recursive = False
+    while True:
+        _box(win, title, "Space toggle  0-7 octal  Enter=OK  Esc=Cancel")
+        win_h, w = win.getmaxyx()
+        theme.paint(win, 1, 3, subject[: w - 6], "dialoghot")
+        theme.paint(win, 3, 14, "  ".join(f"{what:<5}" for what in _WHAT),
+                    "dialogdim")
+        for r, who in enumerate(_WHO):
+            theme.paint(win, 4 + r, 3, who, "dialog")
+            for c in range(3):
+                bit = _bit(r, c)
+                mark = "x" if on & bit else " " if off & bit else "~"
+                theme.paint(win, 4 + r, 14 + c * 7, f"[{mark}]",
+                            "sel" if (r, c) == (row, col) else "input")
+        theme.paint(win, 8, 3, f"Octal      {octal_text(on, off)}", "dialog")
+        who = f"Owner: {owner or '(various)'}   Group: {group or '(various)'}"
+        if can_chown:
+            who += "   o / g"
+        theme.paint(win, 9, 3, who[: w - 6], "dialog")
+        if has_dirs:
+            theme.paint(win, 10, 3,
+                        f"[{'x' if recursive else ' '}] Recursive   r",
+                        "dialog")
+        win.refresh()
+        k = read_key(win)
+        char = typed_char(k) or ""
+        if k == 27:
+            return None
+        elif k in (10, 13, curses.KEY_ENTER):
+            return AttributeChoice(on, off, owner, group, recursive)
+        elif k == curses.KEY_UP:
+            row = (row - 1) % 3
+        elif k == curses.KEY_DOWN:
+            row = (row + 1) % 3
+        elif k == curses.KEY_LEFT:
+            col = (col - 1) % 3
+        elif k in (curses.KEY_RIGHT, 9):
+            col = (col + 1) % 3
+        elif char in (" ", "x"):
+            bit = _bit(row, col)
+            # A mixed box turns on first, as the commanders do it.
+            if on & bit:
+                on, off = on & ~bit, off | bit
+            else:
+                on, off = on | bit, off & ~bit
+            typed = ""
+        elif char and char in "01234567":
+            typed = (typed + char)[-3:]
+            on = int(typed, 8)
+            off = 0o777 & ~on
+        elif char == "o" and can_chown:
+            answer = prompt(stdscr, title, "New owner:", default=owner)
+            owner = answer.strip() if answer else owner
+        elif char == "g" and can_chown:
+            answer = prompt(stdscr, title, "New group:", default=group)
+            group = answer.strip() if answer else group
+        elif char == "r" and has_dirs:
+            recursive = not recursive

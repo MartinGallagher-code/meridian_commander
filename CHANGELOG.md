@@ -12,6 +12,25 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.12.0] — 2026-11-10
+
+### Added
+
+- **`a` shows and changes permissions, owner and group** (also **File ▸
+  Attributes…**). Nine `rwx` boxes and the octal number, kept in step: the
+  arrows and `Space` flip a box, octal digits set all nine. Tagged entries
+  that disagree show their mixed bits as `[~]` (and `?` in octal), which stay
+  each entry's own unless changed. `o` and `g` change the owner and group where
+  the pane can — by name locally and over SSH, by number over SFTP; `r` goes
+  on under tagged directories, after asking, without following the links it
+  meets, and can be cancelled. Whatever refuses is named at the end. FTP and
+  archives say they cannot. (MC-014)
+- **Options ▸ Long listing** adds a mode (`-rwxr-xr-x`) and an owner column to
+  the panes, remembered as `[ui] listing = long`. In a narrow pane the time
+  gives way first. (MC-014)
+- **`FileSystem.chown`** with `can_chown`, and `owner` and `group` on
+  `DirEntry`: local and SSH listings give names, SFTP gives numbers. (MC-014)
+
 ## [1.11.0] — 2026-11-10
 
 ### Changed
@@ -937,6 +956,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.12.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.8.0...v1.9.0

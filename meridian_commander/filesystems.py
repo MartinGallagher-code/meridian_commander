@@ -51,6 +51,11 @@ class DirEntry:
     size: int = 0
     mtime: float | None = None
     mode: int = 0
+    #: Who owns it, as the backend names them: a user name where it knows
+    #: one, a number where it only has that (SFTP), blank where it says
+    #: nothing.
+    owner: str = ""
+    group: str = ""
 
     @property
     def is_file(self) -> bool:
@@ -234,6 +239,19 @@ class FileSystem(abc.ABC):
         """What the symbolic link at ``path`` points to, as it was written."""
         raise FileSystemError(f"{self.label()} cannot read symbolic links")
 
+    #: Whether :meth:`chown` can change an owner or group on this backend.
+    can_chown: bool = False
+
+    def chown(self, path: str, owner: str = "", group: str = "") -> None:
+        """Give ``path`` a new owner, group, or both; blank leaves one alone.
+
+        Names or numbers, as the backend takes them.  Only root may give a
+        file away, and a group must be one of the user's own; the backend's
+        refusal is raised, not swallowed, so the caller can say which file
+        kept its owner and why.
+        """
+        raise FileSystemError(f"{self.label()} cannot change owners")
+
     @contextlib.contextmanager
     def batch(self):
         """Group a run of writes so the backend can finish them in one go.
@@ -260,6 +278,33 @@ class FileSystem(abc.ABC):
 # ---------------------------------------------------------------------------
 # Local filesystem
 # ---------------------------------------------------------------------------
+_USER_NAMES: dict[int, str] = {}
+_GROUP_NAMES: dict[int, str] = {}
+
+
+def _id_name(table: dict[int, str], number: int, lookup) -> str:
+    """The name ``lookup`` gives an id, or the number when it has none.
+
+    Remembered, because a listing asks for the same few owners thousands of
+    times and each question is a read of the password or group database.
+    """
+    if number not in table:
+        try:
+            table[number] = lookup(number)[0]
+        except (KeyError, OverflowError):
+            table[number] = str(number)
+    return table[number]
+
+
+def _owner_names(st) -> tuple[str, str]:
+    """The user and group names an ``os.stat`` result belongs to."""
+    import grp
+    import pwd
+
+    return (_id_name(_USER_NAMES, st.st_uid, pwd.getpwuid),
+            _id_name(_GROUP_NAMES, st.st_gid, grp.getgrgid))
+
+
 class LocalFileSystem(FileSystem):
     """The machine Meridian Commander is running on."""
 
@@ -311,6 +356,7 @@ class LocalFileSystem(FileSystem):
                     # Resolve symlinks for the is_dir flag so that following
                     # them behaves as the user expects.
                     is_dir = de.is_dir(follow_symlinks=True)
+                    owner, group = _owner_names(st)
                     entries.append(
                         DirEntry(
                             name=de.name,
@@ -319,6 +365,8 @@ class LocalFileSystem(FileSystem):
                             size=st.st_size,
                             mtime=st.st_mtime,
                             mode=st.st_mode,
+                            owner=owner,
+                            group=group,
                         )
                     )
                 except OSError:
@@ -341,6 +389,7 @@ class LocalFileSystem(FileSystem):
             if not os.path.islink(path):
                 raise
             st = os.lstat(path)
+        owner, group = _owner_names(st)
         return DirEntry(
             name=os.path.basename(os.path.normpath(path)),
             is_dir=stat_mod.S_ISDIR(st.st_mode),
@@ -348,6 +397,8 @@ class LocalFileSystem(FileSystem):
             size=st.st_size,
             mtime=st.st_mtime,
             mode=st.st_mode,
+            owner=owner,
+            group=group,
         )
 
     def open_read(self, path: str):
@@ -391,6 +442,11 @@ class LocalFileSystem(FileSystem):
 
     def readlink(self, path: str) -> str:
         return os.readlink(path)
+
+    can_chown = True
+
+    def chown(self, path: str, owner: str = "", group: str = "") -> None:
+        shutil.chown(path, user=owner or None, group=group or None)
 
 
 # ---------------------------------------------------------------------------
@@ -838,6 +894,8 @@ class SFTPFileSystem(FileSystem):
                     size=attr.st_size or 0,
                     mtime=float(attr.st_mtime) if attr.st_mtime else None,
                     mode=mode,
+                    owner=_number(attr, "st_uid"),
+                    group=_number(attr, "st_gid"),
                 )
             )
         return entries
@@ -872,6 +930,8 @@ class SFTPFileSystem(FileSystem):
             size=attr.st_size or 0,
             mtime=float(attr.st_mtime) if attr.st_mtime else None,
             mode=mode,
+            owner=_number(attr, "st_uid"),
+            group=_number(attr, "st_gid"),
         )
 
     def open_read(self, path: str):
@@ -953,6 +1013,19 @@ class SFTPFileSystem(FileSystem):
             raise FileSystemError(f"not a symbolic link: {path}")
         return target
 
+    can_chown = True
+
+    def chown(self, path: str, owner: str = "", group: str = "") -> None:
+        """SFTP speaks numbers only, and wants both: a blank one is kept."""
+        for value in (owner, group):
+            if value and not value.isdigit():
+                raise FileSystemError(
+                    f"SFTP takes numeric owner and group ids, not {value!r}")
+        attr = self._sftp.stat(path)
+        self._sftp.chown(path,
+                         int(owner) if owner else attr.st_uid,
+                         int(group) if group else attr.st_gid)
+
     def close(self) -> None:
         try:
             # The write session, when there is a distinct one, goes first: it
@@ -965,6 +1038,12 @@ class SFTPFileSystem(FileSystem):
             self._sftp.close()
         finally:
             _close_ssh_client(self._client)
+
+
+def _number(attr, name: str) -> str:
+    """An SFTP attribute's numeric id as text, or blank when it is missing."""
+    value = getattr(attr, name, None)
+    return "" if value is None else str(value)
 
 
 # ---------------------------------------------------------------------------
@@ -1022,13 +1101,13 @@ def _parse_unix_ls_line(line: str) -> "DirEntry | None":
     if not line.strip():
         return None
     m = re.match(
-        r"^([\-dlbcps])([rwxsStT\-]{9})[\+@\.]?\s+\d+\s+\S+\s+\S+\s+"
+        r"^([\-dlbcps])([rwxsStT\-]{9})[\+@\.]?\s+\d+\s+(\S+)\s+(\S+)\s+"
         r"(\d+(?:,\s*\d+)?)\s+(\S+\s+\d+\s+[\d:]+)\s+(.+)$",
         line,
     )
     if not m:
         return None
-    type_ch, perms, size_s, date_s, name = m.groups()
+    type_ch, perms, owner, group, size_s, date_s, name = m.groups()
     is_link = type_ch == "l"
     is_dir = type_ch == "d"
     size = 0 if "," in size_s else int(size_s)
@@ -1041,6 +1120,8 @@ def _parse_unix_ls_line(line: str) -> "DirEntry | None":
         size=size,
         mtime=_parse_ls_date(date_s),
         mode=_ls_mode(type_ch, perms),
+        owner=owner,
+        group=group,
     )
 
 
@@ -1700,6 +1781,15 @@ class SSHFileSystem(FileSystem):
 
     def readlink(self, path: str) -> str:
         return self._run(f"readlink {self._q(path)}").rstrip("\n")
+
+    can_chown = True
+
+    def chown(self, path: str, owner: str = "", group: str = "") -> None:
+        if owner:
+            spec = f"{owner}:{group}" if group else owner
+            self._run(f"chown {self._q(spec)} {self._q(path)}")
+        elif group:
+            self._run(f"chgrp {self._q(group)} {self._q(path)}")
 
     def close(self) -> None:
         _close_ssh_client(self._client)

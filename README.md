@@ -210,6 +210,12 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   two ends are kept, so a multi-gigabyte log costs what a short one does.
 - **New file** (`n`) and **rename** (`r`) — `touch` and a rename without
   leaving for a shell; an existing file is restamped, never emptied.
+- **Permissions, owner and group** (`a`, File ▸ Attributes…) — nine `rwx`
+  boxes and the octal number, kept in step; tagged entries that disagree show
+  their mixed bits as `[~]`, which stay each entry's own unless changed;
+  owner and group where the pane can change them; recursive into directories
+  on request, cancellable, with refusals named at the end. **Options ▸ Long
+  listing** adds mode and owner columns, and is remembered.
 - **Tag multiple files** for batch copy/move/delete: `Insert`/`Space` one at a
   time; `+` the names matching a pattern (pre-filled with `*`, so `+` Enter
   tags every file), `\` untags by pattern, `-` untags everything and `*`
