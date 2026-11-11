@@ -82,6 +82,7 @@ from .panel import Panel, Search
 from . import usage
 from .peek import PeekPane
 from .quickview import QuickViewPane
+from .opener import SystemOpener
 from .trash import TrashUnavailable, move_to_trash
 from .sync import (
     MTIME_TOLERANCE,
@@ -143,6 +144,8 @@ MENUS: list[dict] = [
             {"label": "Ne~w~ file", "name": "touch", "key": "n"},
             {"label": "Attri~b~utes...", "name": "attributes", "key": "a"},
             {"label": "Lin~k~...", "name": "link", "key": "l"},
+            {"label": "~O~pen with system app", "name": "open_with",
+             "key": "w"},
             {"label": "De~l~ete", "name": "delete", "key": "F8"},
             {"label": "~T~ag / untag", "name": "tag", "key": "Ins"},
             {"label": "Tag ~g~roup...", "name": "tag_group", "key": "+"},
@@ -350,6 +353,8 @@ class App:
         self.long_listing = _config.long_listing()
         #: Whether F8 on a local pane offers the trash first (Options).
         self.use_trash = _config.trash_enabled()
+        #: Hands files to the desktop (``w``), keeping its copies for the run.
+        self.opener = SystemOpener()
 
         left_fs = LocalFileSystem()
         right_fs = LocalFileSystem()
@@ -928,6 +933,7 @@ class App:
             "invert": self._invert_tags,
             "attributes": self._attributes,
             "link": self._link,
+            "open_with": self._open_with,
             "long": self._toggle_long,
             "trash": self._toggle_trash,
             "find": self._find_files,
@@ -1066,6 +1072,8 @@ class App:
             self._attributes()
         elif key == ord("l"):  # make a symbolic link, or change one's target
             self._link()
+        elif key == ord("w"):  # open with the desktop's own application
+            self._open_with()
         elif key == 17:  # Ctrl-Q: the other pane shows the cursor's file
             self._quick_view()
         elif key == 27:  # Esc: the menu bar; Alt+letter: a menu by name
@@ -1310,6 +1318,19 @@ class App:
             self._set_message("Attributes cancelled")
         else:
             self._set_message(f"Attributes changed on {done} item(s)")
+
+    def _open_with(self) -> None:
+        """Hand the entry under the cursor to the desktop's own application."""
+        panel = self.active
+        if panel.plugin is not None:
+            self._set_message("Open with works on a directory listing")
+            return
+        entry = panel.current()
+        if entry is None or entry.name == "..":
+            self._set_message("Nothing to open")
+            return
+        path = panel.fs.join(panel.path, entry.name)
+        self._set_message(self.opener.open(panel.fs, path, entry.is_dir))
 
     def _link(self) -> None:
         """Make symbolic links in the other pane, or change a link's target.
@@ -3253,6 +3274,8 @@ class App:
             "  Ctrl-Q         quick view: the other pane shows the cursor's file\n"
             "  Ctrl-T         sort: name, natural (run_2 < run_10), ext, size, time\n"
             "  l              link in the other pane; on a link, change its target\n"
+            "  w              open with the system's application (a copy,\n"
+            "                 if remote or in an archive)\n"
             "  F8             on a local pane: to the trash, or delete for good\n"
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
             "  Ctrl-G         go to path   Ctrl-T  sort order\n"
@@ -3371,6 +3394,7 @@ class App:
     def _close_backends(self) -> None:
         for panel in (self.left, self.right):
             self._close_plugin(panel)
+        self.opener.cleanup()
         for fs in self._backends:
             try:
                 fs.close()

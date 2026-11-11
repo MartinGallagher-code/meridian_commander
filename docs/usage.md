@@ -1077,6 +1077,27 @@ and can restore it:
 **Options ▸ Trash on delete** turns this off, so `F8` deletes permanently as it
 used to; it is remembered as `[ui] trash` (see [Configuration](configuration.md)).
 
+### Opening with the system's application
+
+**`w`** (**File ▸ Open with system app**) hands the file under the cursor to the
+desktop, which opens it with whatever application it associates with that kind
+of file: `open` on macOS, `xdg-open` on Linux and the BSDs, and `wslview` under
+WSL when it is installed. It does not wait for the application, and nothing it
+prints reaches the screen. The built-in viewers stay on `F3`.
+
+- **A directory** on a local pane opens in the system's file browser. On a
+  remote pane there is nothing local to open, and `w` says so.
+- **A file on a server or inside an archive** is copied first, into a directory
+  of its own under one private (mode 0700) directory made for this run, and
+  that copy is opened. Changes to the copy are **not** sent back — use `F4`
+  with your own editor for that (see [Editing with your own editor](#editing-with-your-own-editor)).
+- **The copies are removed when Meridian exits.** An application still holding
+  one open at that moment may lose it, so save anything worth keeping
+  somewhere else first.
+- **With no desktop** — Linux with neither `DISPLAY` nor `WAYLAND_DISPLAY` set,
+  as over SSH, or no opener installed — nothing is run, and the status line
+  says why.
+
 ## Key bindings
 
 Keys are read decoded, so anywhere text is typed — the editor, a rename or
@@ -1102,7 +1123,7 @@ where it should.)
 | `D` | compare both panes' files | `h` | head + tail of the other pane's file, in this pane |
 | `Ctrl-Q` | quick view: the other pane shows the cursor's file (see below) | | |
 | `+` / `\` | tag / untag the names matching a pattern | `F8` | delete: to the trash on a local pane, or permanently (see below) |
-| `-` / `*` | untag all / invert the tags | | |
+| `-` / `*` | untag all / invert the tags | `w` | open with the system's application (see above) |
 | `Ctrl-U` | swap panes | `F9` | synchronize panes |
 | `Ctrl-R` | reload panes | `F10` | quit |
 | `Ctrl-G` | go to path | `Ctrl-T` | change sort order: name, natural name (`run_2` before `run_10`), extension, size, time |

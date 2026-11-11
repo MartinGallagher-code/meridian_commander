@@ -12,6 +12,20 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.17.0] — 2026-11-10
+
+### Added
+
+- **`w` opens the file under the cursor with the system's application**
+  (**File ▸ Open with system app**): `open` on macOS, `xdg-open` on Linux,
+  `wslview` under WSL. It starts detached, with its output sent nowhere. A
+  file on a server or inside an archive is copied into a private (0700)
+  directory for this run first, and the copies are removed when Meridian
+  exits; edits to a copy are not sent back. A local directory opens in the
+  file browser. With no desktop (no `DISPLAY` or `WAYLAND_DISPLAY` on Linux,
+  or no opener installed) nothing is run and the status line says why.
+  (MC-019)
+
 ## [1.16.0] — 2026-11-10
 
 ### Added
@@ -1019,6 +1033,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.17.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.13.0...v1.14.0

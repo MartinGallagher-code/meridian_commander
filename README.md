@@ -222,6 +222,12 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   delete can be undone; **Delete permanently** is the second choice, and
   remote panes and archives say plainly that it cannot be undone.
   **Options ▸ Trash on delete** turns it off.
+- **Open with the system's application** (`w`, File ▸ Open with system app) —
+  hands the file under the cursor to the desktop: `open` on macOS, `xdg-open`
+  on Linux, `wslview` under WSL. A PDF goes to Preview, an `.xlsx` to Excel. A
+  file on a server or inside an archive is copied to a private temporary
+  directory first, removed when Meridian exits; edits to that copy are not
+  sent back. On a local directory it opens the system's file browser.
 - **Symbolic links** (`l`, File ▸ Link…) — a link in the other pane to the
   cursor entry or each tagged one, relative by default; on a link, `l` changes
   where it points. Both panes must be on one machine.
