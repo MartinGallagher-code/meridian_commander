@@ -82,6 +82,8 @@ from .panel import Panel, Search
 from . import usage
 from .peek import PeekPane
 from .quickview import QuickViewPane
+from .jobs import RULES, Job, JobQueue
+from .jobspane import JobsPane
 from .opener import SystemOpener
 from .trash import TrashUnavailable, move_to_trash
 from .sync import (
@@ -179,6 +181,7 @@ MENUS: list[dict] = [
              "key": "h"},
             {"label": "~Q~uick view in the other pane", "name": "quick_view",
              "key": "Ctrl+Q"},
+            {"label": "~J~obs in this pane", "name": "jobs", "key": "J"},
             {"sep": True},
             {"label": "~T~erminal in this pane", "name": "terminal", "key": "t"},
             {"label": "Full-screen she~l~l", "name": "shell", "key": "!"},
@@ -327,6 +330,10 @@ class TransferConflicts:
             pass   # no screen to repaint: a stand-in in a test
 
 
+def _is_local(fs) -> bool:
+    return getattr(fs, "scheme", "local") == "local"
+
+
 def menu_layout() -> list[tuple[int, int]]:
     """Where each menu's caption sits on the bar, as (start column, width).
 
@@ -355,6 +362,10 @@ class App:
         self.use_trash = _config.trash_enabled()
         #: Hands files to the desktop (``w``), keeping its copies for the run.
         self.opener = SystemOpener()
+        #: Copies and moves running in the background (MC-020).
+        self.jobs = JobQueue()
+        #: Quit once the last background job has ended.
+        self._quit_when_done = False
 
         left_fs = LocalFileSystem()
         right_fs = LocalFileSystem()
@@ -587,10 +598,17 @@ class App:
         # single mode its right-hand end says that a second pane exists, and
         # where it is: a pane nobody can see is easy to forget is there.
         room = width - 2
+        right = width - 1
         if len(shown) == 1:
             note = self._hidden_note(self.other, width)
-            theme.paint(stdscr, height - 2, width - 1 - len(note), note, "hint")
+            right -= len(note)
+            theme.paint(stdscr, height - 2, right, note, "hint")
             room -= len(note) + 1
+        status = self.jobs.status()
+        if status and len(status) + 2 < room // 2:
+            right -= len(status) + 1
+            theme.paint(stdscr, height - 2, right, status, "hint")
+            room -= len(status) + 1
         theme.paint(stdscr, height - 2, 1, self.message[:room], "hint")
         self._draw_function_bar(height - 1, width)
         stdscr.noutrefresh()
@@ -813,6 +831,10 @@ class App:
     #: slice of work per poll -- so waiting the plug-in's 120 ms between 15 ms
     #: slices would leave it working one eighth of the time.
     PLUGIN_POLL_MS = 120
+    #: How often the status line's job counter moves while jobs run.
+    JOBS_POLL_MS = 500
+    #: How long quitting waits for cancelled jobs to stop.
+    JOBS_GRACE = 5.0
     SIZING_POLL_MS = 5
 
     def _tick_plugins(self) -> int | None:
@@ -824,6 +846,7 @@ class App:
         terminal is only being drained.
         """
         poll: int | None = None
+        jobs_running = bool(self.jobs.jobs) and self._tick_jobs()
         for panel in (self.left, self.right):
             # A pane counting what is under its subdirectories is work in
             # progress too, and wants the same polling loop: that is what
@@ -847,17 +870,52 @@ class App:
                 wanted = getattr(plugin, "poll_ms", None)
                 if isinstance(wanted, int) and wanted < poll:
                     poll = wanted
+        if jobs_running and poll is None:
+            poll = self.JOBS_POLL_MS
         return poll
+
+    def _tick_jobs(self) -> bool:
+        """Take in what the background jobs have done; whether any are left.
+
+        The jobs run on threads of their own and never draw: this is where the
+        main thread notices one has ended, reloads the panes it changed and
+        says so on the status line.  Errors are not shown here -- they stay
+        with the job, in the jobs list (``J``), rather than popping up over
+        whatever is on the screen when they happen.
+        """
+        for job in self.jobs.tick():
+            for panel in (self.left, self.right):
+                if panel.fs is job.src_pane_fs or panel.fs is job.dst_pane_fs:
+                    panel.refresh()
+            text = f"Job {job.number} {job.state}: {job.title()}"
+            if job.errors:
+                count = len(job.errors)
+                text += f" -- {count} error{'' if count == 1 else 's'}, J to read"
+            elif job.note:
+                text += f" -- {job.note}"
+            self._set_message(text)
+        if self.jobs.active():
+            return True
+        if self._quit_when_done:
+            self.running = False
+        return False
 
     def run(self) -> None:
         curses.curs_set(0)
         while self.running:
             poll = self._tick_plugins()
+            if not self.running:          # the last job ended: quit, as asked
+                break
             self.stdscr.timeout(-1 if poll is None else poll)
             self.draw()
             try:
                 key = read_key(self.stdscr)
             except KeyboardInterrupt:
+                if self.jobs.active():
+                    self._quit_with_jobs()
+                    if not self.running:
+                        break
+                    continue
                 if dialogs.confirm(self.stdscr, "Quit", "Exit Meridian Commander?"):
                     break
                 continue
@@ -934,6 +992,7 @@ class App:
             "attributes": self._attributes,
             "link": self._link,
             "open_with": self._open_with,
+            "jobs": self._jobs_pane,
             "long": self._toggle_long,
             "trash": self._toggle_trash,
             "find": self._find_files,
@@ -1074,6 +1133,8 @@ class App:
             self._link()
         elif key == ord("w"):  # open with the desktop's own application
             self._open_with()
+        elif key == ord("J"):  # the background jobs, in this pane
+            self._jobs_pane()
         elif key == 17:  # Ctrl-Q: the other pane shows the cursor's file
             self._quick_view()
         elif key == 27:  # Esc: the menu bar; Alt+letter: a menu by name
@@ -1332,6 +1393,89 @@ class App:
         path = panel.fs.join(panel.path, entry.name)
         self._set_message(self.opener.open(panel.fs, path, entry.is_dir))
 
+    def _jobs_pane(self) -> None:
+        """Show the background jobs in this pane, or stop showing them."""
+        from .plugin_api import PluginContext
+
+        for panel in (self.left, self.right):
+            if isinstance(panel.plugin, JobsPane):
+                self._close_plugin(panel)
+                panel.refresh()
+                self._set_message("Jobs closed")
+                return
+        panel = self.active
+        if panel.plugin is not None:
+            self._set_message("This pane is busy -- close it first")
+            return
+        ctx = PluginContext(app=self, own_panel=panel, other_panel=self.other)
+        panel.plugin = JobsPane(ctx)
+        self._set_message("Jobs -- p pauses, c cancels, Enter shows errors, "
+                          "J closes")
+
+    def _background(self, move: bool, src_panel: Panel, dst_panel: Panel,
+                    sources: list, dest: str, keep_mode: bool) -> None:
+        """Queue a copy or move to run while the panes stay usable.
+
+        A job cannot stop to ask, so what to do with a target that is already
+        there is asked now, once, for all of it.  A remote side gets a
+        connection of the job's own -- browsing that host must not wait
+        behind the copy, and one paramiko channel is not shared between
+        threads -- dialled now, on this thread, so a password can be asked.
+        """
+        verb = "Move" if move else "Copy"
+        for fs in (src_panel.fs, dst_panel.fs):
+            if isinstance(fs, ArchiveFileSystem):
+                dialogs.message(self.stdscr, f"Background {verb.lower()}",
+                                "An archive is rewritten as a whole, so it "
+                                "cannot take part in a background job.\n"
+                                "Run this one without Background.",
+                                error=True)
+                return
+        labels = ["Overwrite", "Overwrite if older", "Skip", "Cancel"]
+        choice = dialogs.menu(self.stdscr, f"Background {verb.lower()}",
+                              labels, keys=["o", "i", "s", "c"],
+                              text="If a target is already there:")
+        if choice is None or choice == 3:
+            return
+        rule = RULES[choice]
+        closing: list[FileSystem] = []
+        own: list[FileSystem] = []
+        for fs, path in ((src_panel.fs, src_panel.path),
+                         (dst_panel.fs, dest)):
+            # Both sides on this machine share one backend, so a move between
+            # local panes is a rename rather than a copy and a delete.
+            mine = own[0] if own and _is_local(fs) and _is_local(own[0]) \
+                else self._own_connection(fs, path)
+            if mine is None:
+                for opened in closing:
+                    opened.close()
+                return
+            if mine is not fs:
+                closing.append(mine)
+            own.append(mine)
+        job = Job(self.jobs.number(), move, own[0], src_panel.path,
+                  [entry.name for entry in sources], own[1], dest, rule,
+                  keep_mode=keep_mode, src_pane_fs=src_panel.fs,
+                  dst_pane_fs=dst_panel.fs, closing=closing,
+                  delete_sources=self._delete_sources)
+        self.jobs.submit(job)
+        src_panel.clear_selection()
+        queued = "" if self.jobs.started(job) else ", after the one before it"
+        self._set_message(f"Job {job.number}: {job.title()}{queued} "
+                          f"-- J to watch it")
+
+    def _own_connection(self, fs: FileSystem, path: str) -> FileSystem | None:
+        """A connection to where ``fs`` is, for a background job alone.
+
+        The local disk needs none: each job gets a fresh local backend, which
+        holds nothing open.  A remote location is dialled again with the
+        details the pane was opened with, asking for a password only if the
+        agent and keys will not do, as a preset does.
+        """
+        if _is_local(fs):
+            return LocalFileSystem()
+        return self._dial(presets.from_location("job", fs, path))
+
     def _link(self) -> None:
         """Make symbolic links in the other pane, or change a link's target.
 
@@ -1513,8 +1657,28 @@ class App:
 
     # -- actions ----------------------------------------------------------
     def _quit(self) -> None:
+        if self.jobs.active():
+            self._quit_with_jobs()
+            return
         if dialogs.confirm(self.stdscr, "Quit", "Exit Meridian Commander?",
                            default_yes=True):
+            self.running = False
+
+    def _quit_with_jobs(self) -> None:
+        """Quit with background jobs still to finish: wait, or cancel them."""
+        count = len(self.jobs.active())
+        choice = dialogs.menu(
+            self.stdscr, "Quit",
+            ["Wait for them, then quit", "Cancel them and quit", "Back"],
+            keys=["w", "c", "b"],
+            text=f"{count} background job{'' if count == 1 else 's'} "
+                 f"still running or waiting.")
+        if choice == 0:
+            self._quit_when_done = True
+            self._set_message("Quitting when the jobs end -- J to watch them")
+        elif choice == 1:
+            self.jobs.cancel_all()
+            self.jobs.wait(self.JOBS_GRACE)
             self.running = False
 
     def printwd_path(self) -> str | None:
@@ -2496,6 +2660,13 @@ class App:
 
     def _connect_preset(self, preset: presets.Preset) -> FileSystem | None:
         """Dial a preset's location, asking for a password only if needed."""
+        fs = self._dial(preset)
+        if fs is not None:
+            self._backends.append(fs)
+        return fs
+
+    def _dial(self, preset: presets.Preset) -> FileSystem | None:
+        """A new connection to a preset's place, or ``None`` having said why."""
         info = preset.connect_info()
         try:
             fs = self._connect(info)
@@ -2517,7 +2688,6 @@ class App:
                 dialogs.message(self.stdscr, "Connection failed",
                                 f"{preset.label()}\n\n{exc2}", error=True)
                 return None
-        self._backends.append(fs)
         return fs
 
     def _save_preset(self) -> None:
@@ -2725,8 +2895,10 @@ class App:
             prompt_label = (f"{verb} {len(sources)} items"
                             f"{self._not_shown(src_panel)} to{where}:")
         keep_mode = dialogs.Toggle("Keep permissions", "p")
+        background = dialogs.Toggle("Background", "b", on=False)
         dest = dialogs.prompt(self.stdscr, f"{verb}", prompt_label,
-                              default=default_dest, toggles=[keep_mode])
+                              default=default_dest,
+                              toggles=[keep_mode, background])
         if dest is None:
             return
         dst_fs = dst_panel.fs
@@ -2737,6 +2909,10 @@ class App:
         # wherever the shell that started the application happened to be,
         # where the pane would never show it.
         dest = dst_fs.normpath(dst_panel.resolve(dest))
+        if background.on:
+            self._background(move, src_panel, dst_panel, sources, dest,
+                             keep_mode.on)
+            return
 
         # Pre-count for an overall byte total across all sources.
         try:
@@ -3276,6 +3452,8 @@ class App:
             "  l              link in the other pane; on a link, change its target\n"
             "  w              open with the system's application (a copy,\n"
             "                 if remote or in an archive)\n"
+            "  F5/F6 Ctrl-B   in the prompt: run it in the background\n"
+            "  J              background jobs: p pause, c cancel, Enter errors\n"
             "  F8             on a local pane: to the trash, or delete for good\n"
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
             "  Ctrl-G         go to path   Ctrl-T  sort order\n"
@@ -3395,6 +3573,8 @@ class App:
         for panel in (self.left, self.right):
             self._close_plugin(panel)
         self.opener.cleanup()
+        self.jobs.cancel_all()
+        self.jobs.wait(self.JOBS_GRACE)
         for fs in self._backends:
             try:
                 fs.close()

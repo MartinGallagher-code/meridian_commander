@@ -1129,7 +1129,7 @@ where it should.)
 | `Ctrl-G` | go to path | `Ctrl-T` | change sort order: name, natural name (`run_2` before `run_10`), extension, size, time |
 | `Esc` | the menu bar | `Alt+F`/`C`/`O`/`H` | a menu by name |
 | `~` | home directory (this pane) | `=` | other pane: same location |
-| `<` / `>` | back / forward through this pane's history | | |
+| `<` / `>` | back / forward through this pane's history | `J` | background jobs: pause, resume, cancel (see [In the background](transfers.md#in-the-background)) |
 | `b` | presets: saved locations | | |
 | `.` | show/hide hidden files | `t` | terminal inside this pane (see above) |
 | `u` | directory sizes in this pane | `z` | single pane: this one at full width, the other kept |

@@ -18,6 +18,8 @@ the sync engine are written once and work across any pair of backends.
 | `operations.py` | streaming copy, recursive copy, move |
 | `attributes.py` | permission bits and owners: working out a change, and making it over a tree |
 | `quickview.py` | the quick view pane: the other pane's file, in the viewer F3 would use |
+| `jobs.py` | background copies and moves: the job, its worker thread, the queue |
+| `jobspane.py` | the jobs list pane (`J`) |
 | `opener.py` | handing a file to the desktop's own application (`open`, `xdg-open`, `wslview`) |
 | `trash.py` | moving files to the desktop's trash (FreeDesktop.org, or `~/.Trash` on macOS) |
 | `sync.py` | bidirectional sync plan + execution |

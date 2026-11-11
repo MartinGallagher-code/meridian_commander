@@ -12,6 +12,24 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.18.0] — 2026-11-10
+
+### Added
+
+- **Copies and moves in the background.** The `F5`/`F6` prompt has a
+  **Background** switch (`Ctrl-B`): choose once what to do with targets
+  already there (overwrite, overwrite if older, skip) and the panes stay
+  usable while the job runs. The status line shows jobs, bytes and speed;
+  `J` (**Command ▸ Jobs in this pane**) lists them to pause, resume, cancel or
+  read their errors. Jobs between the same two places run one at a time; a
+  remote side gets its own connection; archives are left to the foreground.
+  Quitting with jobs left asks whether to wait or cancel them. (MC-020)
+
+### Changed
+
+- A copy cancelled part-way through a file now removes that file rather than
+  leaving a truncated one behind, in the foreground as in the background.
+
 ## [1.17.0] — 2026-11-10
 
 ### Added
@@ -1033,6 +1051,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.18.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.14.0...v1.15.0

@@ -185,6 +185,14 @@ def copy_file(
                 progress(done, total, label)
         finally:
             writer.close()
+    except OperationCancelled:
+        # A file cut short is not a copy of anything: leave no half of one
+        # behind to be taken for the real thing.
+        try:
+            dst_fs.remove(dst)
+        except Exception:
+            pass
+        raise
     finally:
         try:
             reader.close()
