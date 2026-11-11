@@ -217,6 +217,9 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   two ends are kept, so a multi-gigabyte log costs what a short one does.
 - **New file** (`n`) and **rename** (`r`) — `touch` and a rename without
   leaving for a shell; an existing file is restamped, never emptied.
+- **Symbolic links** (`l`, File ▸ Link…) — a link in the other pane to the
+  cursor entry or each tagged one, relative by default; on a link, `l` changes
+  where it points. Both panes must be on one machine.
 - **Permissions, owner and group** (`a`, File ▸ Attributes…) — nine `rwx`
   boxes and the octal number, kept in step; tagged entries that disagree show
   their mixed bits as `[~]`, which stay each entry's own unless changed;
