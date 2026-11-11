@@ -19,12 +19,20 @@ def fs():
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
-    """An App with two local panes and a config directory of its own."""
+    """An App with two local panes and a config directory of its own.
+
+    F8 deletes for good here, as it did before the trash (MC-018): the delete
+    tests are about deleting, and a trash would be the machine's own.  The
+    trash's tests turn it on, with a data directory of their own.
+    """
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     for side in ("left", "right"):
         (tmp_path / side / "sub").mkdir(parents=True)
         write(str(tmp_path / side / "file.txt"), side)
-    return App(_StubScreen(), str(tmp_path / "left"), str(tmp_path / "right"))
+    app = App(_StubScreen(), str(tmp_path / "left"), str(tmp_path / "right"))
+    app.use_trash = False
+    return app
 
 
 @pytest.fixture

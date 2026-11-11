@@ -12,6 +12,25 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.16.0] — 2026-11-10
+
+### Added
+
+- **`F8` on a local pane offers the trash.** It asks **Move to trash**,
+  **Delete permanently** or **Cancel**. On Linux the trash follows the
+  FreeDesktop.org specification — the home trash for the same disk, the
+  disk's own `.Trash/<uid>` or `.Trash-<uid>` for another, an info file with
+  the original path and date, and names never written over — so the
+  desktop's trash can restore what went in; on macOS it is `~/.Trash`, from
+  which Finder cannot "Put Back". An item with no usable trash is asked
+  about: delete permanently, or skip. **Options ▸ Trash on delete** and
+  `[ui] trash = no` turn it off. (MC-018)
+
+### Changed
+
+- **`F8` on a remote pane or in an archive says "This cannot be undone."**
+  Nothing else about it changed. (MC-018)
+
 ## [1.15.0] — 2026-11-10
 
 ### Added
@@ -1000,6 +1019,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.16.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.12.0...v1.13.0

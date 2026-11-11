@@ -170,7 +170,9 @@ def app(results, tmp_path, monkeypatch):
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     (tmp_path / "other").mkdir()
-    return App(_StubScreen(), str(results), str(tmp_path / "other"))
+    app = App(_StubScreen(), str(results), str(tmp_path / "other"))
+    app.use_trash = False
+    return app
 
 
 def test_f_asks_for_a_pattern_and_filters(app, monkeypatch):
@@ -231,7 +233,7 @@ def test_a_copy_and_a_delete_say_what_is_not_shown(app, monkeypatch, tmp_path):
     app._copy()
     app._delete()
     assert "Copy 3 items (2 not shown) to" in scripted.prompts[0]
-    assert scripted.messages[0][1] == "Delete 3 selected items (2 not shown)?"
+    assert scripted.messages[0][1].startswith("Delete 3 selected items (2 not shown)?")
 
 
 def test_a_single_hidden_item_is_named_with_its_count(app, monkeypatch):
@@ -241,7 +243,7 @@ def test_a_single_hidden_item_is_named_with_its_count(app, monkeypatch):
     app._copy()
     app._delete()
     assert "Copy 'notes.md' (1 not shown) to" in scripted.prompts[0]
-    assert scripted.messages[0][1] == "Delete 'notes.md' (1 not shown)?"
+    assert scripted.messages[0][1].startswith("Delete 'notes.md' (1 not shown)?")
 
 
 def test_the_footer_totals_hidden_tags_too(app):

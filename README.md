@@ -217,6 +217,11 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   two ends are kept, so a multi-gigabyte log costs what a short one does.
 - **New file** (`n`) and **rename** (`r`) — `touch` and a rename without
   leaving for a shell; an existing file is restamped, never emptied.
+- **Delete to the trash** — `F8` on a local pane offers **Move to trash** first
+  (the FreeDesktop.org trash on Linux, `~/.Trash` on macOS), so a mistaken
+  delete can be undone; **Delete permanently** is the second choice, and
+  remote panes and archives say plainly that it cannot be undone.
+  **Options ▸ Trash on delete** turns it off.
 - **Symbolic links** (`l`, File ▸ Link…) — a link in the other pane to the
   cursor entry or each tagged one, relative by default; on a link, `l` changes
   where it points. Both panes must be on one machine.
