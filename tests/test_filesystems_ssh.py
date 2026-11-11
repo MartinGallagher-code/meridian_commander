@@ -709,3 +709,41 @@ def test_scp_write_on_a_dropped_connection_says_so(ssh_fs):
     fs._client = types.SimpleNamespace(get_transport=lambda: None)
     with pytest.raises(FileSystemError, match="SSH connection has closed"):
         fs._scp_write("/a.txt", b"hello")
+
+
+# -- permissions and links (MC-011) -------------------------------------------
+
+def test_ssh_sets_the_mode_in_octal(ssh_fs):
+    fs, client = ssh_fs()
+    assert fs.can_chmod and fs.can_symlink
+    fs.chmod("/srv/run me.sh", 0o100755)
+    assert client.commands[-1] == "chmod 755 '/srv/run me.sh'"
+
+
+def test_ssh_makes_a_link_whose_target_cannot_pass_for_an_option(ssh_fs):
+    fs, client = ssh_fs()
+    fs.symlink("-odd", "/srv/link")
+    assert client.commands[-1] == "ln -s -- -odd /srv/link"
+
+
+def test_ssh_reads_a_link_without_its_newline(ssh_fs):
+    fs, _ = ssh_fs({"readlink": _Result(out=b"releases/42\n")})
+    assert fs.readlink("/srv/current") == "releases/42"
+
+
+def test_ssh_readlink_of_a_plain_file_fails(ssh_fs):
+    fs, _ = ssh_fs({"readlink": _Result(status=1)})
+    with pytest.raises(FileSystemError):
+        fs.readlink("/srv/plain.txt")
+
+
+def test_an_ssh_listing_knows_which_files_are_executable(ssh_fs):
+    """The mode was read and thrown away, so Enter on an SSH pane could not
+    tell an executable from any other file the way an SFTP pane can."""
+    listing = (b"total 8\n"
+               b"-rwxr-xr-x 1 u g 10 Jan  1 12:00 run.sh\n"
+               b"-rw------- 1 u g 10 Jan  1 12:00 secret\n")
+    fs, _ = ssh_fs({"ls -lA": _Result(out=listing)})
+    by_name = {e.name: e for e in fs.listdir("/srv")}
+    assert by_name["run.sh"].mode & 0o777 == 0o755
+    assert by_name["secret"].mode & 0o777 == 0o600

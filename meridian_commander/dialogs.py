@@ -19,6 +19,7 @@ layout and loses only the paint.
 from __future__ import annotations
 
 import curses
+from dataclasses import dataclass
 
 from . import theme
 from .util import read_key, typed_char
@@ -131,11 +132,36 @@ def confirm(stdscr, title: str, text: str, default_yes: bool = False) -> bool:
             return choice
 
 
+@dataclass
+class Toggle:
+    """A switch drawn under a prompt's field, flipped with Ctrl and its key.
+
+    ``on`` is read back once the prompt returns: the prompt flips it in place,
+    so the caller holds the answer without a second return value to unpack.
+    """
+
+    label: str
+    key: str
+    on: bool = True
+
+    @property
+    def code(self) -> int:
+        """The key code Ctrl and ``key`` arrive as."""
+        return ord(self.key.lower()) & 0x1F
+
+
 def prompt(stdscr, title: str, label: str, default: str = "",
-           is_password: bool = False) -> str | None:
-    """Single-line text input.  Returns the string, or None if cancelled."""
+           is_password: bool = False,
+           toggles: list[Toggle] | None = None) -> str | None:
+    """Single-line text input.  Returns the string, or None if cancelled.
+
+    ``toggles`` are switches listed under the field, each flipped by Ctrl and
+    its key while the field is being typed into -- a letter on its own is
+    text, so it cannot be the key.
+    """
+    toggles = toggles or []
     width = max(len(title) + 8, len(label) + 6, 50)
-    height = 5
+    height = 5 + len(toggles)
     win = _center(stdscr, height, width)
     buf = list(default)
     pos = len(buf)
@@ -145,6 +171,10 @@ def prompt(stdscr, title: str, label: str, default: str = "",
             _box(win, title, "Enter=OK  Esc=Cancel")
             win_h, w = win.getmaxyx()
             theme.paint(win, 1, 3, label[: w - 6], "dialog")
+            for row, toggle in enumerate(toggles[: max(0, win_h - 5)]):
+                mark = "x" if toggle.on else " "
+                text = f"[{mark}] {toggle.label}   Ctrl-{toggle.key.upper()}"
+                theme.paint(win, 3 + row, 3, text[: w - 6], "dialog")
             field_w = w - 6
             shown = "".join("*" if is_password else c for c in buf)
             start = max(0, pos - field_w + 1)
@@ -159,7 +189,10 @@ def prompt(stdscr, title: str, label: str, default: str = "",
             win.move(2, 3 + caret)
             win.refresh()
             k = read_key(win)
-            if k in (10, 13, curses.KEY_ENTER):
+            flipped = next((t for t in toggles if k == t.code), None)
+            if flipped is not None:
+                flipped.on = not flipped.on
+            elif k in (10, 13, curses.KEY_ENTER):
                 return "".join(buf)
             elif k == 27:
                 return None
@@ -225,7 +258,7 @@ def accelerators(names: list[str], reserved: str = "") -> list[str | None]:
 
 
 def menu(stdscr, title: str, options: list[str],
-         keys: list[str | None] | None = None) -> int | None:
+         keys: list[str | None] | None = None, text: str = "") -> int | None:
     """Vertical single-choice menu.  Returns the selected index or None.
 
     A list too long for the screen (a well stocked preset list on a short
@@ -237,13 +270,20 @@ def menu(stdscr, title: str, options: list[str],
     that option there and then rather than moving the highlight to it -- the
     whole point is to skip the walk down the list -- so a menu of saved
     locations answers to a keystroke.
+
+    ``text`` is shown above the options, a blank row under it: what the
+    choice is about, when the title alone cannot say it.  A short screen
+    gives the options the room first and cuts the text.
     """
+    header = text.split("\n") + [""] if text else []
     gutter = 3 if keys else 0     # "x  " down the left of every row
     width = max(len(title) + 8,
-                max((len(o) for o in options), default=0) + 7 + gutter, 32)
-    win = _center(stdscr, len(options) + 2, width)
+                max((len(o) for o in options), default=0) + 7 + gutter,
+                max((len(line) for line in header), default=0) + 6, 32)
+    win = _center(stdscr, len(options) + 2 + len(header), width)
     win_h, win_w = win.getmaxyx()
-    body = max(1, win_h - 2)     # rows available for options
+    first = 1 + min(len(header), max(0, win_h - 3))   # the first option's row
+    body = max(1, win_h - 1 - first)     # rows available for options
     row_w = win_w - 4            # one column kept for the scrollbar
     idx = 0
     top = 0
@@ -252,6 +292,8 @@ def menu(stdscr, title: str, options: list[str],
         top = max(min(top, idx), idx - body + 1, 0)
         scrolling = len(options) > body
         _box(win, title, f"{idx + 1}/{len(options)}" if scrolling else "")
+        for row, line in enumerate(header[: first - 1]):
+            theme.paint(win, 1 + row, 3, line[: win_w - 6], "dialog")
         for row in range(min(body, len(options) - top)):
             i = top + row
             selected = i == idx
@@ -261,12 +303,12 @@ def menu(stdscr, title: str, options: list[str],
                 # Options without a letter still indent, so one row without a
                 # shortcut does not step the whole column sideways.
                 prefix = f"{keys[i]}  " if keys[i] else "   "
-            text = f" {prefix}{options[i]} ".ljust(row_w)[:row_w]
-            theme.paint(win, 1 + row, 1, text, role)
+            label = f" {prefix}{options[i]} ".ljust(row_w)[:row_w]
+            theme.paint(win, first + row, 1, label, role)
             if keys and keys[i]:
-                theme.paint(win, 1 + row, 2, keys[i],
+                theme.paint(win, first + row, 2, keys[i],
                             "selhot" if selected else "dialoghot")
-        theme.scrollbar(win, 1, win_w - 2, body, top, body, len(options))
+        theme.scrollbar(win, first, win_w - 2, body, top, body, len(options))
         win.refresh()
         k = read_key(win)
         pressed = (typed_char(k) or "").lower()

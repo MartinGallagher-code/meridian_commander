@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import calendar
+import stat as stat_mod
 import time
 
 import pytest
@@ -656,3 +657,35 @@ def test_an_upload_that_has_already_failed_refuses_more_writes(ftp):
         time.sleep(0.005)
     else:
         pytest.fail("the write never reported the failure")
+
+
+# -- the mode an ls line stands for (MC-011) ----------------------------------
+
+@pytest.mark.parametrize("perms, expected", [
+    ("-rwxr-xr-x", stat_mod.S_IFREG | 0o755),
+    ("-rw-------", stat_mod.S_IFREG | 0o600),
+    ("drwxrwsr-t", stat_mod.S_IFDIR | 0o775 | stat_mod.S_ISGID | stat_mod.S_ISVTX),
+    ("-rwSr--r-T", stat_mod.S_IFREG | 0o644 | stat_mod.S_ISUID | stat_mod.S_ISVTX),
+    ("-rwsr-xr-x", stat_mod.S_IFREG | 0o755 | stat_mod.S_ISUID),
+    ("lrwxrwxrwx", stat_mod.S_IFLNK | 0o777),
+    ("crw-rw----", stat_mod.S_IFCHR | 0o660),
+    ("brw-rw----", stat_mod.S_IFBLK | 0o660),
+    ("prw-r--r--", stat_mod.S_IFIFO | 0o644),
+    ("srwxr-xr-x", stat_mod.S_IFSOCK | 0o755),
+])
+def test_an_ls_line_keeps_its_mode(perms, expected):
+    entry = _parse_unix_ls_line(f"{perms} 1 u g 10 Jan  1 12:00 name")
+    assert entry is not None
+    assert entry.mode == expected
+
+
+def test_ftp_cannot_change_modes_or_make_links():
+    """It says so in its own name rather than failing somewhere odd."""
+    fs = FTPFileSystem.__new__(FTPFileSystem)
+    fs.username, fs.host = "anon", "files"
+    assert not fs.can_chmod and not fs.can_symlink
+    for call in (lambda: fs.chmod("/a", 0o644),
+                 lambda: fs.symlink("b", "/a"),
+                 lambda: fs.readlink("/a")):
+        with pytest.raises(FileSystemError, match="ftp://anon@files cannot"):
+            call()

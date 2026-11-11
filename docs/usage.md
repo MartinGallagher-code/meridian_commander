@@ -977,7 +977,7 @@ where it should.)
 | `↑`/`↓` `j`/`k` | move cursor | `F2` | open / connect location |
 | `PgUp`/`PgDn` | page | `F3` | view (`.md`, `.xlsx`, `.docx`, `.pptx`) |
 | `Home`/`End` | first / last | `F4` | edit file |
-| `Enter` / `→` | enter dir / view file | `F5` | copy to other pane |
+| `Enter` / `→` | enter dir / view file | `F5` | copy to other pane (asks before replacing) |
 | `Backspace` / `←` | parent directory | `F6` | move to other pane |
 | `Insert` / `Space` | tag file | `F7` | make directory |
 | `n` | new (empty) file here | `r` | rename the file under the cursor |

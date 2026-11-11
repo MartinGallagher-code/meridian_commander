@@ -93,7 +93,11 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   servers that permit SSH login but have the SFTP subsystem disabled.
 - **Copy & move across any pair of panes** — local→remote, remote→local,
   remote→remote and local→local all work through one streaming engine, with a
-  cancellable progress bar (`F5` copy, `F6` move). A copy from an SFTP pane to
+  cancellable progress bar (`F5` copy, `F6` move). A file already at the far
+  end is never replaced without asking (overwrite, skip, overwrite if older,
+  for one or all), copies keep their permissions, and symbolic links arrive as
+  links (see [When the target is already there](https://meridian-commander.readthedocs.io/en/latest/transfers.html)).
+  A copy from an SFTP pane to
   the *same* server writes down a second channel, so the read and the write
   never contend (see [Copying on one connection](https://meridian-commander.readthedocs.io/en/latest/transfers.html)).
 - **Bidirectional directory sync** (`F9`) — compares the two panes and copies
