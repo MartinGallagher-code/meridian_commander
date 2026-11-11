@@ -151,6 +151,7 @@ MENUS: list[dict] = [
             {"label": "~B~ack", "name": "back", "key": "<"},
             {"label": "~F~orward", "name": "forward", "key": ">"},
             {"label": "Search by ~n~ame", "name": "search", "key": "/"},
+            {"label": "Filt~e~r...", "name": "filter", "key": "F"},
             {"sep": True},
             {"label": "~S~wap panes", "name": "swap", "key": "Ctrl+U"},
             {"label": "~R~eload panes", "name": "reload", "key": "Ctrl+R"},
@@ -611,9 +612,11 @@ class App:
         # tail visible (the deepest directories matter most), and are trimmed
         # before the frame sees them so the frame can still centre them.
         header = f"{panel.fs.label()}:{panel.path}"
-        room = max(8, inner_w - 8)
+        note = self._filter_note(panel)
+        room = max(8, inner_w - 8 - len(note))
         if len(header) > room:
             header = "~" + header[-(room - 1):]
+        header += note
 
         search = self.search
         if search is not None and search.panel is panel:
@@ -705,7 +708,7 @@ class App:
         if panel.error:
             return f"! {panel.error}"
         if panel.selected:
-            total = sum(e.size or 0 for e in panel.entries
+            total = sum(e.size or 0 for e in panel.listed
                         if e.name in panel.selected)
             return f"{len(panel.selected)} tagged, {human_size(total).strip()}"
         cur = panel.current()
@@ -884,6 +887,7 @@ class App:
             "back": self._back,
             "forward": self._forward,
             "search": self._start_search,
+            "filter": self._filter,
             "swap": self._swap_panes,
             "reload": self._reload,
             "mirror": self._mirror_to_other_pane,
@@ -1050,6 +1054,8 @@ class App:
             self._peek()
         elif key == ord("/"):  # search this pane's listing by name
             self._start_search()
+        elif key == ord("F"):  # show only the names matching a pattern
+            self._filter()
         elif key == curses.KEY_MOUSE:
             self._handle_mouse()
         # F-keys, with digit (1..0 -> F1..F10) and mnemonic-letter alternates
@@ -1090,6 +1096,47 @@ class App:
         self._message_before_search = self.message
         self._set_message("Search: / or Esc ends   Down/Up next/previous   "
                           "Ins tag")
+
+    def _filter(self) -> None:
+        """Ask for a pattern and show only the names in the pane that match.
+
+        Pre-filled with the pane's filter, so it can be edited, and an empty
+        answer shows everything again.  It hides; it does not untag: the
+        caption counts what it hides, tagged entries among them, and a copy
+        or delete says how many of its items are not on the screen.
+        """
+        panel = self.active
+        if panel.plugin is not None:
+            self._set_message("Filter works on a directory listing")
+            return
+        pattern = dialogs.prompt(
+            self.stdscr, "Filter",
+            "Show only names matching (text or glob; empty shows all):",
+            default=panel.filter)
+        if pattern is None:
+            return
+        panel.set_filter(pattern)
+        if not pattern:
+            self._set_message("Filter off")
+            return
+        shown = len(panel.entries) - (0 if panel._at_root() else 1)
+        self._set_message(f"Filter {pattern}: {shown} shown, "
+                          f"{panel.hidden_count} hidden")
+
+    @staticmethod
+    def _filter_note(panel: Panel) -> str:
+        """The caption's word on a filter: the pattern and what it hides."""
+        if not panel.filter:
+            return ""
+        note = f" [{panel.filter}: {panel.hidden_count} hidden"
+        tagged = panel.hidden_tagged
+        return note + (f", {tagged} tagged]" if tagged else "]")
+
+    @staticmethod
+    def _not_shown(panel: Panel) -> str:
+        """A copy, move or delete's word on tagged items a filter hides."""
+        hidden = panel.hidden_tagged
+        return f" ({hidden} not shown)" if hidden else ""
 
     def _end_search(self) -> None:
         """Turn the search mode off, leaving the cursor where it is."""
@@ -2316,9 +2363,10 @@ class App:
         default_dest = dst_panel.path
         where = self._destination(dst_panel)
         if len(sources) == 1:
-            prompt_label = f"{verb} '{sources[0].name}' to{where}:"
+            prompt_label = f"{verb} '{sources[0].name}'{self._not_shown(src_panel)} to{where}:"
         else:
-            prompt_label = f"{verb} {len(sources)} items to{where}:"
+            prompt_label = (f"{verb} {len(sources)} items"
+                            f"{self._not_shown(src_panel)} to{where}:")
         keep_mode = dialogs.Toggle("Keep permissions", "p")
         dest = dialogs.prompt(self.stdscr, f"{verb}", prompt_label,
                               default=default_dest, toggles=[keep_mode])
@@ -2621,9 +2669,10 @@ class App:
         if not targets:
             return
         if len(targets) == 1:
-            text = f"Delete '{targets[0].name}'?"
+            text = f"Delete '{targets[0].name}'{self._not_shown(panel)}?"
         else:
-            text = f"Delete {len(targets)} selected items?"
+            text = (f"Delete {len(targets)} selected items"
+                    f"{self._not_shown(panel)}?")
         has_dir = any(t.is_dir for t in targets)
         if has_dir:
             text += "\n(directories are removed recursively)"
@@ -2688,11 +2737,12 @@ class App:
         warning is trying to save the user from.
 
         Counting the pane's own listing rather than re-reading the directory
-        also means the numbers in the dialog are the ones on screen, hidden
-        files included or excluded exactly as the pane has them.
+        also means the numbers in the dialog are the ones the pane holds,
+        hidden files included or excluded exactly as the pane has them -- and
+        a filter's hidden names counted, since sync walks past any filter.
         """
         sides = [("Left ", self.left), ("Right", self.right)]
-        surveys = [(label, panel, survey_directory(panel.entries))
+        surveys = [(label, panel, survey_directory(panel.listed))
                    for label, panel in sides]
         if not any(survey.is_large for _l, _p, survey in surveys):
             return None
@@ -2896,6 +2946,7 @@ class App:
             "  F4/4/e  Edit      F5/5/c  Copy           F6/6/m  Move\n"
             "  F7/7    Mkdir     F8/8/d  Delete          F9/9/s  Sync\n"
             "  F10/0/q Quit\n"
+            "  F       filter: show only the names matching a pattern\n"
             "\n"
             "  F5/F6 ask before replacing a file (overwrite, skip, if\n"
             "  older; once or for all), keep permissions (Ctrl-P in the\n"

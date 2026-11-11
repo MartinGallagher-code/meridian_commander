@@ -12,6 +12,7 @@ offset.  :class:`Search` is the type-to-jump search over a panel's listing.
 from __future__ import annotations
 
 import bisect
+import fnmatch
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -28,12 +29,37 @@ Place = tuple[FileSystem, str, Optional[str]]
 #: this is a few sessions' wandering rather than a few jumps.
 HISTORY_LIMIT = 100
 
+#: The characters that make a filter a glob rather than a plain substring.
+GLOB_CHARS = "*?["
+
+
+def name_matches(pattern: str, name: str) -> bool:
+    """Whether ``name`` matches a filter or search ``pattern``.
+
+    The viewers' smart case: a pattern in lowercase ignores case, and one
+    with a capital in it means it.  Plain text matches anywhere in the name,
+    as the search does; a pattern holding ``*``, ``?`` or ``[`` is a shell
+    glob (``*.tsv``, ``run_?``), matched against the whole name.
+    """
+    fold = pattern == pattern.lower()
+    subject = name.lower() if fold else name
+    if any(char in pattern for char in GLOB_CHARS):
+        return fnmatch.fnmatchcase(subject, pattern)
+    return pattern in subject
+
 
 @dataclass
 class Panel:
     fs: FileSystem
     path: str
+    #: What the pane shows: the listing, less what a filter hides.
     entries: list[DirEntry] = field(default_factory=list)
+    #: The whole sorted listing, filter or none.  A filter only hides, so a
+    #: tag on an entry it hides is still a tag, and a copy still takes it.
+    listed: list[DirEntry] = field(default_factory=list)
+    #: Only names matching this are shown (see :func:`name_matches`); empty
+    #: shows everything.  One per pane, and cleared by leaving the directory.
+    filter: str = ""
     cursor: int = 0            # index into ``entries`` of the highlight bar
     top: int = 0               # index of the first visible row (scroll offset)
     selected: set[str] = field(default_factory=set)  # tagged entry names
@@ -95,12 +121,52 @@ class Panel:
             self.error = str(exc)
         if not self.show_hidden:
             entries = [e for e in entries if not e.name.startswith(".")]
-        self.entries = self._sorted(entries)
-        # Drop selections for entries that no longer exist.
-        names = {e.name for e in self.entries}
+        self.listed = self._sorted(entries)
+        self.entries = self._filtered()
+        # Drop selections for entries that no longer exist -- not for those a
+        # filter hides, which are there and still tagged.
+        names = {e.name for e in self.listed}
         self.selected &= names
         self._restore_cursor(target, fallback)
         self.start_sizing()
+
+    # -- filtering --------------------------------------------------------
+    def _filtered(self) -> list[DirEntry]:
+        if not self.filter:
+            return list(self.listed)
+        return [e for e in self.listed
+                if e.name == self.PARENT or name_matches(self.filter, e.name)]
+
+    def set_filter(self, pattern: str) -> None:
+        """Show only the names matching ``pattern``; empty shows them all.
+
+        The listing is already in memory, so this asks the backend nothing --
+        a remote pane filters as fast as a local one.  The cursor lands on the
+        first match, which is what was being looked for.
+        """
+        keep = self.current_name()
+        self.filter = pattern
+        self.entries = self._filtered()
+        first = next((i for i, e in enumerate(self.entries)
+                      if e.name != self.PARENT), 0)
+        if pattern:
+            self.cursor = first
+            self._clamp()
+        else:
+            self._restore_cursor(keep, self.cursor)
+        self.top = 0
+        self.start_sizing()
+
+    @property
+    def hidden_count(self) -> int:
+        """How many entries the filter is hiding."""
+        return len(self.listed) - len(self.entries)
+
+    @property
+    def hidden_tagged(self) -> int:
+        """How many tagged entries the filter is hiding."""
+        shown = {e.name for e in self.entries}
+        return sum(1 for name in self.selected if name not in shown)
 
     # -- directory sizes --------------------------------------------------
     def toggle_sizes(self) -> bool:
@@ -266,7 +332,7 @@ class Panel:
     def selected_entries(self) -> list[DirEntry]:
         """Tagged entries, or the entry under the cursor if none are tagged."""
         if self.selected:
-            return [e for e in self.entries
+            return [e for e in self.listed
                     if e.name in self.selected and e.name != self.PARENT]
         entry = self.current()
         if entry and entry.name != self.PARENT:
@@ -294,6 +360,7 @@ class Panel:
         self._left(self._here())
         self.path = parent
         self.selected.clear()
+        self.filter = ""
         # An index into the directory being left means nothing in its parent,
         # so the cursor starts at the top; normally the name below finds it.
         self.cursor = 0
@@ -321,6 +388,7 @@ class Panel:
         old = self.path
         self.path = self.fs.normpath(self.resolve(path))
         self.selected.clear()
+        self.filter = ""
         self.cursor = 0
         self.top = 0
         self.refresh(keep_name=keep_name)
@@ -364,6 +432,7 @@ class Panel:
         self.fs = fs
         self.path = fs.normpath(path)
         self.selected.clear()
+        self.filter = ""
         self.cursor = 0
         self.top = 0
         self.refresh(keep_name=keep_name)
