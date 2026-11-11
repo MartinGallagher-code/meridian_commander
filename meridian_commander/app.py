@@ -79,6 +79,7 @@ from .compare import Comparison
 from .panel import Panel, Search
 from . import usage
 from .peek import PeekPane
+from .quickview import QuickViewPane
 from .sync import (
     MTIME_TOLERANCE,
     build_sync_plan,
@@ -169,6 +170,8 @@ MENUS: list[dict] = [
              "key": "D"},
             {"label": "He~a~d + tail in this pane", "name": "peek",
              "key": "h"},
+            {"label": "~Q~uick view in the other pane", "name": "quick_view",
+             "key": "Ctrl+Q"},
             {"sep": True},
             {"label": "~T~erminal in this pane", "name": "terminal", "key": "t"},
             {"label": "Full-screen she~l~l", "name": "shell", "key": "!"},
@@ -929,6 +932,7 @@ class App:
             "sync": self._sync,
             "compare": self._compare,
             "peek": self._peek,
+            "quick_view": self._quick_view,
             "terminal": self._open_terminal_pane,
             "shell": self._open_terminal,
             "plugins": self._plugin_mode,
@@ -1047,6 +1051,8 @@ class App:
             self._invert_tags()
         elif key == ord("a"):  # permissions, owner and group
             self._attributes()
+        elif key == 17:  # Ctrl-Q: the other pane shows the cursor's file
+            self._quick_view()
         elif key == 27:  # Esc: the menu bar; Alt+letter: a menu by name
             self._menu_key(key)
         elif key == 21:  # Ctrl-U swap panes
@@ -2483,6 +2489,33 @@ class App:
         self._set_message("Head + tail of the other pane's file "
                           "-- +/- lines, Esc closes")
 
+    def _quick_view(self) -> None:
+        """Show the file under the cursor in the other pane, or stop showing it.
+
+        The other pane follows this one's cursor in the viewer F3 would open,
+        and keeps its own listing underneath, so turning it off gives it back
+        exactly as it was.  In single mode both panes show while it is on --
+        a plug-in working on the other pane always pairs them.  A pane
+        running something of its own is not taken over.
+        """
+        from .plugin_api import PluginContext
+
+        for panel in (self.left, self.right):
+            if isinstance(panel.plugin, QuickViewPane):
+                self._close_plugin(panel)
+                panel.refresh()
+                self._set_message("Quick view closed")
+                return
+        shown_in = self.other
+        if shown_in.plugin is not None:
+            self._set_message("The other pane is busy -- close it first")
+            return
+        ctx = PluginContext(app=self, own_panel=shown_in,
+                            other_panel=self.active)
+        shown_in.plugin = QuickViewPane(ctx)
+        self._set_message("Quick view -- Tab into it, Enter for the full "
+                          "viewer, Ctrl-Q closes")
+
     def _edit(self) -> None:
         panel = self.active
         entry = panel.current()
@@ -3038,6 +3071,7 @@ class App:
             "  Insert / Space tag file    -  untag all    *  invert\n"
             "  + / \\          tag / untag the names matching a pattern\n"
             "  a              permissions, owner and group of what is tagged\n"
+            "  Ctrl-Q         quick view: the other pane shows the cursor's file\n"
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
             "  Ctrl-G         go to path   Ctrl-T  sort order\n"
             "  Esc            the menu bar (Alt+F, Alt+C, Alt+O, Alt+H\n"

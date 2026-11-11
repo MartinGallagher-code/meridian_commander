@@ -57,6 +57,8 @@ class Viewer:
     #: Whether this viewer colours code by its syntax.  The Markdown viewer
     #: says no: its styles come from a rendering, not from the source.
     SYNTAX = True
+    #: The most of a file it reads; the quick view reads less.
+    LIMIT = MAX_VIEW_BYTES
 
     def __init__(self, fs: FileSystem, path: str) -> None:
         self.fs = fs
@@ -98,14 +100,14 @@ class Viewer:
         try:
             reader = self.fs.open_read(self.path)
             try:
-                data = reader.read(MAX_VIEW_BYTES + 1)
+                data = reader.read(self.LIMIT + 1)
             finally:
                 reader.close()
         except Exception as exc:
             self.error = str(exc)
             return []
-        if len(data) > MAX_VIEW_BYTES:
-            data = data[:MAX_VIEW_BYTES]
+        if len(data) > self.LIMIT:
+            data = data[:self.LIMIT]
             self.truncated = True
         text = data.decode("utf-8", errors="replace")
         # Normalise newlines; keep tabs expanded for stable columns.

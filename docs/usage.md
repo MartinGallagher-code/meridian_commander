@@ -1027,6 +1027,34 @@ the cursor, or of the tagged entries, and changes them.
 **Options ▸ Long listing** adds a mode and an owner column to every pane, and
 is remembered (`[ui] listing`, see [Configuration](configuration.md)).
 
+### Quick view
+
+**`Ctrl-Q`** (or **Command ▸ Quick view**) turns the *other* pane into the
+viewer `F3` would open for the file under the cursor, and moving the cursor
+shows the next file there — paging through a results directory one TSV or plot
+after another, without opening and closing each. `Ctrl-Q` again gives the pane
+back, at the place it was showing.
+
+- **Every viewer**: text, Markdown, documents, decks, spreadsheets, TSV and
+  CSV tables, PDFs and images. A directory shows how many entries it holds
+  and what its files add up to; a file that will not open says why.
+- **Images are drawn in half-blocks** in the quick view. A Sixel or kitty
+  picture is written past curses, and curses repaints only what it thinks has
+  changed, so its pixels could stay on the screen when the cursor moves on.
+  `Enter` opens the full viewer, with the real pixels.
+- **Remote panes do not fetch on every arrow key.** A remote file is fetched
+  once the cursor has rested on it for a moment. A file a viewer has to read
+  whole is fetched only up to a size (2 MiB remote, 32 MiB local); past it the
+  pane says how large it is, and `Tab` then `Enter` loads it. Text is read only
+  as far as a pane can use.
+- **The keyboard stays in the listing.** `Tab` moves into the quick view, where
+  the arrows and page keys scroll a text view, `Enter` opens the full viewer
+  and `Esc` closes; `Tab` comes back. In single mode (`z`) both panes show
+  while it is on. A pane already running something — a terminal, a plug-in —
+  is not taken over.
+
+`h` is its smaller sibling: head and tail of the file, in the pane you are in.
+
 ## Key bindings
 
 Keys are read decoded, so anywhere text is typed — the editor, a rename or
@@ -1050,6 +1078,7 @@ where it should.)
 | `x` | extract the archive into the other pane | `/` | search this pane by name (see above) |
 | `F` | filter: show only the names matching a pattern (see above) | | |
 | `D` | compare both panes' files | `h` | head + tail of the other pane's file, in this pane |
+| `Ctrl-Q` | quick view: the other pane shows the cursor's file (see below) | | |
 | `+` / `\` | tag / untag the names matching a pattern | `F8` | delete |
 | `-` / `*` | untag all / invert the tags | | |
 | `Ctrl-U` | swap panes | `F9` | synchronize panes |
