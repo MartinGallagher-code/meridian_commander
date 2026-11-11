@@ -2219,12 +2219,15 @@ class App:
                           "-- '<' there goes back")
 
     def _sort_menu(self) -> None:
-        options = ["Name", "Extension", "Size", "Modify time"]
-        keys = ["name", "ext", "size", "mtime"]
+        options = ["Name", "Name (natural: run_2 before run_10)", "Extension",
+                   "Size", "Modify time"]
+        keys = ["name", "natural", "ext", "size", "mtime"]
+        said = ["name", "natural name order", "extension", "size",
+                "modify time"]
         choice = dialogs.menu(self.stdscr, "Sort by", options)
         if choice is not None:
             self.active.set_sort(keys[choice])
-            self._set_message(f"Sorted by {options[choice].lower()}")
+            self._set_message(f"Sorted by {said[choice]}")
 
     def _connect(self, info: dict) -> FileSystem:
         """Open the backend described by a connect-dialog/preset dict.
@@ -3072,6 +3075,7 @@ class App:
             "  + / \\          tag / untag the names matching a pattern\n"
             "  a              permissions, owner and group of what is tagged\n"
             "  Ctrl-Q         quick view: the other pane shows the cursor's file\n"
+            "  Ctrl-T         sort: name, natural (run_2 < run_10), ext, size, time\n"
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
             "  Ctrl-G         go to path   Ctrl-T  sort order\n"
             "  Esc            the menu bar (Alt+F, Alt+C, Alt+O, Alt+H\n"
