@@ -634,6 +634,109 @@ on SFTP, SSH and FTP panes and inside archives too.
 `/`, `n`/`N`, `w`, `g`/`G`, the arrows and `hjkl` mean what they mean in the
 spreadsheet grid; `/` searches the rows the filters keep, in the order shown.
 
+## Datacenter floor plans (`.dc`)
+
+`F3` on a `.dc` layout — the plain-text format of
+[datacenter_visualization](https://pypi.org/project/datacenter-layout-viewer/)
+(`dcviz`) — draws the floor the file describes rather than its text. The
+format is compact on purpose: ranges and nesting multiply, so the eight lines
+of dcviz's own example are 504 servers and switches, and its `mega.dc` is a
+quarter of a million elements in 45 lines. Reading the source does not tell
+you what stands on the floor; this does.
+
+It opens on the whole site. Each room (hall, pod — any container) is a line
+of its own with its rows under it, and every rack is a cell, filled as far as
+the rack is full and coloured by what it mostly holds:
+
+```
+ Floor: small.dc -- IAD1  [plan]
+DH1  Data Hall 1  row: 6  rack: 32  node: 592
+  A  ▒▒ ▄▄ ▄▄ ▄▄ ▄▄ ▄▄
+  B  ▄▄ ▄▄ ▄▄ ▄▄ ▄▄ ▄▄
+  E  ██ ██ ██ ██
+DH2  Data Hall 2  row: 2  rack: 16  node: 496
+  A  ▆▆ ▆▆ ▆▆ ▆▆ ▆▆ ▆▆ ▆▆ ▆▆
+MDF  Meet-Me Room  row: 1  rack: 4  node: 4
+  S1 ▁▁ ▁▁ ▁▁ ▁▁
+
+ role: ██ server 1,040  ██ tor 48  ██ spine 4
+ rack R01  IAD1/DH1/A/R01  42U, 21U used  holds node: 21  line 14
+ u=42  ^region=us-east  ^tier=3  +standard  ^+compute  ^+hall-a  ^+prod
+ arrows move  Enter in  Bksp out  [c]olour: role  [q]uit
+```
+
+`Enter` zooms in towards the cursor — a room, then a **row**, its racks
+standing side by side on one floor as columns of U-slots, two U to a cell in
+half-blocks and as tall as each rack is, then one **rack**, U by U, U1 at the
+bottom, every device in its `at=` or auto-filled slot with its id beside it:
+
+```
+ Floor: dual-plane.dc -- LAB > DH1 > P1 > A > R01  [rack]
+ 24 |████████████████| tora
+ 23 >████████████████< torb
+ 22 |                |
+ ...
+ 16 |████████████████| s8
+ 15 |████████████████|
+ 14 |████████████████| s7
+```
+
+- **Walking the floor.** The arrows (or `hjkl`) move the cursor. On a plan
+  they move between racks and rows; at row zoom `←`/`→` walk along the racks
+  and `↑`/`↓` step to the row beside it, keeping your place; at rack zoom
+  `↑`/`↓` go from device to device and `←`/`→` walk on to the next rack, at
+  the same height. `Backspace` (or `Esc`) zooms back out, keeping the cursor on
+  what you were looking at; `Esc` at the top closes, as `q` does anywhere.
+- **The inspector**, under the floor, is the element under the cursor: its
+  kind, id and name, its path, its U-slot (or a rack's height and how much of
+  it is used), how many elements of each kind it holds, and the line of the
+  file that made it — then its attributes and tags, its own first and those it
+  inherits marked `^`.
+- **`c` colours** the devices by `role=`, by tag (a device's own first tag,
+  or the nearest one it inherits — `+switch`, `+compute`), by `model=`, or not
+  at all. The legend names the ten commonest with their counts; the rest share
+  one colour and are counted together, and devices with nothing set are
+  counted apart. Colour pairs come from the one allocator the image viewer and
+  the terminal pane share; should they run out, the cells left without one are
+  drawn in letters and the footer says so.
+- **Without 256 colours** — or under the mono scheme — the same floor is drawn
+  in letters, one per kind of device, as the legend shows: on a plan a capital
+  for a full rack, a small letter for one partly filled and `.` for an empty
+  one; in a rack `.` for an empty slot.
+- **A device above its rack** — an `at=` copied from a taller rack — is drawn
+  where it is, with `!` beside its U numbers, rather than inside. A rack with
+  nothing in it opens on its empty slots.
+- **Large layouts** open: only a screen is drawn, so `mega.dc`'s quarter of a
+  million elements is read once (about half a second) and costs a screenful
+  after that. Wide rows scroll, `<` and `>` marking more to either side.
+
+**What is read.** Meridian reads the layout itself, in Python, so a `.dc`
+opens on SFTP, SSH and FTP panes and inside archives with no Node and no
+dcviz installed. It reads everything that decides what the floor holds, by
+dcviz's rules: indentation nesting (a tab counts four spaces), every range
+form (`R[01..20]`, `u[1..40x2]`, `A..H`, `[web|db]`, `r[1..2]-[a|b]`,
+`R[1..4,7..10]`), placeholders with their widths (`{id}`, `{i:3}`, `{room}`,
+`{parent}` …), `{seq}` and its `seq=` scopes, `if=` conditions, attribute and
+tag inheritance, `model` lines (whose `u=` and tags every `model=` device
+takes), `title` lines, and rack slotting — `u=`, `at=` and the auto-fill. It is
+tested against dcviz's own example files, element for element. `net` and
+`link` lines describe the cables, not the floor, and are passed over; so are
+the keys that only arrange dcviz's canvas (`cols`, `dir`, `gap`, `align`,
+`w`).
+
+**What is not read is said.** Whatever dcviz itself would refuse — a range
+that cannot expand, a number out of its range, a placeholder with nothing to
+name, a slipped indent that leaves a `node` holding lines — is counted in the
+footer, with the first of them named (`! 2 not read: line 9: …`), since the
+floor drawn is then not quite the one written. So are this reader's own
+limits: a million elements at most, 200 levels of nesting, and a 4 MiB file.
+
+**Which `.dc` files.** `.dc` is also the extension of `dc` calculator scripts,
+so a `.dc` is drawn as a floor only when it opens like a layout: its first line
+that is neither blank nor a `#` comment starts with `dc`, `title` or `model`
+— the test dcviz makes. Only the first 8 KiB are read to decide. Any other
+`.dc` opens as it always did, in the text viewer or your pager.
+
 ## Popping up from the shell, and taking the shell with you
 
 A file manager is most useful a keystroke away: `Ctrl-O` from your prompt,
@@ -859,8 +962,9 @@ menu puts it back. The choice is remembered in `[ui] viewer`, and `$PAGER` is
 expanded when the pager is launched rather than when the setting is read.
 
 It applies to **plain text only**. A spreadsheet, table (TSV or CSV), document,
-deck, PDF, image or markdown file keeps the browser built for it, whatever the
-setting says: a
+deck, PDF, image, markdown file or `.dc` layout keeps the browser built for it,
+whatever the setting says (a `dc` calculator script is text, and goes to the
+pager): a
 pager handed a `.xlsx` shows you the bytes of a zip file, and choosing a pager
 is an answer about text rather than a request to give up the other viewers.
 Code and configuration files *are* text, so the pager gets them — without the
@@ -1036,7 +1140,7 @@ after another, without opening and closing each. `Ctrl-Q` again gives the pane
 back, at the place it was showing.
 
 - **Every viewer**: text, Markdown, documents, decks, spreadsheets, TSV and
-  CSV tables, PDFs and images. A directory shows how many entries it holds
+  CSV tables, PDFs, images and `.dc` floor plans. A directory shows how many entries it holds
   and what its files add up to; a file that will not open says why.
 - **Images are drawn in half-blocks** in the quick view. A Sixel or kitty
   picture is written past curses, and curses repaints only what it thinks has
@@ -1111,7 +1215,7 @@ where it should.)
 | --- | --- | --- | --- |
 | `Tab` | switch active pane | `F1` | help |
 | `↑`/`↓` `j`/`k` | move cursor | `F2` | open / connect location |
-| `PgUp`/`PgDn` | page | `F3` | view (`.md`, `.xlsx`, `.docx`, `.pptx`) |
+| `PgUp`/`PgDn` | page | `F3` | view (`.md`, `.xlsx`, `.docx`, `.pptx`, `.dc`) |
 | `Home`/`End` | first / last | `F4` | edit file |
 | `Enter` / `→` | enter dir / view file | `F5` | copy to other pane (asks before replacing) |
 | `Backspace` / `←` | parent directory | `F6` | move to other pane |
@@ -1161,6 +1265,10 @@ switch between the rendered view and the file as it was written.
 In the **PDF viewer**: `Tab`/`Shift-Tab` (or `[`/`]`, `←`/`→`) page through,
 arrows/PgUp/PgDn scroll a long page, `/` searches the whole document with
 `n`/`N`, `i` opens a scanned page's image, `q` quits.
+In the **floor plan** (`.dc`): arrows or `hjkl` move rack by rack and row by
+row, `Enter` zooms in (site, room, row, rack), `Backspace` or `Esc` zooms out
+(`Esc` at the top closes), `c` colours by role, tag, model or not at all, `q`
+quits.
 In the **image viewer**: arrows or `hjkl` pan, `+`/`-` zoom and `f` fits,
 `n`/`p` (or Space) step animation frames, `c` switches between colour
 half-blocks and the ASCII ramp, `g` between the terminal's real pixels

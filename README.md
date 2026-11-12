@@ -193,10 +193,29 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   the header, and `#` shows them. Rows with the wrong number of fields are
   marked rather than padded, and the read stops at 50,000 rows or 16 MB with
   `[truncated]` in the title.
+- **Floor plan browser** (`F3` on a `.dc` layout) — a
+  [datacenter_visualization](https://pypi.org/project/datacenter-layout-viewer/)
+  layout drawn as the floor it describes, not as its text: eight lines of
+  `.dc` can be five hundred servers. The whole site first, a line of cells
+  per row and a cell per rack, filled as far as the rack is full and
+  coloured by what it mostly holds; `Enter` zooms in to a row, its racks
+  standing side by side in half-blocks, then to one rack, U by U with every
+  device in its slot and named. The arrows walk the floor rack by rack and
+  row by row, `Backspace` zooms back out, and an inspector shows the
+  element under the cursor — path, slot, what it holds, attributes and tags
+  (inherited ones marked `^`). `c` colours by role, tag, model or not at all,
+  with a legend; without 256 colours the floor is drawn in letters. Meridian
+  reads the format itself — ranges, placeholders, `{seq}`, `if=`, `model`
+  lines, inheritance and rack slots, held to dcviz's own answers on its
+  examples — so no Node or dcviz is needed, and anything it cannot read is
+  named in the footer rather than drawn wrong. A `.dc` is claimed only when
+  it opens like a layout (`dc`, `title` or `model` first); a `dc` calculator
+  script opens as text, as before.
 - **Your own pager** (**Options ▸ Viewer**) — point `F3` at `less`, `$PAGER` or
   any command you name, for plain text; a spreadsheet, table, document, deck,
-  PDF or image keeps the browser built for it rather than being shown to a
-  pager as bytes. Remote files are fetched to a private copy and read there.
+  PDF, image or `.dc` layout keeps the browser built for it rather than being
+  shown to a pager as bytes. Remote files are fetched to a private copy and
+  read there.
 - **File editor** (`F4`) — a real in-place editor (insert/delete, Enter/Backspace
   line handling, save with `Ctrl-S`), also with toggleable line numbers. Prefer
   your own editor? **Options > Editor** points `F4` at `vi`, `vim`, `$EDITOR` or
@@ -210,11 +229,11 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   in-archive one with nothing fetched to disk first.
 - **Quick view** (`Ctrl-Q`, Command ▸ Quick view) — the other pane shows the
   file under the cursor in the viewer `F3` would open, and follows the cursor:
-  text, Markdown, documents, decks, sheets, tables, PDFs and images (in
-  half-blocks), a directory as a summary. A remote file is fetched once the
-  cursor settles, and a large one waits to be asked. `Tab` moves into it to
-  scroll, `Enter` opens the full viewer, and `Ctrl-Q` gives the pane back as
-  it was. Single mode shows both panes while it is on.
+  text, Markdown, documents, decks, sheets, tables, PDFs, images (in
+  half-blocks) and `.dc` floor plans, a directory as a summary. A remote file
+  is fetched once the cursor settles, and a large one waits to be asked. `Tab`
+  moves into it to scroll, `Enter` opens the full viewer, and `Ctrl-Q` gives
+  the pane back as it was. Single mode shows both panes while it is on.
 - **Head and tail in a pane** (`h`) — the pane becomes the first and last lines
   of whatever the **other** pane's cursor is on, with a rule between them
   counting what was skipped, and it **follows that cursor** as you move it: ten
@@ -342,7 +361,7 @@ The manual is at **<https://meridian-commander.readthedocs.io/>**:
 | Page | What is in it |
 | --- | --- |
 | [Installation](https://meridian-commander.readthedocs.io/en/latest/installation.html) | the extras, pipx, and "command not found" |
-| [Usage](https://meridian-commander.readthedocs.io/en/latest/usage.html) | remote locations, presets, the archive, document, image and PDF browsers, and the **full key-binding reference** |
+| [Usage](https://meridian-commander.readthedocs.io/en/latest/usage.html) | remote locations, presets, the archive, document, image, PDF and floor plan browsers, and the **full key-binding reference** |
 | [Look and feel](https://meridian-commander.readthedocs.io/en/latest/look-and-feel.html) | the three colour schemes, and terminals without colour |
 | [Configuration](https://meridian-commander.readthedocs.io/en/latest/configuration.html) | `config.ini` and where it lives |
 | [Plug-ins](https://meridian-commander.readthedocs.io/en/latest/plugins.html) | what ships, and how to write one |
