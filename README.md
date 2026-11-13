@@ -248,6 +248,10 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   delete can be undone; **Delete permanently** is the second choice, and
   remote panes and archives say plainly that it cannot be undone.
   **Options ▸ Trash on delete** turns it off.
+- **Look in the trash** (`T`, Command ▸ Trash folder) — the pane goes to the
+  trash `F8` uses from where it is, without your having to know where the
+  platform keeps it; `<` comes back. View, compare or copy things out as
+  anywhere else; `F8` there deletes for good, with the trash's record of it.
 - **Open with the system's application** (`w`, File ▸ Open with system app) —
   hands the file under the cursor to the desktop: `open` on macOS, `xdg-open`
   on Linux, `wslview` under WSL. A PDF goes to Preview, an `.xlsx` to Excel. A

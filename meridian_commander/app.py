@@ -32,6 +32,7 @@ Key bindings (also shown in the F1 help screen)::
     x              extract archive -> other pane
     < / >          back / forward through this pane's history
     ~              home directory (this pane)
+    T              the trash (this pane)
     =              other pane: same location as this one
     b              presets: saved locations to return to
     z              single pane: one pane at full width, the other kept
@@ -85,7 +86,13 @@ from .quickview import QuickViewPane
 from .jobs import RULES, Job, JobQueue
 from .jobspane import JobsPane
 from .opener import SystemOpener
-from .trash import TrashUnavailable, move_to_trash
+from .trash import (
+    TrashUnavailable,
+    forget,
+    move_to_trash,
+    trash_location,
+    trash_root,
+)
 from .sync import (
     MTIME_TOLERANCE,
     build_sync_plan,
@@ -165,6 +172,7 @@ MENUS: list[dict] = [
             {"label": "~P~resets...", "name": "presets", "key": "b"},
             {"label": "~G~o to path...", "name": "goto", "key": "Ctrl+G"},
             {"label": "~H~ome directory", "name": "home", "key": "~"},
+            {"label": "Trash fol~d~er", "name": "open_trash", "key": "T"},
             {"label": "~B~ack", "name": "back", "key": "<"},
             {"label": "~F~orward", "name": "forward", "key": ">"},
             {"label": "Search by ~n~ame", "name": "search", "key": "/"},
@@ -1000,6 +1008,7 @@ class App:
             "presets": self._presets_menu,
             "goto": self._go_to_path,
             "home": self._go_home,
+            "open_trash": self._open_trash,
             "back": self._back,
             "forward": self._forward,
             "search": self._start_search,
@@ -1147,6 +1156,8 @@ class App:
             self._go_to_path()
         elif key == ord("~"):  # home directory of this pane's filesystem
             self._go_home()
+        elif key == ord("T"):  # the trash, in this pane
+            self._open_trash()
         elif key == ord("<"):  # back through this pane's history
             self._back()
         elif key == ord(">"):  # and forward again
@@ -2316,13 +2327,13 @@ class App:
                   "Rename", "Delete", "Tag / untag",
                   "New directory", "New file", "Compare with other pane",
                   "Head + tail in this pane", "Home directory",
-                  "Same location in other pane", "Presets (go to / save)",
-                  "Find files here", "Terminal in this pane",
-                  "Full-screen shell", "Cancel"]
+                  "Trash folder", "Same location in other pane",
+                  "Presets (go to / save)", "Find files here",
+                  "Terminal in this pane", "Full-screen shell", "Cancel"]
         actions = ["view", "edit", "run", "copy", "move", "extract", "rename",
                    "delete", "tag", "mkdir", "touch", "compare", "peek",
-                   "home", "mirror", "presets", "find", "terminal", "shell",
-                   None]
+                   "home", "open_trash", "mirror", "presets", "find",
+                   "terminal", "shell", None]
         choice = dialogs.menu(self.stdscr, header[:40], labels)
         if choice is None:
             return
@@ -2355,6 +2366,8 @@ class App:
             self._peek()
         elif action == "home":
             self._go_home()
+        elif action == "open_trash":
+            self._open_trash()
         elif action == "mirror":
             self._mirror_to_other_pane()
         elif action == "presets":
@@ -2483,6 +2496,45 @@ class App:
         else:
             dialogs.message(self.stdscr, "Error",
                             f"Cannot open home directory:\n{home}", error=True)
+
+    def _open_trash(self) -> None:
+        """Point the active pane at the trash; ``<`` comes back (MC-024).
+
+        The trash ``F8`` would use from here: on a local pane, that of the
+        disk the pane is on if the disk has one, and otherwise the home trash.
+        From a server or an archive it is the home trash, through a local
+        backend as a local preset would be -- the trash is this computer's,
+        and nothing on the far side of a connection is ever called one.
+        """
+        panel = self.active
+        if getattr(panel.fs, "scheme", "") == "local":
+            fs, where = panel.fs, trash_location(panel.path)
+        else:
+            fs, where = self._local_backend(), trash_location()
+        if panel.set_location(fs, where):
+            self._set_message(f"Trash: {where} -- '<' goes back")
+            return
+        reason = str(panel.failure)
+        text = f"Cannot list the trash:\n{where}\n{reason}"
+        if sys.platform == "darwin" and "not permitted" in reason:
+            # macOS privacy (TCC) can refuse a terminal a listing of
+            # ~/.Trash until it is given Full Disk Access.
+            text += ("\n\nmacOS shows the trash only to a terminal with "
+                     "Full Disk Access: System Settings > Privacy & "
+                     "Security > Full Disk Access, then restart it.")
+        dialogs.message(self.stdscr, "Trash", text, error=True)
+
+    def _local_backend(self) -> FileSystem:
+        """An open local backend, the other pane's first, or a new one kept.
+
+        Asked for when the active pane is on a server or in an archive.
+        """
+        for fs in [self.other.fs] + list(reversed(self._backends)):
+            if getattr(fs, "scheme", "") == "local":
+                return fs
+        fs = LocalFileSystem()
+        self._backends.append(fs)
+        return fs
 
     def _back(self) -> None:
         panel = self.active
@@ -3211,9 +3263,19 @@ class App:
             text += "\n(directories are removed recursively)"
         # The trash is the local disk's: a server or an archive has none, so
         # there it is said plainly that this is for good.
-        to_trash = (self.use_trash
-                    and getattr(panel.fs, "scheme", "") == "local")
-        if to_trash:
+        local = getattr(panel.fs, "scheme", "") == "local"
+        # In the trash already, "to the trash" would only rename the item
+        # inside it and leave its .trashinfo describing nothing, so for good
+        # is the one way out offered, and the record goes with the item.
+        in_trash = local and trash_root(panel.path) is not None
+        to_trash = self.use_trash and local and not in_trash
+        if in_trash:
+            if dialogs.menu(self.stdscr, "Delete from the trash",
+                            ["Delete permanently", "Cancel"], keys=["p", "c"],
+                            text=text + "\nAlready in the trash: this "
+                                        "cannot be undone.") != 0:
+                return
+        elif to_trash:
             choice = dialogs.menu(self.stdscr, "Delete",
                                   ["Move to trash", "Delete permanently",
                                    "Cancel"], keys=["t", "p", "c"], text=text)
@@ -3261,6 +3323,12 @@ class App:
                         errors.append(f"{entry.name}: {exc}")
                         continue
                     removed.append(target)
+                    if in_trash:
+                        try:
+                            forget(target)
+                        except OSError as exc:
+                            errors.append(f"{entry.name}: deleted, but not "
+                                          f"its .trashinfo: {exc}")
         except Exception as exc:
             # The archive could not be written, so nothing went after all.
             errors.append(str(exc))
@@ -3297,7 +3365,8 @@ class App:
             self._set_message(f"Moved {trashed} item(s) to the trash"
                               + (f", deleted {deleted}" if deleted else ""))
         else:
-            self._set_message(f"Deleted {len(removed)} item(s)")
+            self._set_message(f"Deleted {len(removed)} item(s)"
+                              + (" from the trash" if in_trash else ""))
 
     def _sync_scope_warning(self) -> str | None:
         """Text to show before syncing two panes, or None if they look sane.
@@ -3454,12 +3523,16 @@ class App:
             "                 if remote or in an archive)\n"
             "  F5/F6 Ctrl-B   in the prompt: run it in the background\n"
             "  J              background jobs: p pause, c cancel, Enter errors\n"
-            "  F8             on a local pane: to the trash, or delete for good\n"
+            "  F8             on a local pane: to the trash, or delete for good;\n"
+            "                 in the trash itself, for good only\n"
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
             "  Ctrl-G         go to path   Ctrl-T  sort order\n"
             "  Esc            the menu bar (Alt+F, Alt+C, Alt+O, Alt+H\n"
             "                 open a menu by name; click one to open it)\n"
             "  ~              home directory of this pane's location\n"
+            "  T              the trash, in this pane: the one F8 uses from\n"
+            "                 here (from a server or an archive, this\n"
+            "                 computer's); < goes back\n"
             "  < / >          back / forward through the places this pane\n"
             "                 has been: '=', F2 and archives included\n"
             "  =              other pane: same directory and connection\n"

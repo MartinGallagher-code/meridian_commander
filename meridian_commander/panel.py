@@ -84,6 +84,10 @@ class Panel:
     sort_reverse: bool = False
     show_hidden: bool = True    # whether dotfiles are listed
     error: str | None = None
+    #: Why the last :meth:`chdir` or :meth:`set_location` stayed put, or None
+    #: if it went.  :attr:`error` cannot say: the rollback lists the old place
+    #: again, which clears it.
+    failure: str | None = None
     plugin: object | None = None  # active pane plugin, or None for the listing
     #: Whether subdirectories show what is under them rather than "<DIR>".
     show_sizes: bool = False
@@ -411,6 +415,7 @@ class Panel:
         self.cursor = 0
         self.top = 0
         self.refresh(keep_name=keep_name)
+        self.failure = self.error
         if self.error:
             # Failed to open; roll back so the user is not stranded.  The
             # listing is never empty on success (a readable directory still
@@ -455,6 +460,7 @@ class Panel:
         self.cursor = 0
         self.top = 0
         self.refresh(keep_name=keep_name)
+        self.failure = self.error
         if self.error:
             self.fs = old_fs
             self.path = old_path

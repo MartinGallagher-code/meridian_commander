@@ -595,3 +595,15 @@ def test_a_listing_reloaded_under_the_search_is_searched_again(fs, named):
     assert search.position() == (1, 4)
     panel.toggle_hidden()                # a new listing, the same names
     assert search.hits() == panel.matches("rep")
+
+
+def test_a_move_that_stays_put_keeps_its_reason(tmp_path):
+    (tmp_path / "sub").mkdir()
+    fs = LocalFileSystem()
+    panel = Panel(fs, str(tmp_path))
+    assert not panel.chdir(str(tmp_path / "missing"))
+    # The rollback listed the old place again, which cleared the error.
+    assert panel.error is None and "missing" in panel.failure
+    assert panel.chdir("sub") and panel.failure is None
+    assert not panel.set_location(fs, str(tmp_path / "gone"))
+    assert panel.path == str(tmp_path / "sub") and "gone" in panel.failure

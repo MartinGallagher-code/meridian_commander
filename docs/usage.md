@@ -1181,6 +1181,47 @@ and can restore it:
 **Options ▸ Trash on delete** turns this off, so `F8` deletes permanently as it
 used to; it is remembered as `[ui] trash` (see [Configuration](configuration.md)).
 
+#### Looking in the trash
+
+**`T`** (**Command ▸ Trash folder**, or **Trash folder** on the right-click
+menu) points the pane at the trash, and **`<`** brings it back to where it was.
+The status line says which directory it opened. It is the trash `F8` uses from
+where the pane is:
+
+- **Linux and the BSDs:** the trash's `files/` directory. On the disk your home
+  is on, that is `$XDG_DATA_HOME/Trash/files` (`~/.local/share/Trash/files`
+  unless `XDG_DATA_HOME` says otherwise). From a pane on another disk — a USB
+  stick, a second drive — it is that disk's own trash, if anything has been
+  trashed there, and the home trash if not.
+- **macOS:** `~/.Trash`.
+- **From a remote pane or an archive,** the pane switches to this computer's
+  home trash, as a local preset would, and `<` takes it back to the server or
+  the archive. Nothing on a server or inside an archive is treated as a trash.
+
+Looking never leaves anything behind on another disk: a USB stick that has
+never had anything trashed on it is not given a `.Trash-<uid>` because you
+looked. A home trash that does not exist yet is made (`files/` and `info/`,
+mode 0700), as `F8` would make it, so the pane opens on an empty trash.
+
+In the trash the usual keys work: view (`F3`), compare (`D`), copy out (`F5`).
+The names are the trash's, not the originals — a second `a.txt` is `a.2.txt`
+here (`a 2.txt` on macOS) — and where each item came from is recorded only in
+the trash's `info/*.trashinfo` files, on Linux and the BSDs.
+
+- **`F8` in the trash** offers only **Delete permanently** (and **Cancel**):
+  moving an item to the trash it is already in would only rename it there. An
+  item at the top of `files/` goes with its `.trashinfo`, so the desktop's
+  trash window does not list something that is no longer there.
+- **Moving something out by hand** (`F6` to the other pane) is a manual
+  restore: the item goes, but its `.trashinfo` stays behind in `info/`. Putting
+  an item back where it came from, and emptying the trash, are not done here;
+  use the desktop's trash window for those.
+- **If the trash cannot be listed** the pane stays where it was, and the
+  message says why. On macOS a terminal without **Full Disk Access** can be
+  refused a listing of `~/.Trash` ("Operation not permitted"); the message then
+  says to allow it in **System Settings ▸ Privacy & Security ▸ Full Disk
+  Access** and restart the terminal.
+
 ### Opening with the system's application
 
 **`w`** (**File ▸ Open with system app**) hands the file under the cursor to the
@@ -1233,6 +1274,7 @@ where it should.)
 | `Ctrl-G` | go to path | `Ctrl-T` | change sort order: name, natural name (`run_2` before `run_10`), extension, size, time |
 | `Esc` | the menu bar | `Alt+F`/`C`/`O`/`H` | a menu by name |
 | `~` | home directory (this pane) | `=` | other pane: same location |
+| `T` | the trash, in this pane (see above) | | |
 | `<` / `>` | back / forward through this pane's history | `J` | background jobs: pause, resume, cancel (see [In the background](transfers.md#in-the-background)) |
 | `b` | presets: saved locations | | |
 | `.` | show/hide hidden files | `t` | terminal inside this pane (see above) |
