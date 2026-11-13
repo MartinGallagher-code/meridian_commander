@@ -60,6 +60,13 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   it, and `h`, `Ctrl-]` `Tab` from a terminal and plug-ins that work on the
   other pane bring both back while they run. In a terminal, where `z` goes to
   the shell, it is `Ctrl-]` `z`. `[ui] panes = 1` starts that way.
+- **View and edit in a pane** (Options ▸ View and edit in a pane) — `F3` and
+  `F4` open in a pane rather than full-screen, alone at full width; `z` (or
+  `Ctrl-]` `z`) puts the listing the file came from beside it, `Ctrl-]` `Tab`
+  hands it the keyboard, and `F3` there shows the next file in the same view.
+  Every viewer keeps its keys, an outside pager or editor runs in the pane's
+  terminal, and unsaved edits are asked about before quitting or being
+  replaced. `[ui] open_in = pane` keeps it on.
 - **Home and mirror shortcuts** — `~` jumps a pane to its own home directory
   (the *remote* account's home on a remote pane), and `=` points the **other
   pane at this pane's directory and connection**, reusing the same live session

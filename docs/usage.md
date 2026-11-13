@@ -803,6 +803,10 @@ with `:q` costs no upload. Two limits follow from that:
   rewritten — the temporary copy is deliberately **kept**, and the message
   tells you where it is. Nothing you typed is thrown away.
 
+With **Options ▸ View and edit in a pane** ticked, the editor runs in a pane
+instead of taking the terminal — see
+[Viewing and editing in a pane](#viewing-and-editing-in-a-pane).
+
 ## Making, renaming and comparing files
 
 **`n` — new file.** Asks for a name and creates it, empty, in the active
@@ -883,6 +887,60 @@ line says it is there and where it is (`right pane hidden: sftp://web1:/srv`).
 
 To start this way every time, set `[ui] panes = 1` in the
 [configuration](configuration.md).
+
+## Viewing and editing in a pane
+
+`F3` and `F4` normally take the whole terminal until you close them. Tick
+**Options ▸ View and edit in a pane** (or set `[ui] open_in = pane` in the
+[configuration](configuration.md#ui-open_in--f3-and-f4-in-a-pane)) and they
+open in a pane instead, so the file manager is one key away while you read or
+edit.
+
+- **It opens alone, at full width**, with the menu bar, the hint line and the
+  F-key bar still there. It is [single mode](#one-pane-at-a-time), turned on
+  for the view: the hint line says which pane is out of sight.
+- **`z` shows two panes**: the file on one side, the listing it came from on
+  the other. `z` again goes back to the file alone. In the editor, where `z`
+  is a letter to type, it is **`Ctrl-]` then `z`**, as in the terminal, and
+  that works in every viewer too.
+- **`Ctrl-]` then `Tab` gives the listing the keyboard**, with the view kept in
+  sight beside it; **`Tab`** in the listing comes back. The listing moves,
+  opens and copies as usual, and **`F3` on the next file there shows it in the
+  same view**, keeping the panes as they are. `Ctrl-]` then `q` closes, as the
+  view's own keys do.
+- **Every viewer keeps its own keys**: search (`/`, `n`, `N`), wrap, line
+  numbers and colour, PDF and slide paging with `Tab`, sheet tabs, table
+  filters and sorting, the floor plan's zoom, image pan and zoom. Search and
+  filter prompts open over the screen as they always did. A picture is drawn
+  in half-blocks, as [quick view](#quick-view) draws it; `Enter` (or `g`) shows
+  it full-screen with its real pixels.
+- **It keeps its place**: the scroll position, a search, the editor's cursor
+  and unsaved text all survive every switch.
+- **Closing puts everything back**: `q` or `Esc` in a viewer, `F10` or
+  `Ctrl-Q` in the editor. The pane gets its listing back as it was, the panes
+  go back to what they were before `F3` (one, if you had pressed `z` before),
+  and the keyboard returns to the listing the file came from.
+- **The view opens in the other pane**, as quick view does, so the two-pane
+  view puts the listing you were browsing beside it. When the other pane is
+  running something of its own — a terminal, a plug-in — it opens in this one
+  instead, for that once; with both panes busy it opens full-screen.
+- **An outside pager or editor opens in a pane too.** With **Options ▸ Viewer**
+  or **Editor** set to `less`, `vim` or `$EDITOR`, the program runs in the
+  pane's [terminal](#the-terminal-in-a-pane), alone at full width, and the
+  pane closes when it exits; `Ctrl-]` then `z` and `Ctrl-]` then `Tab` work as
+  in the terminal. A remote file is fetched to a private copy and written back
+  when it changed, exactly as [full-screen](#editing-with-your-own-editor). A
+  program that will not start, or exits with an error, leaves its pane open
+  saying so until you press a key.
+- **Unsaved edits are never lost without asking.** Quitting (`F10`, `q` or
+  `Ctrl-C` from the other pane, or **File ▸ Exit**), or opening something else
+  over the editor, asks first whether to discard them. Deleting, moving,
+  renaming or copying over the file from the other pane is refused while it is
+  open with changes not saved — and while an outside editor is still running
+  on it, since what it holds cannot be seen from outside.
+
+**Options ▸ Configuration** still opens `config.ini` full-screen: it has to
+know the edit is finished before it can say it was saved.
 
 ## Finding what is taking up the space
 
@@ -973,7 +1031,9 @@ built-in viewer's colours; `bat --paging=always` colours them its own way.
 The rest matches `F4`: the terminal is handed over while the pager runs, and on
 a remote pane the file is fetched to a private temporary copy (mode `0700`,
 8 MB ceiling) and read there. Nothing is written back — a pager has nothing to
-send — so the copy is removed however the pager exits.
+send — so the copy is removed however the pager exits. With **Options ▸ View
+and edit in a pane** ticked, the pager runs in a pane instead — see
+[Viewing and editing in a pane](#viewing-and-editing-in-a-pane).
 
 ## The terminal in a pane
 
@@ -1283,7 +1343,7 @@ where it should.)
 | `f` | find files (browsable results) | | |
 | `C` | configuration menu | `Ctrl-]` | in the terminal: its menu — `Tab` other pane, `z` zoom, `q` close, `PgUp` scroll back |
 | `Options ▸ Editor` | F4 opens your editor | `Options ▸ Viewer` | F3 opens your pager |
-| `Options ▸ Single pane` | the same as `z`, ticked while on | | |
+| `Options ▸ Single pane` | the same as `z`, ticked while on | `Options ▸ View and edit in a pane` | F3 and F4 open in a pane (see above) |
 
 **F-key aliases** (for terminals that swallow function keys): press the digit
 `1`–`0` for `F1`–`F10`, or the mnemonic letter — `?`/`1` help, `o` open/connect,

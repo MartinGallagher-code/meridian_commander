@@ -12,6 +12,43 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.21.0] — 2026-11-13
+
+### Added
+
+- **`F3` and `F4` can open in a pane** (**Options ▸ View and edit in a pane**,
+  or `[ui] open_in = pane`; full-screen stays the default). The viewer or the
+  editor opens in the other pane, alone at full width; `z` in a viewer, or
+  `Ctrl-]` then `z` anywhere, shows two panes — the file beside the listing it
+  came from — and back. `Ctrl-]` then `Tab` gives the listing the keyboard and
+  `Tab` comes back; `F3` on the next file there shows it in the same view,
+  keeping the panes as they are. Closing it gives the pane its listing back,
+  puts the panes back as they were before `F3`, and returns the keyboard to
+  the listing. When the other pane is busy with a terminal or a plug-in it
+  opens in this one, and with both busy, full-screen. All nine viewers keep
+  their own keys in a pane; a picture is drawn in half-blocks there, and
+  `Enter` or `g` shows it full-screen with its pixels. An outside pager or
+  editor (**Options ▸ Viewer**/**Editor**) runs in the pane's terminal and
+  closes with it, a remote file on a private copy written back when it
+  changed. (MC-025)
+- **Unsaved edits in a pane are asked about** before the application quits
+  (`F10`, `q`, `Ctrl-C`, **File ▸ Exit**) and before something else is opened
+  over them, and `F5`, `F6`, `F8` and `r` refuse to copy over, move, delete or
+  rename a file open with changes not saved, or open in an outside editor
+  still running. (MC-025)
+- `PanePlugin.may_close()`: a plug-in may ask before it is closed from outside,
+  and answer `False` to stay open. `config.open_in_pane()` and
+  `save_open_in()`; `extedit.Session`, the fetch, run and write-back of an
+  outside program cut into steps a pane can wait on.
+
+### Changed
+
+- Every viewer keeps its keys in `handle_key(key, stdscr, height, width)`, and
+  `run()` is a thin loop over it (`util.run_full_screen`), so the same keys
+  drive a viewer full-screen and in a pane. No change in behaviour.
+- The terminal plug-in can run a given program instead of the shell, keeps
+  its exit status, and reports a program that cannot be run on its own screen.
+
 ## [1.20.0] — 2026-11-13
 
 ### Added
@@ -1114,6 +1151,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.21.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.20.0...v1.21.0
 [1.20.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.17.0...v1.18.0

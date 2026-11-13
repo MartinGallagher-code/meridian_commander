@@ -161,5 +161,17 @@ the keyboard to the other pane (`Tab`), and `ctx.toggle_single()` switches
 between one pane and two (`z`). One pane turned on with `toggle_single()` is
 the plug-in's zoom, and goes back to two when the plug-in closes.
 
+A plug-in holding work that is not saved can ask before it is closed from
+outside: the application calls `may_close()` before it quits and before
+something else is opened in the pane, and a plug-in that answers `False` stays
+open. The built-in editor in a pane uses it to ask *Discard them?*; the default
+answers `True`. It is not asked when the plug-in closes itself.
+
+```python
+def may_close(self) -> bool:
+    return not self.dirty or dialogs.confirm(
+        self.ctx.app.stdscr, "Unsaved", "Discard the changes?")
+```
+
 The [API reference](api.md) documents `PluginContext`, `PanePlugin` and
 `InputOutputPlugin` in full.
