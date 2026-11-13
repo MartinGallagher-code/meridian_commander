@@ -45,7 +45,7 @@ from .ooxml import (
     related,
     relationships,
 )
-from .util import ljust, read_key, truncate
+from .util import ljust, run_full_screen, truncate
 from .viewer import wrap_line
 
 PRESENTATION_SUFFIXES = (".pptx", ".pptm")
@@ -426,51 +426,47 @@ class SlideView:
 
     # -- interaction ------------------------------------------------------
     def run(self, stdscr) -> None:
+        run_full_screen(self, stdscr)
+
+    def handle_key(self, key, stdscr, height: int, width: int) -> bool:
+        """Apply one key; False when it closes the deck."""
         from . import dialogs
 
-        curses.curs_set(0)
-        height, width = stdscr.getmaxyx()
-        win = curses.newwin(height, width, 0, 0)
-        win.keypad(True)
-        while True:
-            self.draw(win)
-            curses.doupdate()
-            height, width = stdscr.getmaxyx()
-            body_h = max(1, height - 2)
-            key = read_key(win)
-            self.notice = ""
-            if key in (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10):
-                break
-            elif key in (curses.KEY_RIGHT, 9, ord("]"), ord(" ")):
-                self.step(1)
-            elif key in (curses.KEY_LEFT, curses.KEY_BTAB, ord("[")):
-                self.step(-1)
-            elif key in (curses.KEY_DOWN, ord("j")):
-                self.top += 1
-            elif key in (curses.KEY_UP, ord("k")):
-                self.top = max(0, self.top - 1)
-            elif key == curses.KEY_NPAGE:
-                self.top += body_h
-            elif key == curses.KEY_PPAGE:
-                self.top = max(0, self.top - body_h)
-            elif key == curses.KEY_HOME:
-                self.top = 0
-            elif key == curses.KEY_END:
-                self.go_to(len(self.deck.slides) - 1)
-            elif key in (ord("t"), ord("T")):
-                self.toggle_notes()
-            elif key in (ord("/"), curses.KEY_F7):
-                pattern = dialogs.prompt(stdscr, "Search",
-                                         "Find in deck (smart case):",
-                                         default=self.search)
-                curses.curs_set(0)
-                if pattern is not None:
-                    self.set_search(pattern)
-                    if pattern and not self.find_next(1):
-                        self.notice = f" '{pattern}' not found "
-            elif key == ord("n"):
-                if self.search and not self.find_next(1):
-                    self.notice = " no match "
-            elif key in (ord("N"), ord("p")):
-                if self.search and not self.find_next(-1):
-                    self.notice = " no match "
+        body_h = max(1, height - 2)
+        self.notice = ""
+        if key in (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10):
+            return False
+        elif key in (curses.KEY_RIGHT, 9, ord("]"), ord(" ")):
+            self.step(1)
+        elif key in (curses.KEY_LEFT, curses.KEY_BTAB, ord("[")):
+            self.step(-1)
+        elif key in (curses.KEY_DOWN, ord("j")):
+            self.top += 1
+        elif key in (curses.KEY_UP, ord("k")):
+            self.top = max(0, self.top - 1)
+        elif key == curses.KEY_NPAGE:
+            self.top += body_h
+        elif key == curses.KEY_PPAGE:
+            self.top = max(0, self.top - body_h)
+        elif key == curses.KEY_HOME:
+            self.top = 0
+        elif key == curses.KEY_END:
+            self.go_to(len(self.deck.slides) - 1)
+        elif key in (ord("t"), ord("T")):
+            self.toggle_notes()
+        elif key in (ord("/"), curses.KEY_F7):
+            pattern = dialogs.prompt(stdscr, "Search",
+                                     "Find in deck (smart case):",
+                                     default=self.search)
+            curses.curs_set(0)
+            if pattern is not None:
+                self.set_search(pattern)
+                if pattern and not self.find_next(1):
+                    self.notice = f" '{pattern}' not found "
+        elif key == ord("n"):
+            if self.search and not self.find_next(1):
+                self.notice = " no match "
+        elif key in (ord("N"), ord("p")):
+            if self.search and not self.find_next(-1):
+                self.notice = " no match "
+        return True

@@ -62,7 +62,7 @@ from .table import (
     summarise,
     wrap,
 )
-from .util import read_key, rjust, truncate
+from .util import rjust, run_full_screen, truncate
 
 #: The colours the columns cycle through, when colour is on.
 COLUMN_ROLES = ("edit", "tablecol1", "tablecol2", "tablecol3")
@@ -933,22 +933,18 @@ class TableView:
                 self.notice = " no match "
 
     def run(self, stdscr) -> None:
-        curses.curs_set(0)
-        height, width = stdscr.getmaxyx()
-        win = curses.newwin(height, width, 0, 0)
-        win.keypad(True)
-        while True:
-            self.draw(win)
-            curses.doupdate()
-            height, width = stdscr.getmaxyx()
-            key = read_key(win)
-            self.notice = ""
-            if self.summary is not None:
-                self._summary_key(key, max(1, height - 2))
-            elif self.record and self.order:
-                self._record_key(key, max(1, height - 2))
-            elif key in QUIT_KEYS:
-                break
-            else:
-                self._grid_key(key, stdscr, max(1, height - 3))
-            self._clamp()
+        run_full_screen(self, stdscr)
+
+    def handle_key(self, key, stdscr, height: int, width: int) -> bool:
+        """Apply one key; False when it closes the table."""
+        self.notice = ""
+        if self.summary is not None:
+            self._summary_key(key, max(1, height - 2))
+        elif self.record and self.order:
+            self._record_key(key, max(1, height - 2))
+        elif key in QUIT_KEYS:
+            return False
+        else:
+            self._grid_key(key, stdscr, max(1, height - 3))
+        self._clamp()
+        return True

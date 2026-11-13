@@ -44,7 +44,7 @@ from .dclayout import NUMBERS, Element, Layout, int_attr, looks_like_layout, par
 from .filesystems import FileSystem
 from .imageview import HALF_BLOCK, full_colour
 from .theme import Pairs
-from .util import read_key, truncate
+from .util import run_full_screen, truncate
 
 #: The largest layout read.  dcviz's quarter-million-element example is a
 #: few kilobytes; four megabytes of layout is a typo or not a layout at all.
@@ -82,6 +82,13 @@ MIN_WIDTH, MIN_HEIGHT = 30, 10
 
 BACKSPACE = (curses.KEY_BACKSPACE, 127, 8)
 ENTER = (10, 13, curses.KEY_ENTER)
+#: The arrows, and vi's letters for them, as a step across the plan.
+MOVES = {
+    curses.KEY_LEFT: (-1, 0), ord("h"): (-1, 0),
+    curses.KEY_RIGHT: (1, 0), ord("l"): (1, 0),
+    curses.KEY_UP: (0, -1), ord("k"): (0, -1),
+    curses.KEY_DOWN: (0, 1), ord("j"): (0, 1),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -863,34 +870,25 @@ class FloorView:
 
     # -- the key loop --------------------------------------------------------
     def run(self, stdscr) -> None:
-        curses.curs_set(0)
-        height, width = stdscr.getmaxyx()
-        win = curses.newwin(height, width, 0, 0)
-        win.keypad(True)
-        moves = {
-            curses.KEY_LEFT: (-1, 0), ord("h"): (-1, 0),
-            curses.KEY_RIGHT: (1, 0), ord("l"): (1, 0),
-            curses.KEY_UP: (0, -1), ord("k"): (0, -1),
-            curses.KEY_DOWN: (0, 1), ord("j"): (0, 1),
-        }
-        while True:
-            self.draw(win)
-            curses.doupdate()
-            key = read_key(win)
-            self.notice = ""
-            if key in (ord("q"), ord("Q"), curses.KEY_F3, curses.KEY_F10):
-                break
-            if key == 27 or key in BACKSPACE:
-                if not self.zoom_out():
-                    if key == 27:
-                        break
-                    self.notice = "this is the whole floor"
-            elif key in moves:
-                self.move(*moves[key])
-            elif key in ENTER:
-                self.zoom_in()
-            elif key in (ord("c"), ord("C")):
-                self.cycle_colour()
+        run_full_screen(self, stdscr)
+
+    def handle_key(self, key, stdscr, height: int, width: int) -> bool:
+        """Apply one key; False when it closes the floor plan."""
+        self.notice = ""
+        if key in (ord("q"), ord("Q"), curses.KEY_F3, curses.KEY_F10):
+            return False
+        if key == 27 or key in BACKSPACE:
+            if not self.zoom_out():
+                if key == 27:
+                    return False
+                self.notice = "this is the whole floor"
+        elif key in MOVES:
+            self.move(*MOVES[key])
+        elif key in ENTER:
+            self.zoom_in()
+        elif key in (ord("c"), ord("C")):
+            self.cycle_colour()
+        return True
 
 
 def _tally(kinds: dict[str, int]) -> str:
