@@ -13,6 +13,10 @@ would be a copy and a delete, which is exactly what a trash is not.
 
 On macOS it is ``~/.Trash``.  Finder's "Put Back" reads metadata only Finder
 writes, so an item trashed here can be dragged back but not put back.
+
+:func:`trash_location` answers the other question -- where to look -- without
+making anything but the home trash, and :func:`trash_root` and
+:func:`info_file` let a pane already in the trash tell where it is (MC-024).
 """
 
 from __future__ import annotations
@@ -68,21 +72,134 @@ def trash_for(path: str) -> tuple[str, str | None]:
             raise TrashUnavailable(f"cannot write to the trash in {home}")
         return home, None
     top = _mount_point(os.path.dirname(os.path.abspath(path)))
-    uid = os.getuid()
-    shared = os.path.join(top, ".Trash")
-    try:
-        st = os.lstat(shared)
-        if (stat.S_ISDIR(st.st_mode) and not stat.S_ISLNK(st.st_mode)
-                and st.st_mode & stat.S_ISVTX):
-            mine = os.path.join(shared, str(uid))
-            if _usable(mine):
-                return mine, top
-    except OSError:
-        pass
-    own = os.path.join(top, f".Trash-{uid}")
+    mine = _shared_trash(top)
+    if mine is not None and _usable(mine):
+        return mine, top
+    own = os.path.join(top, f".Trash-{os.getuid()}")
     if _usable(own):
         return own, top
     raise TrashUnavailable(f"no trash on the disk {top} can be used")
+
+
+def _shared_trash(top: str) -> str | None:
+    """This user's place in the disk's shared ``.Trash``, if it has one.
+
+    Only a real, sticky ``$topdir/.Trash`` counts: the specification says to
+    pass over one that is a link or lacks the sticky bit, since anyone could
+    have made it to collect other people's files.  Nothing is created here.
+    """
+    try:
+        st = os.lstat(os.path.join(top, ".Trash"))
+    except OSError:
+        return None
+    if (stat.S_ISDIR(st.st_mode) and not stat.S_ISLNK(st.st_mode)
+            and st.st_mode & stat.S_ISVTX):
+        return os.path.join(top, ".Trash", str(os.getuid()))
+    return None
+
+
+def _make_home_trash() -> str:
+    """The home trash, made as :func:`trash_for` makes it if it is not there.
+
+    A failure is left for the listing that follows to report, which can say
+    what was wrong with the directory rather than only that it is missing.
+    """
+    home = _home_trash()
+    try:
+        os.makedirs(home, mode=0o700, exist_ok=True)
+    except OSError:
+        return home
+    _usable(home)
+    return home
+
+
+def trash_location(path: str | None = None) -> str:
+    """The directory a pane lists to show the trash.
+
+    On Linux and the BSDs it is a trash's ``files/``: the one ``F8`` would use
+    for things in the local directory ``path`` -- that disk's own trash, when
+    it is on another disk and has one -- and otherwise, or with no ``path``,
+    the home trash.  On macOS it is ``~/.Trash``.
+
+    Looking must not litter: the home trash is made if it is missing (``F8``
+    would make it anyway, and an empty trash is a better answer than an
+    error), but nothing is ever created on another disk -- a USB stick that
+    has never had anything trashed on it is left without a ``.Trash-$uid``.
+    """
+    if sys.platform == "darwin":
+        trash = os.path.expanduser("~/.Trash")
+        try:
+            os.makedirs(trash, exist_ok=True)
+        except OSError:
+            pass     # the listing says why
+        return trash
+    home = _make_home_trash()
+    files = os.path.join(home, "files")
+    if path is None:
+        return files
+    try:
+        if os.stat(path).st_dev == os.stat(home).st_dev:
+            return files
+        top = _mount_point(path)
+    except OSError:
+        return files
+    own = os.path.join(top, f".Trash-{os.getuid()}")
+    for trash in (_shared_trash(top), own):
+        if trash is not None and os.path.isdir(os.path.join(trash, "files")):
+            return os.path.join(trash, "files")
+    return files
+
+
+def _is_trash(directory: str) -> bool:
+    """Whether ``directory`` is a FreeDesktop trash this user's ``F8`` uses."""
+    name = os.path.basename(directory)
+    if name == f".Trash-{os.getuid()}":
+        return True
+    if (name == str(os.getuid())
+            and os.path.basename(os.path.dirname(directory)) == ".Trash"):
+        return True
+    return os.path.realpath(directory) == os.path.realpath(_home_trash())
+
+
+def trash_root(directory: str) -> str | None:
+    """The trash listing ``directory`` is in, or ``None`` if it is in none.
+
+    The listing is a trash's ``files/`` (or ``~/.Trash`` on macOS), and
+    ``directory`` may be it or anywhere below it: inside a directory that was
+    trashed whole is still inside the trash.
+    """
+    here = os.path.abspath(directory)
+    if sys.platform == "darwin":
+        trash = os.path.realpath(os.path.expanduser("~/.Trash"))
+        real = os.path.realpath(here)
+        if real == trash or real.startswith(trash + os.sep):
+            return trash
+        return None
+    while True:
+        if os.path.basename(here) == "files" and _is_trash(
+                os.path.dirname(here)):
+            return here
+        parent = os.path.dirname(here)
+        if parent == here:
+            return None
+        here = parent
+
+
+def info_file(path: str) -> str | None:
+    """The ``.trashinfo`` that goes with ``path``, an item in a trash.
+
+    ``None`` unless ``path`` is at the top of a FreeDesktop trash's ``files/``:
+    something deeper is part of an item rather than one, and macOS keeps no
+    such file (Finder's own record is not one this module writes).
+    """
+    if sys.platform == "darwin":
+        return None
+    files = os.path.dirname(os.path.abspath(path))
+    if os.path.basename(files) != "files" or not _is_trash(
+            os.path.dirname(files)):
+        return None
+    return os.path.join(os.path.dirname(files), "info",
+                        os.path.basename(path) + ".trashinfo")
 
 
 def _reserve(info_dir: str, name: str, text: str) -> str:
@@ -149,3 +266,20 @@ def move_to_trash(path: str) -> str:
     if sys.platform == "darwin":
         return _move_macos(path)
     return _move_freedesktop(path)
+
+
+def forget(path: str) -> None:
+    """Remove the ``.trashinfo`` of ``path``, an item deleted from the trash.
+
+    Left behind, it would have the desktop's trash list an entry with nothing
+    behind it.  An item with no record -- below the top of ``files/``, on
+    macOS, or put there by hand -- is nothing to do; any other failure to
+    remove one is raised.
+    """
+    info = info_file(path)
+    if info is None:
+        return
+    try:
+        os.remove(info)
+    except FileNotFoundError:
+        pass

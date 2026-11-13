@@ -12,6 +12,35 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.20.0] — 2026-11-13
+
+### Added
+
+- **`T` points a pane at the trash** (also **Command ▸ Trash folder** and
+  **Trash folder** on the right-click menu), and `<` brings it back. It is the
+  trash `F8` uses from where the pane is: on Linux and the BSDs the trash's
+  `files/` directory — `$XDG_DATA_HOME/Trash/files`, or the disk's own
+  `.Trash/<uid>` or `.Trash-<uid>` from a pane on another disk that has one —
+  and `~/.Trash` on macOS. From a remote pane or an archive it switches to
+  this computer's home trash, as a local preset would. Looking makes a home
+  trash that is not there yet (mode 0700, as `F8` would) but never creates
+  anything on another disk. A trash that cannot be listed leaves the pane
+  where it was, with the reason; on macOS a refusal says how to give the
+  terminal Full Disk Access. (MC-024)
+- `trash.trash_location()`, `trash_root()`, `info_file()` and `forget()`:
+  where to look, whether a directory is in a trash, and an item's
+  `.trashinfo`, with no side effects beyond the home trash.
+
+### Changed
+
+- **`F8` inside the trash offers only Delete permanently**, and an item at the
+  top of `files/` goes with its `.trashinfo`. Before, **Move to trash** there
+  renamed the item inside the trash (`a.txt` to `a.2.txt`) and left its old
+  record describing nothing. (MC-024)
+- A pane that cannot go where it was asked now keeps the reason in
+  `Panel.failure`; `Panel.error` loses it when the rollback lists the old
+  place again.
+
 ## [1.19.0] — 2026-11-12
 
 ### Added
@@ -1085,6 +1114,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.20.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.16.0...v1.17.0
