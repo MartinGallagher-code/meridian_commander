@@ -12,6 +12,40 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.19.0] — 2026-11-12
+
+### Added
+
+- **A floor plan browser for `.dc` datacenter layouts.** `F3` on a layout
+  written for datacenter_visualization draws the floor it describes rather
+  than its text: the whole site, a line of cells per row with every rack
+  filled as far as it is full and coloured by what it mostly holds; `Enter`
+  zooms in to a row of racks standing side by side in half-blocks, then to one
+  rack, U by U, every device in its slot and named. The arrows walk the floor
+  rack by rack and row by row, `Backspace`/`Esc` zoom back out, an inspector
+  shows the element under the cursor (path, slot, what it holds, attributes
+  and tags, inherited ones marked `^`), and `c` colours by role, tag, model or
+  not at all, with a legend. Without 256 colours the floor is drawn in
+  letters. Quick view (`Ctrl-Q`) shows it too. (MC-023)
+- **Meridian reads `.dc` itself** (`meridian_commander/dclayout.py`): nesting,
+  every range form, placeholders and their widths, `{seq}` and `seq=`, `if=`,
+  inheritance, `model` lines and rack slotting, by dcviz's rules and held to
+  dcviz's own answers on its example files element for element. No Node or
+  dcviz is needed, so layouts open on SFTP, SSH and FTP panes and in archives.
+  `net` and `link` lines are passed over; anything the reader cannot read is
+  counted and the first of it named in the footer, never drawn wrong. A
+  quarter of a million elements (dcviz's `mega.dc`) opens in about half a
+  second, and only a screen is drawn.
+
+### Changed
+
+- A `.dc` file is claimed by its content as well as its name: only one that
+  opens like a layout (its first real line starts `dc`, `title` or `model`)
+  gets the floor plan, and a `dc` calculator script opens as text, in the
+  built-in viewer or your pager, as before. The decision reads the first
+  8 KiB. `browsers.has_own_browser` now takes the pane's file system and the
+  path rather than a bare name, so the pager rule and `F3` cannot disagree.
+
 ## [1.18.0] — 2026-11-10
 
 ### Added
@@ -1051,6 +1085,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.19.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.15.0...v1.16.0

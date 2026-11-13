@@ -2206,7 +2206,7 @@ class App:
         of the container, which is nobody's idea of viewing it.  Choosing a
         pager answers the question about *text*.
         """
-        if has_own_browser(fs.basename(path)):
+        if has_own_browser(fs, path):
             return False
         argv = self._external_viewer()
         if argv is None:
@@ -3512,14 +3512,18 @@ class App:
             "                 scripts in colour; c turns the colour off\n"
             "  F3 on an image arrows pan, +/- zoom, c colour/ASCII, n frame\n"
             "  F3 on .pdf     page text: Tab page, / find, i scanned image\n"
+            "  F3 on .dc      datacenter floor plan (a layout, not a dc\n"
+            "                 script): arrows move, Enter zooms in to a\n"
+            "                 row and a rack, Bksp/Esc out, c colours by\n"
+            "                 role/tag/model/off\n"
             "  C              configuration: edit config.ini / plug-ins\n"
             "  Options>Colours  turbo (blue), midnight (black), mono\n"
             "  Options>Editor   F4 opens vi/vim/$EDITOR instead of the\n"
             "                   built-in editor\n"
             "  Options>Viewer   F3 opens less/$PAGER instead of the built-in\n"
             "                   viewer, for plain text and code (a spreadsheet,\n"
-            "                   table, deck, document, PDF or image keeps its\n"
-            "                   own)\n"
+            "                   table, deck, document, PDF, image or .dc\n"
+            "                   layout keeps its own)\n"
             "\n"
             "  Function keys -- each also has digit and letter aliases,\n"
             "  for terminals that swallow the F-keys:\n"

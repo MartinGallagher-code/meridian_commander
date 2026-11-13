@@ -92,7 +92,7 @@ def test_each_table_suffix_opens_in_the_table_browser(fs, tmp_path, name):
     assert isinstance(viewer_for(fs, str(tmp_path / name)), TableView)
     # So the configured pager no longer takes them, as it does not take a
     # spreadsheet: less shows a TSV as misaligned as the text viewer did.
-    assert has_own_browser(name) is True
+    assert has_own_browser(fs, str(tmp_path / name)) is True
 
 
 def test_everything_else_opens_as_it_did(fs, tmp_path):
@@ -100,7 +100,7 @@ def test_everything_else_opens_as_it_did(fs, tmp_path):
     book = write_xlsx(str(tmp_path / "book.xlsx"), {"S": [["a"]]})
     assert isinstance(viewer_for(fs, str(tmp_path / "notes.txt")), Viewer)
     assert isinstance(viewer_for(fs, book), SheetView)
-    assert has_own_browser("notes.txt") is False
+    assert has_own_browser(fs, str(tmp_path / "notes.txt")) is False
 
 
 def test_a_table_on_a_remote_pane_is_read_through_the_backend(tmp_path):

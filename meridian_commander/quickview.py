@@ -4,10 +4,11 @@
 
 ``Ctrl-Q`` turns the pane opposite the one being browsed into the viewer that
 ``F3`` would open for the file under the cursor -- text, Markdown, a document,
-a deck, a sheet, a table, a PDF, an image -- and moving the cursor shows the
-next file there.  It is ``h`` (:mod:`~meridian_commander.peek`) grown up: the
-same pane-opposite arrangement, following the same cursor, but with every
-viewer instead of head and tail.
+a deck, a sheet, a table, a PDF, an image, a datacenter floor plan -- and
+moving the cursor shows the next file there.  It is ``h``
+(:mod:`~meridian_commander.peek`) grown up: the same pane-opposite
+arrangement, following the same cursor, but with every viewer instead of head
+and tail.
 
 Each viewer already draws into whatever window it is given, at that window's
 size, so none of them had to change: the quick view hands one a window over
@@ -122,7 +123,7 @@ class QuickViewPane(PanePlugin):
             if entry.is_dir:
                 self.lines = self._summary(fs, path)
                 return
-            if not has_own_browser(entry.name):
+            if not has_own_browser(fs, path):
                 self.view = _Glance(fs, path)
                 return
             limit = REMOTE_LIMIT if self.remote() else LOCAL_LIMIT
