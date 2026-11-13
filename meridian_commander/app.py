@@ -372,6 +372,8 @@ class App:
         self.use_trash = _config.trash_enabled()
         #: Whether F3 and F4 open in a pane rather than full-screen (Options).
         self.open_in_pane = _config.open_in_pane()
+        #: Whether the last draw showed the cursor, for the editor in a pane.
+        self._cursor_shown = False
         #: Hands files to the desktop (``w``), keeping its copies for the run.
         self.opener = SystemOpener()
         #: Copies and moves running in the background (MC-020).
@@ -624,12 +626,18 @@ class App:
         theme.paint(stdscr, height - 2, 1, self.message[:room], "hint")
         self._draw_function_bar(height - 1, width)
         # The editor in a pane has a cursor; everything else draws its own
-        # or has none.  Last, so nothing written after it moves it.
+        # or has none.  Last, so nothing written after it moves it.  The
+        # cursor is hidden again only after being shown here: a draw that
+        # never shows one leaves the cursor, and the library, alone.
         where = getattr(self.active.plugin, "cursor", None)
         spot = where() if where is not None else None
         if spot is not None:
             stdscr.move(*spot)
-        curses.curs_set(0 if spot is None else 1)
+            curses.curs_set(1)
+            self._cursor_shown = True
+        elif self._cursor_shown:
+            curses.curs_set(0)
+            self._cursor_shown = False
         stdscr.noutrefresh()
         curses.doupdate()
 

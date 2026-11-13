@@ -1106,10 +1106,7 @@ def test_an_outside_program_draws_its_own_caption(files, monkeypatch,
     assert _on_screen(files, script).startswith(" [sh] second.txt")
 
 
-def test_quitting_the_application_closes_the_view(files, monkeypatch):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(files / "config"))
-    app = App(_StubScreen(), str(files / "left"), str(files / "right"))
-    app.open_in_pane = True
+def test_quitting_the_application_closes_the_view(app):
     _view(app)
     app._close_backends()
     assert app.right.plugin is None and app.active is app.left
