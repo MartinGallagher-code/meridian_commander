@@ -81,11 +81,7 @@ def edit(fs, path: str, argv: list[str], run) -> str:
     status, or ``None`` if it could not start -- :meth:`App._suspend_and_run`
     in practice, a stub in the tests.
     """
-    name = fs.basename(path) or path
-    local = getattr(fs, "local_path", None)
-    if local is not None:
-        return _edit_in_place(local(path), name, argv, run)
-    return _edit_via_copy(fs, path, name, argv, run)
+    return _errand(Session(fs, path, argv, editing=True), run)
 
 
 def view(fs, path: str, argv: list[str], run) -> str:
@@ -97,28 +93,112 @@ def view(fs, path: str, argv: list[str], run) -> str:
     lose, so the copy that :func:`edit` deliberately keeps has no reason to
     survive here.
     """
-    name = fs.basename(path) or path
-    local = getattr(fs, "local_path", None)
-    if local is not None:
-        real = local(path)
-        status = run(argv + [real], os.path.dirname(real) or None)
-        return _viewed(name, argv, status)
+    return _errand(Session(fs, path, argv, editing=False), run)
 
-    try:
-        data = _fetch(fs, path)
-    except ValueError as exc:
-        return str(exc)
-    except Exception as exc:
-        return f"Cannot read {name}: {exc}"
 
-    workdir = tempfile.mkdtemp(prefix="meridian-view-")
-    copy = os.path.join(workdir, _copy_name(name))
+def _errand(session: Session, run) -> str:
+    """Start, run and finish ``session``, waiting for the program."""
     try:
-        with open(copy, "wb") as handle:
-            handle.write(data)
-        return _viewed(name, argv, run(argv + [copy], workdir))
+        started = session.start()
+        if isinstance(started, str):
+            return started
+        return session.finish(run(*started))
     finally:
-        _discard(workdir, copy)
+        session.close()
+
+
+class Session:
+    """One file handed to an outside program, from fetching to writing back.
+
+    :func:`edit` and :func:`view` wait for the program, so they run the three
+    steps back to back.  A program running in a pane (MC-025) does not block
+    anything: the pane calls :meth:`start` to get the command, lets it run
+    beside the listing, and calls :meth:`finish` once it has exited.  Either
+    way :meth:`close` removes the working copy, unless :meth:`finish` kept it
+    because the write-back failed.
+
+    *A local file* is opened where it lives.  That is the point of an outside
+    editor -- ``:w`` writes the real file, the permissions and ownership stay
+    as they were, and the editor's own backup and undo files land beside it
+    as their owner expects.
+
+    *A remote file* is fetched to a private copy first, in a directory of its
+    own (0700, so a file from a server is not left readable by everyone else
+    on this machine), and written back only when it changed.
+    """
+
+    def __init__(self, fs, path: str, argv: list[str], editing: bool) -> None:
+        self.fs = fs
+        self.path = path
+        self.argv = argv
+        self.editing = editing
+        self.name = fs.basename(path) or path
+        #: The working copy of a remote file, and the directory made for it.
+        self.copy: str | None = None
+        self.workdir: str | None = None
+        self.before = b""
+        #: Whether the copy holds an edit that could not be written back.
+        self.kept = False
+
+    def start(self) -> tuple[list[str], str | None] | str:
+        """The command and the directory to run it in, or why there is none."""
+        local = getattr(self.fs, "local_path", None)
+        if local is not None:
+            real = local(self.path)
+            return self.argv + [real], os.path.dirname(real) or None
+        try:
+            data = _fetch(self.fs, self.path)
+        except ValueError as exc:
+            return str(exc)
+        except Exception as exc:
+            return f"Cannot read {self.name}: {exc}"
+        prefix = "meridian-edit-" if self.editing else "meridian-view-"
+        self.workdir = tempfile.mkdtemp(prefix=prefix)
+        self.copy = os.path.join(self.workdir, _copy_name(self.name))
+        self.before = data
+        with open(self.copy, "wb") as handle:
+            handle.write(data)
+        return self.argv + [self.copy], self.workdir
+
+    def finish(self, status: int | None) -> str:
+        """Write back what changed; a line for the status bar.
+
+        ``status`` is the program's exit status, or ``None`` if it never
+        started.
+        """
+        if not self.editing:
+            return _viewed(self.name, self.argv, status)
+        if status is None:
+            return f"Could not start {self.argv[0]}"
+        if self.copy is None:
+            if status != 0:
+                return (f"{self.argv[0]} exited {status} -- "
+                        f"{self.name} may be unsaved")
+            return f"Edited {self.name}"
+        try:
+            with open(self.copy, "rb") as handle:
+                after = handle.read()
+        except OSError:
+            # The editor deleted or never wrote it: nothing to send back.
+            return f"{self.name} unchanged"
+        if after == self.before:
+            return f"{self.name} unchanged"
+        try:
+            writer = self.fs.open_write(self.path)
+            try:
+                writer.write(after)
+            finally:
+                writer.close()
+        except Exception as exc:
+            self.kept = True
+            return (f"Could not save {self.name}: {exc} -- "
+                    f"your edit is in {self.copy}")
+        return f"Saved {self.name} ({len(after)} bytes)"
+
+    def close(self) -> None:
+        """Remove the working copy, unless it holds an edit not written back."""
+        if self.copy is not None and not self.kept:
+            _discard(self.workdir or "", self.copy)
 
 
 def _viewed(name: str, argv: list[str], status: int | None) -> str:
@@ -128,64 +208,6 @@ def _viewed(name: str, argv: list[str], status: int | None) -> str:
     if status != 0:
         return f"{argv[0]} exited {status}"
     return f"Viewed {name}"
-
-
-def _edit_in_place(real: str, name: str, argv: list[str], run) -> str:
-    """The local case: the editor opens the file itself.
-
-    Which is the point of using it -- ``:w`` writes the real file, the
-    permissions and ownership stay as they were, and the editor's own backup
-    and undo files land beside it as their owner expects.
-    """
-    status = run(argv + [real], os.path.dirname(real) or None)
-    if status is None:
-        return f"Could not start {argv[0]}"
-    if status != 0:
-        return f"{argv[0]} exited {status} -- {name} may be unsaved"
-    return f"Edited {name}"
-
-
-def _edit_via_copy(fs, path: str, name: str, argv: list[str], run) -> str:
-    """The remote case: fetch, edit a private copy, write back if changed."""
-    try:
-        before = _fetch(fs, path)
-    except ValueError as exc:
-        return str(exc)
-    except Exception as exc:
-        return f"Cannot read {name}: {exc}"
-
-    # 0700, so a file fetched from a server is not left readable by everyone
-    # else on this machine while it is being edited.
-    workdir = tempfile.mkdtemp(prefix="meridian-edit-")
-    keep = False
-    copy = os.path.join(workdir, _copy_name(name))
-    try:
-        with open(copy, "wb") as handle:
-            handle.write(before)
-        status = run(argv + [copy], workdir)
-        if status is None:
-            return f"Could not start {argv[0]}"
-        try:
-            with open(copy, "rb") as handle:
-                after = handle.read()
-        except OSError:
-            # The editor deleted or never wrote it: nothing to send back.
-            return f"{name} unchanged"
-        if after == before:
-            return f"{name} unchanged"
-        try:
-            writer = fs.open_write(path)
-            try:
-                writer.write(after)
-            finally:
-                writer.close()
-        except Exception as exc:
-            keep = True
-            return f"Could not save {name}: {exc} -- your edit is in {copy}"
-        return f"Saved {name} ({len(after)} bytes)"
-    finally:
-        if not keep:
-            _discard(workdir, copy)
 
 
 def _copy_name(name: str) -> str:

@@ -275,6 +275,23 @@ def single_pane() -> bool:
     return (parser.get("ui", "panes", fallback="") or "").strip() == "1"
 
 
+def open_in_pane() -> bool:
+    """Whether ``[ui] open_in`` asks for F3 and F4 to open in a pane.
+
+    Only ``pane`` does.  Anything else -- blank, ``screen``, a typo -- is the
+    full-screen viewer and editor the application has always opened.
+    """
+    parser = load()
+    return (parser.get("ui", "open_in", fallback="") or "").strip() == "pane"
+
+
+def save_open_in(pane: bool) -> bool:
+    """Remember where F3 and F4 open, as chosen from the Options menu."""
+    if open_in_pane() == pane:
+        return True
+    return _save_ui("open_in", "pane" if pane else "screen")
+
+
 def long_listing() -> bool:
     """Whether ``[ui] listing`` asks for the mode and owner columns.
 

@@ -215,6 +215,16 @@ class PanePlugin:
     def on_exit(self) -> None:
         """Called when the plugin closes.  Override to release resources."""
 
+    def may_close(self) -> bool:
+        """Whether the plug-in may be closed from outside, asking if need be.
+
+        Asked before the application quits, and before something else is
+        opened in the pane, so a plug-in holding work not yet saved -- the
+        editor in a pane -- can ask the user first and answer False to stay
+        open.  Not asked when the plug-in closes itself.  True by default.
+        """
+        return True
+
     # -- interface the application drives -------------------------------------
     def draw(self, stdscr, y: int, x: int, h: int, w: int) -> None:
         """Draw the plugin inside its pane's rectangle."""

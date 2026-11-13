@@ -100,6 +100,7 @@ from .sync import (
     survey_directory,
 )
 from .util import human_size, human_time, ljust, read_key, rjust, typed_char
+from .viewpane import ProgramPane, ViewPane
 
 #: How long curses waits after Esc for the rest of a key's sequence, in ms.
 ESCDELAY_MS = 25
@@ -205,6 +206,7 @@ MENUS: list[dict] = [
             {"label": "Single ~p~ane", "name": "single", "key": "z"},
             {"label": "~L~ong listing", "name": "long"},
             {"label": "~T~rash on delete", "name": "trash"},
+            {"label": "View and ed~i~t in a pane", "name": "open_in_pane"},
             {"sep": True},
             {"label": "~C~olours...", "name": "colours"},
             {"label": "~E~ditor...", "name": "editor"},
@@ -368,6 +370,8 @@ class App:
         self.long_listing = _config.long_listing()
         #: Whether F8 on a local pane offers the trash first (Options).
         self.use_trash = _config.trash_enabled()
+        #: Whether F3 and F4 open in a pane rather than full-screen (Options).
+        self.open_in_pane = _config.open_in_pane()
         #: Hands files to the desktop (``w``), keeping its copies for the run.
         self.opener = SystemOpener()
         #: Copies and moves running in the background (MC-020).
@@ -619,6 +623,13 @@ class App:
             room -= len(status) + 1
         theme.paint(stdscr, height - 2, 1, self.message[:room], "hint")
         self._draw_function_bar(height - 1, width)
+        # The editor in a pane has a cursor; everything else draws its own
+        # or has none.  Last, so nothing written after it moves it.
+        where = getattr(self.active.plugin, "cursor", None)
+        spot = where() if where is not None else None
+        if spot is not None:
+            stdscr.move(*spot)
+        curses.curs_set(0 if spot is None else 1)
         stdscr.noutrefresh()
         curses.doupdate()
 
@@ -871,6 +882,11 @@ class App:
                         tick()
                     except Exception as exc:
                         self._set_message(f"Plugin error: {exc}")
+                if getattr(plugin, "wants_close", False):
+                    # An outside pager or editor in a pane has exited: the
+                    # pane closes, as the full-screen run would have ended.
+                    self._end_plugin(panel)
+                    continue
                 # A plug-in that is busy -- the terminal while output flows or
                 # a key has just gone to the shell -- may ask for a quicker
                 # poll, so an echo shows at once rather than on the next
@@ -919,6 +935,8 @@ class App:
             try:
                 key = read_key(self.stdscr)
             except KeyboardInterrupt:
+                if not self._may_quit():
+                    continue
                 if self.jobs.active():
                     self._quit_with_jobs()
                     if not self.running:
@@ -947,6 +965,8 @@ class App:
                 entry["checked"] = self.long_listing
             elif entry.get("name") == "trash":
                 entry["checked"] = self.use_trash
+            elif entry.get("name") == "open_in_pane":
+                entry["checked"] = self.open_in_pane
             items.append(entry)
         return items
 
@@ -1003,6 +1023,7 @@ class App:
             "jobs": self._jobs_pane,
             "long": self._toggle_long,
             "trash": self._toggle_trash,
+            "open_in_pane": self._toggle_open_in_pane,
             "find": self._find_files,
             "connect": self._open_location,
             "presets": self._presets_menu,
@@ -1089,9 +1110,7 @@ class App:
                 self._set_message(f"Plugin error: {exc}")
                 res = True
             if res is False:
-                self._close_plugin(panel)
-                panel.refresh()
-                self._set_message("Plugin closed")
+                self._end_plugin(panel)
                 return
             if res is not None:
                 return
@@ -1610,6 +1629,16 @@ class App:
                            else "F8 deletes permanently")
                           + ("" if saved else "  (could not be saved)"))
 
+    def _toggle_open_in_pane(self) -> None:
+        """Open F3 and F4 in a pane, or full-screen, and remember it."""
+        from . import config as config_mod
+
+        self.open_in_pane = not self.open_in_pane
+        saved = config_mod.save_open_in(self.open_in_pane)
+        self._set_message(("F3 and F4 open in a pane" if self.open_in_pane
+                           else "F3 and F4 open full-screen")
+                          + ("" if saved else "  (could not be saved)"))
+
     def _toggle_long(self) -> None:
         """Show the mode and owner columns, or not, and remember it."""
         from . import config as config_mod
@@ -1668,6 +1697,8 @@ class App:
 
     # -- actions ----------------------------------------------------------
     def _quit(self) -> None:
+        if not self._may_quit():
+            return
         if self.jobs.active():
             self._quit_with_jobs()
             return
@@ -1977,6 +2008,8 @@ class App:
         from .plugins.terminal import TerminalPlugin
 
         panel = self.active
+        if not self._may_close(panel):
+            return
         self._close_plugin(panel)
         ctx = PluginContext(app=self, own_panel=panel, other_panel=self.other)
         try:
@@ -2099,6 +2132,8 @@ class App:
             return
         cls = classes[choice]
 
+        if not self._may_close(panel):
+            return
         self._close_plugin(panel)
         ctx = PluginContext(app=self, own_panel=panel, other_panel=self.other)
         try:
@@ -2222,6 +2257,8 @@ class App:
         argv = self._external_viewer()
         if argv is None:
             return False
+        if self._program_in_pane(fs, path, argv, editing=False):
+            return True
 
         def run(cmd: list[str], cwd: str | None) -> int | None:
             return self._suspend_and_run(
@@ -2235,12 +2272,168 @@ class App:
         argv = self._external_editor()
         if argv is None:
             return False
+        if self._program_in_pane(fs, path, argv, editing=True):
+            return True
 
         def run(cmd: list[str], cwd: str | None) -> int | None:
             return self._suspend_and_run(
                 cmd, cwd, "", fail_label=f"Could not start {argv[0]}")
 
         self._set_message(extedit.edit(fs, path, argv, run))
+        return True
+
+    # -- viewing and editing in a pane (MC-025) ------------------------------
+    def _view_in_pane(self, view) -> bool:
+        """Show a viewer or the editor in a pane, if the setting says so.
+
+        False when it should run full-screen instead: the setting is off, or
+        there is no pane to put it in.
+        """
+        if not self.open_in_pane:
+            return False
+
+        def make(ctx):
+            # Short enough to sit beside the hidden pane's note on an
+            # 80-column hint line.
+            self._set_message("Ctrl-] then z: two panes, Tab: listing"
+                              if isinstance(view, Editor) else
+                              "z: two panes  Ctrl-] Tab: listing")
+            return ViewPane(ctx, view)
+
+        return self._open_in_pane(make)
+
+    def _program_in_pane(self, fs: FileSystem, path: str, argv: list[str],
+                         editing: bool) -> bool:
+        """Run an outside pager or editor in a pane, if the setting says so.
+
+        False when it should have the whole terminal instead, as it always
+        did: the setting is off, or there is no pane to put it in.  Anything
+        that stops it starting is said here, and counts as handled.
+        """
+        if not self.open_in_pane:
+            return False
+
+        def make(ctx):
+            session = extedit.Session(fs, path, argv, editing)
+            started = session.start()
+            if isinstance(started, str):
+                session.close()
+                self._set_message(started)
+                return None
+            command, cwd = started
+            try:
+                pane = ProgramPane(ctx, session, command, cwd)
+            except Exception:
+                session.close()
+                raise
+            self._set_message("Ctrl-] then z: two panes, Tab: listing")
+            return pane
+
+        try:
+            return self._open_in_pane(make)
+        except Exception as exc:
+            dialogs.message(self.stdscr, argv[0],
+                            f"Could not start {argv[0]}: {exc}", error=True)
+            return True
+
+    def _pane_for_view(self) -> Panel | None:
+        """The pane F3 and F4 open in, or None when both are busy.
+
+        The other pane, as quick view does, so that the two-pane view puts the
+        listing the file came from beside it, and F3 on the next file there
+        shows it in the same place.  This pane, for this once, when the other
+        is running a plug-in of its own.
+        """
+        for panel in (self.other, self.active):
+            if panel.plugin is None or isinstance(panel.plugin,
+                                                  (ViewPane, ProgramPane)):
+                return panel
+        return None
+
+    def _open_in_pane(self, make) -> bool:
+        """Install the pane ``make(ctx)`` builds where F3 and F4 open.
+
+        Shown alone, at full width: single mode, turned on for the view and
+        put back as it was when the view closes (:meth:`_view_closed`), with
+        the keyboard back in the listing the file came from.  The next file
+        shown in a view already open takes its place on the screen as it
+        stands -- two panes stay two -- and closing it still puts back the
+        layout from before the first.
+
+        False when no pane is free; True otherwise, including when a view
+        already there holds unsaved changes the user chose to keep, or
+        ``make`` gives nothing.
+        """
+        from .plugin_api import PluginContext
+
+        target = self._pane_for_view()
+        if target is None:
+            return False
+        source = self.active
+        screen = layout = (self.single, self._zoomed_by)
+        replacing = target.plugin is not None
+        if replacing:
+            if not self._may_close(target):
+                return True
+            # Taken over, so closing the old view puts nothing back.
+            layout, target.plugin.layout = target.plugin.layout, None
+            self._close_plugin(target)
+        other = self.right if target is self.left else self.left
+        pane = make(PluginContext(app=self, own_panel=target, other_panel=other))
+        if pane is None:
+            self.single, self._zoomed_by = layout
+            return True
+        pane.source = source
+        pane.layout = layout
+        target.plugin = pane
+        self.active = target
+        self.single, self._zoomed_by = screen if replacing else (True, target)
+        self._beside = None
+        return True
+
+    def _view_closed(self, pane) -> None:
+        """Put back what opening a view changed: the layout and the keyboard.
+
+        Called from the pane's ``on_exit``, however it closed -- its own keys,
+        quitting, something else opened over it -- and safe to call twice.
+        """
+        if pane.layout is None:
+            return
+        self.single, self._zoomed_by = pane.layout
+        pane.layout = None
+        self._beside = None
+        self.active = pane.source
+        if pane.editing:
+            # An outside editor's saves were never seen, and a new file may
+            # only now exist: the listing shows what the editing left.
+            self._reload_after_change(pane.source)
+
+    def _unsaved_in(self, fs: FileSystem, paths: list[str]) -> str | None:
+        """A file open with unsaved changes in a pane, that ``paths`` would
+        delete, move or overwrite (one of them, or under one); its name."""
+        for panel in (self.left, self.right):
+            held = getattr(panel.plugin, "unsaved_file", None)
+            found = held() if held is not None else None
+            if found is None:
+                continue
+            for path in paths:
+                if overlapping(fs, path, found[0], found[1]):
+                    return found[0].basename(found[1])
+        return None
+
+    def _refuse_unsaved(self, fs: FileSystem, paths: list[str]) -> bool:
+        """Refuse, saying why, to touch a file open with unsaved changes.
+
+        The editor in a pane holds the file's text: deleting or moving the
+        file under it, or copying another over it, would leave the next save
+        writing somewhere unexpected or putting back what was removed.
+        """
+        name = self._unsaved_in(fs, paths)
+        if name is None:
+            return False
+        dialogs.message(self.stdscr, "Open in the editor",
+                        f"{name} is open in a pane with unsaved changes.\n"
+                        f"Save it or close it first.", error=True)
         return True
 
     # -- mouse ------------------------------------------------------------
@@ -2390,6 +2583,8 @@ class App:
             return
         src = panel.fs.join(panel.path, entry.name)
         dst = panel.fs.join(panel.path, new_name)
+        if self._refuse_unsaved(panel.fs, [src, dst]):
+            return
         if self._rename_would_replace(panel.fs, src, dst) and not dialogs.confirm(
                 self.stdscr, "Rename",
                 f"'{new_name}' already exists.\nReplace it?"):
@@ -2806,7 +3001,9 @@ class App:
         if self._view_externally(panel.fs, target):
             return
         try:
-            viewer_for(panel.fs, target).run(self.stdscr)
+            view = viewer_for(panel.fs, target)
+            if not self._view_in_pane(view):
+                view.run(self.stdscr)
         except Exception as exc:
             dialogs.message(self.stdscr, "View error", str(exc), error=True)
         curses.curs_set(0)
@@ -2867,6 +3064,8 @@ class App:
             panel.refresh()
             self._set_message("Head + tail closed")
             return
+        if not self._may_close(panel):
+            return
         self._close_plugin(panel)
         ctx = PluginContext(app=self, own_panel=panel, other_panel=self.other)
         panel.plugin = PeekPane(ctx)
@@ -2916,7 +3115,8 @@ class App:
         if not self._edit_externally(panel.fs, target):
             try:
                 editor = Editor(panel.fs, target)
-                editor.run(self.stdscr)
+                if not self._view_in_pane(editor):
+                    editor.run(self.stdscr)
             except Exception as exc:
                 dialogs.message(self.stdscr, "Edit error", str(exc), error=True)
             curses.curs_set(0)
@@ -2933,6 +3133,10 @@ class App:
         dst_panel = self.other
         sources = src_panel.selected_entries()
         if not sources:
+            return
+        if move and self._refuse_unsaved(
+                src_panel.fs, [src_panel.fs.join(src_panel.path, s.name)
+                               for s in sources]):
             return
         verb = "Move" if move else "Copy"
 
@@ -2961,6 +3165,9 @@ class App:
         # wherever the shell that started the application happened to be,
         # where the pane would never show it.
         dest = dst_fs.normpath(dst_panel.resolve(dest))
+        if self._refuse_unsaved(dst_fs, [dst_fs.join(dest, s.name)
+                                         for s in sources]):
+            return
         if background.on:
             self._background(move, src_panel, dst_panel, sources, dest,
                              keep_mode.on)
@@ -3252,6 +3459,9 @@ class App:
         panel = self.active
         targets = panel.selected_entries()
         if not targets:
+            return
+        if self._refuse_unsaved(panel.fs, [panel.fs.join(panel.path, t.name)
+                                           for t in targets]):
             return
         if len(targets) == 1:
             text = f"Delete '{targets[0].name}'{self._not_shown(panel)}?"
@@ -3645,6 +3855,22 @@ class App:
                 exit_hook()
             except Exception as exc:
                 self._set_message(f"Plugin error: {exc}")
+
+    def _end_plugin(self, panel: Panel) -> None:
+        """Close a plug-in that has asked to close, and say so."""
+        plugin = panel.plugin
+        self._close_plugin(panel)
+        panel.refresh()
+        self._set_message(getattr(plugin, "closed_note", "") or "Plugin closed")
+
+    def _may_close(self, panel: Panel) -> bool:
+        """Whether the pane's plug-in agrees to be closed; it may ask first."""
+        ask = getattr(panel.plugin, "may_close", None)
+        return ask is None or bool(ask())
+
+    def _may_quit(self) -> bool:
+        """Whether every pane agrees to the application quitting."""
+        return all(self._may_close(panel) for panel in (self.left, self.right))
 
     def _close_backends(self) -> None:
         for panel in (self.left, self.right):

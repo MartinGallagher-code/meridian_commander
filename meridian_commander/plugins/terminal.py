@@ -395,7 +395,13 @@ class TerminalPlugin(PanePlugin):
         self._busy_at = 0.0
         self._colours: Colours | None = None
         self._modified = modified_keys()
+        #: The program's exit status once it has been collected, or None.
+        self.exit_status: int | None = None
+        self._launch()
 
+    # -- backends ---------------------------------------------------------
+    def _launch(self) -> None:
+        """Start the shell the pane's location calls for."""
         fs = self.ctx.own_fs
         path = self.ctx.own_path
         kind = getattr(fs, "scheme", "")
@@ -409,12 +415,12 @@ class TerminalPlugin(PanePlugin):
                 "open the terminal from a local, SFTP or SSH pane."
             )
 
-    # -- backends ---------------------------------------------------------
-    def _start_local(self, path: str) -> None:
+    def _start_local(self, path: str, command: list[str] | None = None) -> None:
+        """Fork a pty running ``command`` in ``path``: the shell by default."""
         import fcntl
         import pty
 
-        shell = os.environ.get("SHELL", "/bin/sh")
+        argv = command or [os.environ.get("SHELL", "/bin/sh")]
         pid, fd = pty.fork()
         # pragma: no cover -- this branch runs only in the forked child, which
         # replaces its own process image with the shell a few lines later, so
@@ -429,7 +435,12 @@ class TerminalPlugin(PanePlugin):
             # COLUMNS inherited from the outer shell would pin it instead.
             os.environ.pop("LINES", None)
             os.environ.pop("COLUMNS", None)
-            os.execvp(shell, [shell])
+            try:
+                os.execvp(argv[0], argv)
+            except OSError as exc:
+                # On the pane's own screen, where whoever asked for it is
+                # looking, rather than nowhere.
+                os.write(2, f"{argv[0]}: {exc.strerror}\r\n".encode())
             os._exit(127)
         self._pid = pid
         self._fd = fd
@@ -473,9 +484,10 @@ class TerminalPlugin(PanePlugin):
                     break
             if self._pid is not None:
                 try:
-                    pid, _status = os.waitpid(self._pid, os.WNOHANG)
+                    pid, status = os.waitpid(self._pid, os.WNOHANG)
                     if pid == self._pid:
                         self._pid = None
+                        self.exit_status = os.waitstatus_to_exitcode(status)
                         self._finish()
                 except ChildProcessError:
                     pass
@@ -631,9 +643,7 @@ class TerminalPlugin(PanePlugin):
         # program switching to the alternate screen, which has none).
         self._scroll_by(0)
 
-        fs = self.ctx.own_fs
-        where = f"{fs.label()}:{self.ctx.own_path}"
-        self.put(stdscr, y, x, w, f" [terminal] {where} ", theme.attr("keybar"))
+        self.put(stdscr, y, x, w, self._caption(), theme.attr("keybar"))
 
         if self._colours is None or not self._colours.current():
             self._colours = Colours()
@@ -657,6 +667,11 @@ class TerminalPlugin(PanePlugin):
             self._draw_cursor(stdscr, y + 1, x, rows, cols)
 
         self.put(stdscr, y + h - 1, x, w, self._footer(), theme.attr("keybar"))
+
+    def _caption(self) -> str:
+        """The bar along the top of the pane."""
+        fs = self.ctx.own_fs
+        return f" [terminal] {fs.label()}:{self.ctx.own_path} "
 
     def _footer(self) -> str:
         # Each fits the forty columns of half an 80-column screen.
