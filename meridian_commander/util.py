@@ -8,6 +8,28 @@ import curses
 import time
 
 
+def run_full_screen(view, stdscr) -> None:
+    """The full-screen loop every viewer shares: draw, read a key, hand it on.
+
+    A viewer keeps its keys in ``handle_key(key, stdscr, height, width)``,
+    which answers False when the key closes it, and its drawing in
+    ``draw(win)``.  This is the whole of what ``run()`` adds -- a window the
+    size of the terminal -- so the same viewer can be hosted in a pane
+    (:mod:`~meridian_commander.viewpane`) with nothing to drift between the
+    two: the keys are the same method either way.
+    """
+    curses.curs_set(0)
+    height, width = stdscr.getmaxyx()
+    win = curses.newwin(height, width, 0, 0)
+    win.keypad(True)
+    while True:
+        view.draw(win)
+        curses.doupdate()
+        height, width = stdscr.getmaxyx()
+        if not view.handle_key(read_key(win), stdscr, height, width):
+            return
+
+
 def read_key(win) -> int | str:
     """The next key from ``win``, decoded from the terminal's encoding.
 

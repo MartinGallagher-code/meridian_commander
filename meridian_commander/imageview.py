@@ -457,34 +457,39 @@ class ImageView:
             curses.doupdate()
             self.flush_graphics()
             height, width = stdscr.getmaxyx()
-            body = max(1, height - 2)
-            step = max(1, width // 8)
-            key = read_key(win)
-            self.notice = ""
-            if key in (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10):
-                break
-            elif key in (curses.KEY_LEFT, ord("h")):
-                self.pan(-step, 0, width, body)
-            elif key in (curses.KEY_RIGHT, ord("l")):
-                self.pan(step, 0, width, body)
-            elif key in (curses.KEY_UP, ord("k")):
-                self.pan(0, -step, width, body)
-            elif key in (curses.KEY_DOWN, ord("j")):
-                self.pan(0, step, width, body)
-            elif key in (ord("+"), ord("=")):
-                self.set_zoom(self.zoom + 1, width, body)
-            elif key in (ord("-"), ord("_")):
-                self.set_zoom(self.zoom - 1, width, body)
-            elif key in (ord("f"), ord("F"), curses.KEY_HOME):
-                self.set_zoom(0, width, body)
-            elif key in (ord("n"), ord(" ")):
-                self.step_frame(1)
-            elif key in (ord("p"), ord("N")):
-                self.step_frame(-1)
-            elif key in (ord("c"), ord("C")):
-                self.colour = not self.colour
-            elif key in (ord("g"), ord("G")):
-                self._toggle_graphics()
+            if not self.handle_key(read_key(win), stdscr, height, width):
+                return
+
+    def handle_key(self, key, stdscr, height: int, width: int) -> bool:
+        """Apply one key; False when it closes the picture."""
+        body = max(1, height - 2)
+        step = max(1, width // 8)
+        self.notice = ""
+        if key in (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10):
+            return False
+        elif key in (curses.KEY_LEFT, ord("h")):
+            self.pan(-step, 0, width, body)
+        elif key in (curses.KEY_RIGHT, ord("l")):
+            self.pan(step, 0, width, body)
+        elif key in (curses.KEY_UP, ord("k")):
+            self.pan(0, -step, width, body)
+        elif key in (curses.KEY_DOWN, ord("j")):
+            self.pan(0, step, width, body)
+        elif key in (ord("+"), ord("=")):
+            self.set_zoom(self.zoom + 1, width, body)
+        elif key in (ord("-"), ord("_")):
+            self.set_zoom(self.zoom - 1, width, body)
+        elif key in (ord("f"), ord("F"), curses.KEY_HOME):
+            self.set_zoom(0, width, body)
+        elif key in (ord("n"), ord(" ")):
+            self.step_frame(1)
+        elif key in (ord("p"), ord("N")):
+            self.step_frame(-1)
+        elif key in (ord("c"), ord("C")):
+            self.colour = not self.colour
+        elif key in (ord("g"), ord("G")):
+            self._toggle_graphics()
+        return True
 
     def _toggle_graphics(self) -> None:
         """Switch between the real pixels and the half-block drawing."""

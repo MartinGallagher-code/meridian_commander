@@ -36,7 +36,7 @@ import re
 from . import pdfobj, theme
 from .filesystems import FileSystem
 from .image import Image, ImageError
-from .util import read_key, truncate
+from .util import run_full_screen, truncate
 from .pdfobj import (
     Document,
     Lexer,
@@ -875,57 +875,53 @@ class PdfView:
                   name=f"{self.name} page {self.index + 1}").run(stdscr)
 
     def run(self, stdscr) -> None:
+        run_full_screen(self, stdscr)
+
+    def handle_key(self, key, stdscr, height: int, width: int) -> bool:
+        """Apply one key; False when it closes the document."""
         import curses
 
         from . import dialogs
 
-        curses.curs_set(0)
-        height, width = stdscr.getmaxyx()
-        win = curses.newwin(height, width, 0, 0)
-        win.keypad(True)
-        while True:
-            self.draw(win)
-            curses.doupdate()
-            height, width = stdscr.getmaxyx()
-            body_h = max(1, height - 2)
-            key = read_key(win)
-            self.notice = ""
-            if key in (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10):
-                break
-            elif key in (curses.KEY_DOWN, ord("j")):
-                self.scroll(1, body_h)
-            elif key in (curses.KEY_UP, ord("k")):
-                self.scroll(-1, body_h)
-            elif key == curses.KEY_NPAGE:
-                self.scroll(body_h, body_h)
-            elif key == curses.KEY_PPAGE:
-                self.scroll(-body_h, body_h)
-            elif key == curses.KEY_HOME:
-                self.top = 0
-            elif key == curses.KEY_END:
-                self.scroll(len(self.body()), body_h)
-            elif key in (9, ord("]"), curses.KEY_RIGHT):        # 9 = Tab
-                self.go_to(self.index + 1)
-            elif key in (curses.KEY_BTAB, ord("["), curses.KEY_LEFT):
-                self.go_to(self.index - 1)
-            elif key in (ord("i"), ord("I")):
-                self.show_image(stdscr)
-                curses.curs_set(0)
-            elif key in (ord("/"), curses.KEY_F7):
-                pattern = dialogs.prompt(stdscr, "Search",
-                                         "Find in document (smart case):",
-                                         default=self.search)
-                curses.curs_set(0)
-                if pattern is not None:
-                    self.search = pattern or ""
-                    if pattern and not self.find_next(1):
-                        self.notice = f" '{pattern}' not found "
-            elif key == ord("n"):
-                if self.search and not self.find_next(1):
-                    self.notice = " no match "
-            elif key in (ord("N"), ord("p")):
-                if self.search and not self.find_next(-1):
-                    self.notice = " no match "
+        body_h = max(1, height - 2)
+        self.notice = ""
+        if key in (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10):
+            return False
+        elif key in (curses.KEY_DOWN, ord("j")):
+            self.scroll(1, body_h)
+        elif key in (curses.KEY_UP, ord("k")):
+            self.scroll(-1, body_h)
+        elif key == curses.KEY_NPAGE:
+            self.scroll(body_h, body_h)
+        elif key == curses.KEY_PPAGE:
+            self.scroll(-body_h, body_h)
+        elif key == curses.KEY_HOME:
+            self.top = 0
+        elif key == curses.KEY_END:
+            self.scroll(len(self.body()), body_h)
+        elif key in (9, ord("]"), curses.KEY_RIGHT):        # 9 = Tab
+            self.go_to(self.index + 1)
+        elif key in (curses.KEY_BTAB, ord("["), curses.KEY_LEFT):
+            self.go_to(self.index - 1)
+        elif key in (ord("i"), ord("I")):
+            self.show_image(stdscr)
+            curses.curs_set(0)
+        elif key in (ord("/"), curses.KEY_F7):
+            pattern = dialogs.prompt(stdscr, "Search",
+                                     "Find in document (smart case):",
+                                     default=self.search)
+            curses.curs_set(0)
+            if pattern is not None:
+                self.search = pattern or ""
+                if pattern and not self.find_next(1):
+                    self.notice = f" '{pattern}' not found "
+        elif key == ord("n"):
+            if self.search and not self.find_next(1):
+                self.notice = " no match "
+        elif key in (ord("N"), ord("p")):
+            if self.search and not self.find_next(-1):
+                self.notice = " no match "
+        return True
 
 
 def is_pdf(name: str) -> bool:

@@ -6,7 +6,8 @@ Press **`C`** for the configuration menu:
   built-in editor (created with commented defaults on first use). `[ui] scheme`
   is the colour scheme; `[ui] editor` is the external editor `F4` should use
   (blank for the built-in one — see below); `[ui] panes` is how many panes
-  are on screen at start (below); `[ui] listing` is `long` for the mode and
+  are on screen at start (below); `[ui] open_in` is `pane` for `F3` and `F4`
+  to open in a pane (below); `[ui] listing` is `long` for the mode and
   owner columns (below); plug-ins read their settings from
   `[plugin:<name>]` sections; `[plugins] dirs` adds extra plug-in directories.
 - **Edit a plug-in file** lists every discovered plug-in file (built-in and
@@ -34,6 +35,25 @@ panes = 1
 Only `1` does this; anything else, blank included, is two panes. `z` and
 **Options ▸ Single pane** change it for the session and do not write the file,
 the way the hidden-files toggle does not.
+
+## `[ui] open_in` — F3 and F4 in a pane
+
+`screen`, the default, has `F3` and `F4` take the whole terminal until they
+close, as they always have. `pane` opens the viewer or the editor in a pane
+instead, alone at full width, with `z` (or `Ctrl-]` then `z`) to show the
+listing beside it — see
+[Viewing and editing in a pane](usage.md#viewing-and-editing-in-a-pane):
+
+```ini
+[ui]
+open_in = pane
+```
+
+Only `pane` does this; anything else, blank included, is full-screen. It covers
+the built-in viewer and editor, and an outside pager or editor set below,
+which then runs in the pane's terminal. **Options ▸ View and edit in a pane**
+switches it and writes the file, since it is a standing preference rather than
+a layout for the moment.
 
 ## `[ui] trash` — whether F8 offers the trash
 

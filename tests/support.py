@@ -79,6 +79,9 @@ class _StubScreen:
     def timeout(self, value):
         pass
 
+    def clearok(self, flag):
+        pass
+
 
 class _ScriptedDialogs:
     """Scripted stand-ins for the blocking dialogs.

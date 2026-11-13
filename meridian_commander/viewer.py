@@ -22,7 +22,7 @@ import curses
 
 from . import highlight, theme
 from .filesystems import FileSystem
-from .util import read_key
+from .util import run_full_screen
 
 MAX_VIEW_BYTES = 16 * 1024 * 1024  # 16 MiB safety cap
 
@@ -380,57 +380,58 @@ class Viewer:
 
     # -- interaction ------------------------------------------------------
     def run(self, stdscr) -> None:
+        run_full_screen(self, stdscr)
+
+    def handle_key(self, key, stdscr, height: int, width: int) -> bool:
+        """Apply one key; False when it closes the viewer.
+
+        ``height`` and ``width`` are the area the viewer is drawn in -- the
+        terminal full-screen, a pane in a pane -- and ``stdscr`` is the screen
+        a prompt opens over.
+        """
         from . import dialogs
 
-        curses.curs_set(0)
-        height, width = stdscr.getmaxyx()
-        win = curses.newwin(height, width, 0, 0)
-        win.keypad(True)
-        while True:
-            self.draw(win)
-            curses.doupdate()
-            height, width = stdscr.getmaxyx()
-            body_h = height - 2
-            key = read_key(win)
-            if key in (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10):
-                break
-            elif key in (curses.KEY_DOWN, ord("j")):
-                self._scroll(1, body_h)
-            elif key in (curses.KEY_UP, ord("k")):
-                self._scroll(-1, body_h)
-            elif key in (curses.KEY_NPAGE, ord(" ")):
-                self._scroll(body_h, body_h)
-            elif key == curses.KEY_PPAGE:
-                self._scroll(-body_h, body_h)
-            elif key == curses.KEY_HOME:
-                self.top = 0
-            elif key == curses.KEY_END:
-                self.top = max(0, len(self.lines) - body_h)
-            elif key == curses.KEY_LEFT:
-                self.left = max(0, self.left - 8)
-            elif key == curses.KEY_RIGHT:
-                self.left += 8
-            elif key in (ord("/"), curses.KEY_F7):
-                pattern = dialogs.prompt(stdscr, "Search",
-                                         "Find (smart case):",
-                                         default=self.search)
-                curses.curs_set(0)
-                if pattern is not None:
-                    self.set_search(pattern)
-                    if pattern:
-                        self.find_next(1)
-            elif key == ord("n"):
-                self.find_next(1)
-            elif key in (ord("N"), ord("p")):
-                self.find_next(-1)
-            elif key in (ord("l"), ord("L")):
-                self.show_line_numbers = not self.show_line_numbers
-            elif key in (ord("w"), ord("W")):
-                self.toggle_wrap()
-            elif key in (ord("c"), ord("C")) and self.language:
-                self.toggle_colour()
-            else:
-                self._other_key(key)
+        body_h = height - 2
+        if key in (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10):
+            return False
+        elif key in (curses.KEY_DOWN, ord("j")):
+            self._scroll(1, body_h)
+        elif key in (curses.KEY_UP, ord("k")):
+            self._scroll(-1, body_h)
+        elif key in (curses.KEY_NPAGE, ord(" ")):
+            self._scroll(body_h, body_h)
+        elif key == curses.KEY_PPAGE:
+            self._scroll(-body_h, body_h)
+        elif key == curses.KEY_HOME:
+            self.top = 0
+        elif key == curses.KEY_END:
+            self.top = max(0, len(self.lines) - body_h)
+        elif key == curses.KEY_LEFT:
+            self.left = max(0, self.left - 8)
+        elif key == curses.KEY_RIGHT:
+            self.left += 8
+        elif key in (ord("/"), curses.KEY_F7):
+            pattern = dialogs.prompt(stdscr, "Search",
+                                     "Find (smart case):",
+                                     default=self.search)
+            curses.curs_set(0)
+            if pattern is not None:
+                self.set_search(pattern)
+                if pattern:
+                    self.find_next(1)
+        elif key == ord("n"):
+            self.find_next(1)
+        elif key in (ord("N"), ord("p")):
+            self.find_next(-1)
+        elif key in (ord("l"), ord("L")):
+            self.show_line_numbers = not self.show_line_numbers
+        elif key in (ord("w"), ord("W")):
+            self.toggle_wrap()
+        elif key in (ord("c"), ord("C")) and self.language:
+            self.toggle_colour()
+        else:
+            self._other_key(key)
+        return True
 
     def _scroll(self, delta: int, body_h: int) -> None:
         self.notice = ""

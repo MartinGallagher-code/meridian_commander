@@ -19,7 +19,7 @@ import curses
 
 from . import theme
 from .filesystems import FileSystem
-from .util import ljust, read_key, rjust, truncate
+from .util import ljust, rjust, run_full_screen, truncate
 from .xlsx import Sheet, Workbook, column_name, read_workbook
 
 # Column widths are clamped into this range, then cycled by the "w" key: a
@@ -279,60 +279,56 @@ class SheetView:
         self.max_width = WIDTH_CHOICES[(position + 1) % len(WIDTH_CHOICES)]
 
     def run(self, stdscr) -> None:
+        run_full_screen(self, stdscr)
+
+    def handle_key(self, key, stdscr, height: int, width: int) -> bool:
+        """Apply one key; False when it closes the workbook."""
         from . import dialogs
 
-        curses.curs_set(0)
-        height, width = stdscr.getmaxyx()
-        win = curses.newwin(height, width, 0, 0)
-        win.keypad(True)
-        while True:
-            self.draw(win)
-            curses.doupdate()
-            height, width = stdscr.getmaxyx()
-            body_h = max(1, height - 3)
-            key = read_key(win)
-            self.notice = ""
-            if key in (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10):
-                break
-            elif key in (curses.KEY_DOWN, ord("j")):
-                self.row += 1
-            elif key in (curses.KEY_UP, ord("k")):
-                self.row -= 1
-            elif key in (curses.KEY_LEFT, ord("h")):
-                self.col -= 1
-            elif key in (curses.KEY_RIGHT, ord("l")):
-                self.col += 1
-            elif key == curses.KEY_NPAGE:
-                self.row += body_h
-            elif key == curses.KEY_PPAGE:
-                self.row -= body_h
-            elif key == curses.KEY_HOME:
-                self.col = 0
-            elif key == curses.KEY_END:
-                self.col = self.sheet.ncols - 1
-            elif key == ord("g"):
-                self.row = 0
-            elif key == ord("G"):
-                self.row = len(self.sheet.rows) - 1
-            elif key in (9, ord("]")):                  # 9 = Tab
-                self.switch_sheet(1)
-            elif key in (curses.KEY_BTAB, ord("[")):
-                self.switch_sheet(-1)
-            elif key in (ord("/"), curses.KEY_F7):
-                pattern = dialogs.prompt(stdscr, "Search",
-                                         "Find in sheet (smart case):",
-                                         default=self.search)
-                curses.curs_set(0)
-                if pattern is not None:
-                    self.set_search(pattern)
-                    if pattern and not self.find_next(1):
-                        self.notice = f" '{pattern}' not found "
-            elif key == ord("n"):
-                if self.search and not self.find_next(1):
-                    self.notice = " no match "
-            elif key in (ord("N"), ord("p")):
-                if self.search and not self.find_next(-1):
-                    self.notice = " no match "
-            elif key in (ord("w"), ord("W")):
-                self.cycle_width()
-            self._clamp()
+        body_h = max(1, height - 3)
+        self.notice = ""
+        if key in (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10):
+            return False
+        elif key in (curses.KEY_DOWN, ord("j")):
+            self.row += 1
+        elif key in (curses.KEY_UP, ord("k")):
+            self.row -= 1
+        elif key in (curses.KEY_LEFT, ord("h")):
+            self.col -= 1
+        elif key in (curses.KEY_RIGHT, ord("l")):
+            self.col += 1
+        elif key == curses.KEY_NPAGE:
+            self.row += body_h
+        elif key == curses.KEY_PPAGE:
+            self.row -= body_h
+        elif key == curses.KEY_HOME:
+            self.col = 0
+        elif key == curses.KEY_END:
+            self.col = self.sheet.ncols - 1
+        elif key == ord("g"):
+            self.row = 0
+        elif key == ord("G"):
+            self.row = len(self.sheet.rows) - 1
+        elif key in (9, ord("]")):                  # 9 = Tab
+            self.switch_sheet(1)
+        elif key in (curses.KEY_BTAB, ord("[")):
+            self.switch_sheet(-1)
+        elif key in (ord("/"), curses.KEY_F7):
+            pattern = dialogs.prompt(stdscr, "Search",
+                                     "Find in sheet (smart case):",
+                                     default=self.search)
+            curses.curs_set(0)
+            if pattern is not None:
+                self.set_search(pattern)
+                if pattern and not self.find_next(1):
+                    self.notice = f" '{pattern}' not found "
+        elif key == ord("n"):
+            if self.search and not self.find_next(1):
+                self.notice = " no match "
+        elif key in (ord("N"), ord("p")):
+            if self.search and not self.find_next(-1):
+                self.notice = " no match "
+        elif key in (ord("w"), ord("W")):
+            self.cycle_width()
+        self._clamp()
+        return True

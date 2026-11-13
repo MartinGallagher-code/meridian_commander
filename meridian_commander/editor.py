@@ -50,6 +50,13 @@ class Editor:
         #: ending rewritten because one character was typed into it.  (Not
         #: "newline": that is the Enter key's method.)
         self.line_ending = "\n"
+        #: How many times the buffer has been written, so a pane hosting the
+        #: editor can tell a save happened and reload the listing beside it.
+        self.saves = 0
+        #: Where the cursor was last drawn, in the window's own rows and
+        #: columns, or None when it is off the text area.  A pane puts the
+        #: terminal's cursor there; full-screen, ``win.move`` already has.
+        self.cursor_at: tuple[int, int] | None = None
         self._load()
 
     def _load(self) -> None:
@@ -100,6 +107,7 @@ class Editor:
             self.message = f"Save failed: {exc}"
             return False
         self.dirty = False
+        self.saves += 1
         self.message = f"Saved {len(data)} bytes"
         return True
 
@@ -241,8 +249,10 @@ class Editor:
         # Position the hardware cursor.
         scr_y = self.cy - self.top + 1
         scr_x = gutter + (col - self.left)
+        self.cursor_at = None
         if 1 <= scr_y < height - 1 and 0 <= scr_x < width:
             win.move(scr_y, scr_x)
+            self.cursor_at = (scr_y, scr_x)
         win.noutrefresh()
 
     # -- key handling -------------------------------------------------------
