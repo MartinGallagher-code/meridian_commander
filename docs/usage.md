@@ -1121,7 +1121,8 @@ pane holds that pane for as long as it runs, and closing the pane ends it;
   active pane's directory — the menu shows which that is. If it is running
   already you are asked whether to show it, start another, or cancel.
 - **Type a command…** asks for a command line and runs it in the active
-  pane's directory. Then it offers to save it to the list (`Esc` says no),
+  pane's directory. (In a pane listing find's hits, that is the directory
+  searched, whichever hit the cursor is on.) Then it offers to save it to the list (`Esc` says no),
   under a name and with a directory — the one it ran in, which you can clear
   so that it runs wherever the active pane is.
 - **Add…**, **Edit…** and **Delete…** keep the list: a name, a command line

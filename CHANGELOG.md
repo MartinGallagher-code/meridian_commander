@@ -25,7 +25,8 @@ own section here, so not every version below is published to PyPI.
   command…**, which runs a command line in the active pane's directory and
   offers to save it, and **Add…**, **Edit…** (in place, renaming included)
   and **Delete…** (after asking). The command line is run by your shell, so
-  pipes, `&&` and `$VARS` work. (MC-027)
+  pipes, `&&` and `$VARS` work. In a pane listing find's hits (1.22.0) the
+  active pane's directory is the one searched. (MC-027)
 - Each command has a terminal of its own, a pty in a process group of its
   own, whose output is read on a thread of its own — so a command that writes
   a lot never stops on a full terminal, whether a pane shows it or not, or a

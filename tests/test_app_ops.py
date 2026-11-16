@@ -1787,6 +1787,29 @@ def test_an_archive_pane_is_refused(app, stubs, tmp_path, monkeypatch):
     archive.close()
 
 
+def test_a_list_of_finds_hits_runs_it_in_the_directory_searched(
+        app, stubs, tmp_path, monkeypatch):
+    """A results list (MC-026) is a view of the directory searched, and the
+    pane's directory is still that one: a command runs there, whichever hit
+    the cursor is on."""
+    from meridian_commander.findfiles import collect_matches
+
+    root = str(tmp_path / "left")
+    write(str(tmp_path / "left" / "sub" / "deep" / "hit.tsv"), "x")
+    app.left.show_results("hit", *collect_matches(app.left.fs, root,
+                                                  "hit.tsv"))
+    app.left.move_to(next(i for i, e in enumerate(app.left.entries)
+                          if e.name == "sub/deep/hit.tsv"))
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Type a command..."],
+                                prompt=["pwd", None])
+    app.handle_key(ord("&"))
+    assert scripted.prompts[0] == f"Command to run in {root}:"
+    [command] = app.commands.commands
+    assert command.directory == root
+    assert wait_until(lambda: root in _shown(command))
+    app.commands.stop_all(0.5)
+
+
 def test_a_saved_command_with_a_directory_of_its_own_runs_from_anywhere(
         app, stubs, tmp_path, monkeypatch):
     saved_commands.save([SavedCommand("site", "fake-server",

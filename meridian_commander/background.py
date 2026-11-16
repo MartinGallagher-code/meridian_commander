@@ -62,6 +62,15 @@ JOIN_SECONDS = 2.0
 #: How often stopping looks again whether the group has gone.
 STEP_SECONDS = 0.02
 
+#: How long starting waits for the forked child to lead a process group of
+#: its own, which it does a moment after the fork returns.
+GROUP_SECONDS = 2.0
+
+#: How long a closing reader waits for the last of the output: the kernel
+#: hands a pty's output over a moment after the program writes it, and the
+#: last words of a program that has just been stopped are worth having.
+DRAIN_SECONDS = 0.2
+
 
 def duration(seconds: float) -> str:
     """A running time, the way the jobs list shows it: 45s, 3m07s, 2h05m."""
@@ -124,9 +133,26 @@ class Command:
     def start(self) -> None:
         """Start the program, and the thread that reads what it writes."""
         self.pid, self._fd = spawn(self.directory, self.argv)
+        self._await_group()
         self.set_size(self.screen.rows, self.screen.cols)
         _LIVE.add(self)
         self._thread.start()
+
+    def _await_group(self) -> None:
+        """Wait for the child to lead a process group of its own.
+
+        ``pty.fork()`` returns in the parent before the child has called
+        ``setsid()``.  A stop sent in that moment found no group of that
+        number, took the group for gone, and never signalled it again.
+        """
+        deadline = time.monotonic() + GROUP_SECONDS
+        while time.monotonic() < deadline:
+            try:
+                if os.getpgid(self.pid) == self.pid:
+                    return
+            except OSError:
+                return          # ended already: nothing left to wait for
+            time.sleep(0.001)
 
     # -- what the screen asks -------------------------------------------------
     def running(self) -> bool:
@@ -197,9 +223,10 @@ class Command:
             elif select.select([fd], [], [], POLL_SECONDS)[0]:
                 self._read(fd)
         # Asked to finish (it has been stopped): take what it said last.
-        for _ in range(16):
-            if self._eof or not self._read(fd):
-                break
+        deadline = time.monotonic() + DRAIN_SECONDS
+        while not self._eof and time.monotonic() < deadline:
+            if select.select([fd], [], [], POLL_SECONDS)[0]:
+                self._read(fd)
         with self.lock:
             os.close(fd)
             self._fd = None

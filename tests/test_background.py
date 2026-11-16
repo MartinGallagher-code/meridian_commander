@@ -181,6 +181,67 @@ def test_killing_waits_no_longer_than_it_should(monkeypatch):
     assert time.monotonic() - began < 1
 
 
+def test_starting_waits_for_the_childs_own_group(monkeypatch):
+    """Stopped the moment it starts, a command must still be found."""
+    command = _idle()
+    answers = [1, 1, command.pid]
+    monkeypatch.setattr(os, "getpgid", lambda pid: answers.pop(0))
+    command._await_group()
+    assert answers == []
+
+
+@pytest.mark.parametrize("answer", ["gone", "late"])
+def test_starting_does_not_wait_for_ever(monkeypatch, answer):
+    command = _idle()
+    if answer == "gone":
+        def getpgid(pid):
+            raise ProcessLookupError("no such process")
+    else:
+        def getpgid(pid):
+            return 1                       # never its own
+        monkeypatch.setattr(background, "GROUP_SECONDS", 0.05)
+    monkeypatch.setattr(os, "getpgid", getpgid)
+    began = time.monotonic()
+    command._await_group()
+    assert time.monotonic() - began < 1
+
+
+def test_a_closing_reader_takes_the_last_words_and_lets_go(tmp_path):
+    """Closed before it saw the end: what is still on its way is read, then
+    the terminal is closed -- by the reader, the one place that closes it."""
+    command = _idle()
+    read_end, write_end = os.pipe()
+    os.write(write_end, b"last words")
+    os.close(write_end)
+    command._fd = read_end
+    command._closing.set()
+    command._pump()                        # on this thread, to the end
+    assert "last words" in _text(command)
+    assert command._eof and command._fd is None
+    with pytest.raises(OSError):
+        os.fstat(read_end)
+
+
+def test_a_closing_reader_waits_only_a_moment(monkeypatch):
+    command = _idle()
+    read_end, write_end = os.pipe()        # open, and silent
+    monkeypatch.setattr(background, "DRAIN_SECONDS", 0.1)
+    command._fd = read_end
+    command._closing.set()
+    began = time.monotonic()
+    command._pump()
+    assert time.monotonic() - began < 1 and not command._eof
+    os.close(write_end)
+
+
+def test_stopped_the_moment_it_starts(started):
+    """The race the group wait is for, on a real fork."""
+    for _ in range(5):
+        command = started("fake-server")
+        command.stop(grace=1.0)
+        assert command.ended and process_gone(command.pid)
+
+
 def test_a_read_that_would_block_is_not_the_end(monkeypatch):
     command = _idle()
     answers = [OSError(errno.EAGAIN, "again"), OSError(errno.EIO, "gone")]
@@ -242,8 +303,8 @@ def test_a_command_starts_in_its_directory(started, tmp_path):
 def test_the_line_runs_as_at_a_prompt(started):
     command = started('X=piped; echo "a-$X" | tr - + && echo after')
     assert _ended(command)
-    assert _shows(command, "a+piped")
-    assert "after" in _text(command)
+    assert _shows(command, "after")
+    assert "a+piped" in _text(command)
 
 
 def test_the_programs_terminal_is_xterm_with_its_own_size(started):
@@ -253,7 +314,7 @@ def test_the_programs_terminal_is_xterm_with_its_own_size(started):
                       'stty size')
     assert _ended(command)
     assert _shows(command, "term=xterm-256color lines=unset")
-    assert "24 80" in _text(command)
+    assert _shows(command, "24 80")
 
 
 def test_the_exit_status_is_collected(started):
