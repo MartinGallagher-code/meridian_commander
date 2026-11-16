@@ -12,6 +12,60 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.23.0] — 2026-11-16
+
+### Added
+
+- **Commands in the background** (`&`, or **Command ▸ Background commands…**).
+  A long-running command — `python3 -m http.server`, a dev server,
+  `tail -f`, a watcher — runs in a directory you choose while both panes keep
+  working. The menu lists the saved commands alphabetically, each with a
+  letter of its own as the presets have, and starts one at once in its own
+  directory, or in the active pane's when it names none; then **Type a
+  command…**, which runs a command line in the active pane's directory and
+  offers to save it, and **Add…**, **Edit…** (in place, renaming included)
+  and **Delete…** (after asking). The command line is run by your shell, so
+  pipes, `&&` and `$VARS` work. (MC-027)
+- Each command has a terminal of its own, a pty in a process group of its
+  own, whose output is read on a thread of its own — so a command that writes
+  a lot never stops on a full terminal, whether a pane shows it or not, or a
+  dialog, the editor or the full-screen shell has the screen. Its screen and
+  the last 2,000 lines of history are kept. (MC-027)
+- Running commands are listed in the jobs list (`J`) after the copies and
+  moves, numbered `&1`, `&2`, with their state and directory. `Enter` shows
+  one's terminal in the pane, at the pane's size, with the `t` terminal's
+  emulator, keys and `Ctrl-]` menu: `Ctrl-]` `q` hides it again and leaves it
+  running, `Ctrl-]` `k` (or `k` in the list) stops it after asking. Stopping
+  ends the whole process group — `SIGTERM`, then `SIGKILL` two seconds later —
+  so a server's workers go with it. A command is shown in one pane at a time;
+  asking for it in the other pane moves it. (MC-027)
+- An ended command stays listed as `exited (status N)`, `killed (SIG…)` or
+  `stopped`, with its last screen and history still readable, until `d`
+  removes it or it is started again; the status line says when one ends, and
+  counts those running beside the jobs. (MC-027)
+- **Quitting** with commands running asks first, naming them, and stops them
+  all; so does an exception or `Ctrl-C` on the way out, with an `atexit`
+  safety net besides, so nothing Meridian started is left running after it.
+  (MC-027)
+- Saved commands live in `~/.config/meridian-commander/commands.ini`
+  (`$XDG_CONFIG_HOME` honoured), handled as `presets.ini` is: one section
+  each, alphabetical and re-sorted on the next write, `%` taken literally, bad
+  names refused. It starts empty, with `python3 -m http.server 8000` as an
+  example in its header, and is created readable by its owner only. (MC-027)
+- Commands run on this computer: from an SFTP, SSH, FTP or archive pane, a
+  typed command, or a saved one without a directory of its own, is refused
+  with a message saying so. (MC-027)
+
+### Changed
+
+- The pty the terminal plug-in starts its program on is forked by
+  `plugins.terminal.spawn()`, which the background commands use too, and its
+  size set by `plugins.terminal.set_size()`. No change in behaviour.
+- `App.run()` closes the backends however its loop ends, an exception
+  included.
+
+1.22.0 is MC-026's, in its own pull request; this one takes the next number.
+
 ## [1.21.0] — 2026-11-13
 
 ### Added
@@ -1151,6 +1205,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.23.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.22.0...v1.23.0
 [1.21.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.20.0...v1.21.0
 [1.20.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.18.0...v1.19.0
