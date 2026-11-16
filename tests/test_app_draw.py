@@ -205,6 +205,185 @@ def test_a_plugin_that_fails_in_a_pane_too_narrow_to_report_it(panes):
             prepare=lambda app: setattr(app.left, "plugin", _Broken()))
 
 
+# -- the terminal's cursor: the plug-in's screen_cursor() (MC-030) ------------
+#
+# Each frame ends by asking the active pane's plug-in where the terminal's
+# cursor goes.  The hook was looked up as ``cursor``, which the process and
+# container lists keep as their selected row, so ``0()`` ended the program
+# the moment either opened.  A plug-in is someone else's code, as its draw()
+# is: whatever its hook is or does, the frame is drawn and the program goes
+# on, with no cursor.
+
+class _CursorScreen(_StubScreen):
+    """A stub screen that records where the cursor is put, and refuses a
+    place off the screen as a real window does."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.moves: list[tuple] = []
+
+    def move(self, y, x):
+        height, width = self.getmaxyx()
+        if not (0 <= y < height and 0 <= x < width):
+            raise curses.error("wmove() returned ERR")
+        self.moves.append((y, x))
+
+
+class _Quiet:
+    """A plug-in as a third party might write it: no PanePlugin, only the
+    two methods the application has always called, and so no hook."""
+
+    def draw(self, stdscr, y, x, h, w):
+        pass
+
+    def handle_key(self, key):
+        return True
+
+
+class _Rows(_Quiet):
+    """A list browser keeping its selected row as ``cursor``, as Processes
+    and Containers do."""
+
+    def __init__(self, row=0):
+        self.cursor = row
+
+
+class _Placed(_Quiet):
+    """A plug-in whose hook answers ``answer``, or raises it."""
+
+    def __init__(self, answer):
+        self.answer = answer
+
+    def screen_cursor(self):
+        if isinstance(self.answer, BaseException):
+            raise self.answer
+        return self.answer
+
+
+@pytest.fixture
+def cursor_app(panes, monkeypatch):
+    """An app on a cursor-keeping stub screen, and the curs_set() calls.
+
+    curs_set() and doupdate() are the library's, not the screen's, and
+    refuse without an initialised screen (a2a2b53), so both are absorbed;
+    the visibility asked for is what is recorded.
+    """
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(panes / "config"))
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    shown: list[int] = []
+    monkeypatch.setattr(curses, "curs_set", shown.append)
+
+    def make(plugin):
+        app = App(_CursorScreen(), str(panes / "left"), str(panes / "right"))
+        app.left.plugin = plugin
+        app.active = app.left
+        return app, app.stdscr.moves, shown
+
+    return make
+
+
+@pytest.mark.parametrize("row", [0, 3])
+def test_a_plugin_keeping_its_selected_row_as_cursor_is_drawn(cursor_app,
+                                                              row):
+    app, moves, shown = cursor_app(_Rows(row))
+    app.draw()                       # 1.25.0: TypeError, and the program ends
+    app.draw()
+    assert moves == [] and shown == []
+    assert app.left.plugin.cursor == row          # its own state, untouched
+
+
+def test_a_plugin_without_the_hook_has_no_cursor(cursor_app):
+    app, moves, shown = cursor_app(_Quiet())
+    app.draw()
+    assert moves == [] and shown == []
+
+
+def test_a_hook_that_is_not_a_method_is_not_called(cursor_app):
+    plugin = _Quiet()
+    plugin.screen_cursor = (3, 4)    # a value, not something to call
+    app, moves, shown = cursor_app(plugin)
+    app.draw()
+    assert moves == [] and shown == []
+
+
+def test_a_hook_that_raises_means_no_cursor(cursor_app):
+    app, moves, shown = cursor_app(_Placed(RuntimeError("broken hook")))
+    app.draw()
+    assert moves == [] and shown == []
+
+
+@pytest.mark.parametrize("answer", [
+    None, "x", 5, (1,), (1, 2, 3), ("1", 2), (1.0, 2), [1, 2], (None, None),
+])
+def test_an_answer_that_is_not_a_place_means_no_cursor(cursor_app, answer):
+    app, moves, shown = cursor_app(_Placed(answer))
+    app.draw()
+    assert moves == [] and shown == []
+
+
+@pytest.mark.parametrize("spot", [(24, 0), (0, 80), (-1, 5), (999, 999)])
+def test_a_place_off_the_screen_means_no_cursor(cursor_app, spot):
+    app, moves, shown = cursor_app(_Placed(spot))
+    app.draw()
+    assert moves == [] and shown == []
+
+
+def test_the_cursor_goes_where_the_hook_says_and_is_hidden_after(cursor_app):
+    plugin = _Placed((5, 7))
+    app, moves, shown = cursor_app(plugin)
+    app.draw()
+    assert moves == [(5, 7)] and shown == [1]
+    plugin.answer = (6, 9)                       # it follows the hook
+    app.draw()
+    assert moves[-1] == (6, 9) and shown == [1, 1]
+    plugin.answer = None
+    app.draw()
+    assert shown == [1, 1, 0]                    # hidden once
+    app.draw()
+    assert shown == [1, 1, 0]                    # and then left alone
+
+
+@pytest.mark.parametrize("bad", [
+    RuntimeError("broken hook"), "x", (1,), (99, 0),
+])
+def test_a_hook_that_goes_wrong_hides_a_cursor_it_had_shown(cursor_app, bad):
+    plugin = _Placed((5, 7))
+    app, moves, shown = cursor_app(plugin)
+    app.draw()
+    plugin.answer = bad
+    app.draw()
+    assert moves == [(5, 7)] and shown == [1, 0]
+
+
+def test_closing_the_plugin_hides_its_cursor(cursor_app):
+    app, _, shown = cursor_app(_Placed((5, 7)))
+    app.draw()
+    app.left.plugin = None
+    app.draw()
+    app.draw()
+    assert shown == [1, 0]
+
+
+def test_a_place_off_a_real_screen_means_no_cursor(panes, monkeypatch):
+    # The refusal on a real window, which the stub screen above imitates.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(panes / "config"))
+    shown: list[int] = []
+    monkeypatch.setattr(curses, "curs_set", shown.append)
+    plugin = _Placed((3, 4))
+
+    def run(stdscr):
+        app = App(stdscr, str(panes / "left"), str(panes / "right"))
+        app.left.plugin = plugin
+        app.draw()
+        spot = stdscr.getyx()
+        plugin.answer = (30, 100)                 # below and right of 24x80
+        app.draw()
+        return spot
+
+    assert with_curses_screen(24, 80, run) == (3, 4)
+    assert shown == [1, 0]
+
+
 def test_a_listing_longer_than_the_pane_scrolls(panes):
     for i in range(60):
         write(str(panes / "left" / f"f{i:02d}.txt"), "x")

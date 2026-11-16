@@ -1063,6 +1063,45 @@ def test_the_editor_puts_the_terminals_cursor_where_it_types(files,
     assert shown[-3:] == [1, 0, 1]
 
 
+def test_the_editors_cursor_is_hidden_again_when_it_closes(files,
+                                                         monkeypatch):
+    # The hook is screen_cursor(), declared on PanePlugin, since MC-030; the
+    # editor answers it, a viewer does not, and closing hides the cursor
+    # once and then leaves it alone.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(files / "config"))
+    shown = []
+    real = curses.curs_set
+
+    def curs_set(visibility):
+        shown.append(visibility)
+        return real(visibility)
+
+    monkeypatch.setattr(curses, "curs_set", curs_set)
+
+    def script(app, snap):
+        pane = _edit(app)
+        for key in (curses.KEY_DOWN, *[curses.KEY_RIGHT] * 3):
+            app.handle_key(key)
+        app.draw()
+        placed = pane.screen_cursor(), app.stdscr.getyx(), shown[-1]
+        before = len(shown)
+        app.handle_key(curses.KEY_F10)           # nothing typed: it closes
+        assert app.right.plugin is None
+        app.draw()
+        app.draw()
+        closing = shown[before:]
+        viewer = _view(app)
+        app.draw()
+        return placed, closing, viewer.screen_cursor()
+
+    (hook, spot, last), closing, viewing = _on_screen(files, script)
+    # Line 1, column 3: below the pane's title, after the gutter.
+    assert hook == spot == (1 + 2, 3 + 3)
+    assert last == 1                             # shown there
+    assert closing == [0]                        # hidden once, then left
+    assert viewing is None                       # a viewer has none
+
+
 def test_the_view_draws_at_the_smallest_screen_and_through_a_resize(
         files, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(files / "config"))
@@ -1090,7 +1129,7 @@ def test_a_pane_too_small_to_hold_a_view_draws_nothing(app):
     pane.draw(None, 1, 0, 2, 80)
     pane.draw(None, 1, 0, 20, 7)
     assert pane._win is None
-    assert pane.cursor() is None
+    assert pane.screen_cursor() is None
 
 
 def test_an_outside_program_draws_its_own_caption(files, monkeypatch,

@@ -239,6 +239,23 @@ class PanePlugin:
         """
         raise NotImplementedError
 
+    def screen_cursor(self) -> tuple[int, int] | None:
+        """Where the terminal's cursor goes while this pane is the active one.
+
+        Asked at the end of every frame, after :meth:`draw`.  Return
+        ``(row, column)`` in screen coordinates -- the ones :meth:`draw` is
+        given, so ``(y + 1, x + 4)`` is inside the pane -- to show the cursor
+        there, as the editor in a pane does at the point where it types; or
+        ``None`` to leave it hidden.  The default returns ``None``: most
+        plug-ins highlight a row or a field themselves and have no cursor.
+
+        The name is the application's, so do not use it for anything else.
+        ``cursor`` is free, and the process and container lists keep their
+        selected row in it.  An answer that is not a pair of ints, a place
+        off the screen, or an exception from here, means no cursor.
+        """
+        return None
+
     # -- small drawing helper -------------------------------------------------
     @staticmethod
     def put(stdscr, y: int, x: int, w: int, text: str, attr: int | None = None,

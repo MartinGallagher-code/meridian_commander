@@ -11,13 +11,14 @@ import types
 
 import pytest
 
+from meridian_commander.app import App
 from meridian_commander.plugin_api import PluginContext
 from meridian_commander.plugins import processes as processes_mod
 from meridian_commander.plugins.processes import (
     ProcessesPlugin, _etime_seconds, parse_ps, PS_COLUMNS,
 )
 
-from support import with_curses_screen
+from support import _FakeRemoteBackend, _ScriptedDialogs, with_curses_screen
 
 
 RICH = PS_COLUMNS[0]
@@ -501,3 +502,61 @@ def test_draw_shows_the_error_when_there_is_nothing_to_list(local_ps):
 
 def test_draw_survives_a_tiny_pane(plugin):
     with_curses_screen(24, 62, lambda s: plugin.draw(s, 0, 0, 2, 10))
+
+
+# -- opened by the application (MC-030) -----------------------------------------
+
+#: A key from each of the plug-in's modes: move, sort, filter (kept with
+#: Enter), refresh, and the kill prompt, cancelled.
+EVERY_MODE = [curses.KEY_DOWN, ord("p"), ord("/"), ord("n"), ord("g"), 10,
+              ord("r"), curses.KEY_F8, 27]
+
+
+@pytest.mark.parametrize("remote", [False, True], ids=["local", "ssh"])
+def test_opened_from_the_menu_it_draws_through_every_mode(local_ps, tmp_path,
+                                                          monkeypatch,
+                                                          remote):
+    """The whole screen drawn after opening and after each key.
+
+    The tests above draw the plug-in into a window of its own.  The
+    application's draw() also asks the active pane's plug-in where the
+    terminal's cursor goes, and from 1.21.0 to 1.25.0 it took ``cursor`` --
+    this plug-in's selected row -- for that hook: ``0()`` ended the program
+    on the first frame.
+    """
+    local_ps()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr("os.kill",
+                        lambda *a: pytest.fail("should not have killed"))
+    for side in ("left", "right"):
+        (tmp_path / side).mkdir()
+    client = _FakeSSHClient()
+    _ScriptedDialogs(monkeypatch, menu=["Processes"])
+
+    def run(stdscr):
+        app = App(stdscr, str(tmp_path / "left"), str(tmp_path / "right"))
+        if remote:
+            app.left.fs = _FakeRemoteBackend()
+            app.left.fs._client = client
+        app._plugin_mode()
+        plugin = app.left.plugin
+        assert isinstance(plugin, ProcessesPlugin)
+        frames = []
+        for key in [None, *EVERY_MODE]:
+            if key is not None:
+                assert app.handle_key(key) is not False
+            app._tick_plugins()
+            app.draw()
+            frames.append("\n".join(stdscr.instr(row, 0).decode()
+                                     for row in range(24)))
+        return app, plugin, frames
+
+    # Wide enough for the command column in a half-width pane.
+    app, plugin, frames = with_curses_screen(24, 120, run)
+    assert app.left.plugin is plugin                 # still open
+    assert all("[processes]" in frame for frame in frames)
+    assert "python3" in frames[0] and "nginx" in frames[0]
+    assert "nginx" in frames[-1] and "python3" not in frames[-1]  # filtered
+    assert plugin.filter == "ng" and plugin.mode == "list"
+    if remote:
+        assert client.commands[0].startswith("ps -A")

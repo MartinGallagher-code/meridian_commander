@@ -24,6 +24,7 @@ import types
 
 import pytest
 
+from meridian_commander.app import App
 from meridian_commander.dialogs import accelerators
 from meridian_commander.plugin_api import PluginContext
 from meridian_commander.plugins import containers as containers_mod
@@ -480,6 +481,51 @@ def test_it_opens_from_the_menu_and_lists_running_containers(engines, app,
     ]
     app._tick_plugins()
     assert app.handle_key(27) is None and app.left.plugin is None
+
+
+def test_opened_from_the_menu_the_whole_screen_draws(engines, tmp_path,
+                                                    monkeypatch):
+    """The whole screen drawn after opening and after each key.
+
+    The tests here draw the plug-in into a window of its own.  The
+    application's draw() also asks the active pane's plug-in where the
+    terminal's cursor goes, and until 1.25.1 it took ``cursor`` -- this
+    plug-in's selected row -- for that hook: ``0()`` ended the program on
+    the first frame, every time Containers was opened (MC-030).
+    """
+    engines.install("podman")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    for side in ("left", "right"):
+        (tmp_path / side).mkdir()
+    _ScriptedDialogs(monkeypatch, menu=["Containers"])
+
+    def run(stdscr):
+        app = App(stdscr, str(tmp_path / "left"), str(tmp_path / "right"))
+        app._plugin_mode()
+        plugin = app.left.plugin
+        assert isinstance(plugin, ContainersPlugin)
+        frames = []
+        try:
+            # Everything, down a row, sorted, the images, and back.
+            for key in [None, ord("a"), curses.KEY_DOWN, ord("o"), ord("i"),
+                        ord("c")]:
+                if key is not None:
+                    assert app.handle_key(key) is not False
+                app._tick_plugins()
+                app.draw()
+                frames.append("\n".join(stdscr.instr(row, 0).decode()
+                                         for row in range(24)))
+            open_still = app.left.plugin is plugin
+        finally:
+            app._close_plugin(app.left)
+        return open_still, frames
+
+    open_still, frames = with_curses_screen(24, 100, run)
+    assert open_still
+    assert all("[containers] podman" in frame for frame in frames)
+    assert "web-1" in frames[0] and "stopped_one" not in frames[0]
+    assert "stopped_one" in frames[1]                 # a: all of them
+    assert "localhost/mybox" in frames[4]             # i: the images
 
 
 def test_the_caption_counts_what_the_engine_has(podman):
