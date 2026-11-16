@@ -325,6 +325,37 @@ def test_the_programs_terminal_is_xterm_with_its_own_size(started):
     assert _shows(command, "24 80"), _why(command)
 
 
+@pytest.fixture
+def exported_size(monkeypatch):
+    """LINES and COLUMNS in this process's environment, both ways they get
+    there: ``python`` sees ``os.environ``'s, while GNU readline (which
+    pytest imports) exports them behind its back, as ``os.putenv`` does."""
+    def export(how):
+        if how == "os.environ":
+            monkeypatch.setenv("LINES", "24")
+            monkeypatch.setenv("COLUMNS", "80")
+        else:
+            assert "LINES" not in os.environ
+            os.putenv("LINES", "24")
+            os.putenv("COLUMNS", "80")
+
+    yield export
+    os.unsetenv("LINES")
+    os.unsetenv("COLUMNS")
+
+
+@pytest.mark.parametrize("how", ["os.environ", "behind its back"])
+def test_the_program_is_not_given_lines_or_columns(started, exported_size,
+                                                   how):
+    """The size comes from the pty and follows the pane: a LINES or COLUMNS
+    from Meridian's own environment would pin the program to it -- one that
+    only the C library holds included, which ``os.environ.pop`` missed."""
+    exported_size(how)
+    command = started('echo "lines=${LINES-unset} columns=${COLUMNS-unset}"')
+    assert _ended(command), _why(command)
+    assert _shows(command, "lines=unset columns=unset"), _why(command)
+
+
 def test_the_last_words_before_the_end_are_kept(started):
     """Written after a while, just before the program ends: still read."""
     command = started("sleep 0.3; echo last-words-here")

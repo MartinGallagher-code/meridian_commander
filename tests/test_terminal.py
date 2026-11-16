@@ -739,6 +739,25 @@ def test_the_shell_is_told_the_terminal_it_has(local, monkeypatch):
     assert _wait_for(local, lambda: "term=xterm-256color" in _shown(local))
 
 
+def test_the_shell_is_not_given_lines_or_columns(local_ctx, monkeypatch):
+    """Not even ones only the C library holds: GNU readline exports both
+    when it starts, and ``os.environ`` never hears of them."""
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    os.putenv("LINES", "24")
+    os.putenv("COLUMNS", "80")
+    try:
+        plugin = TerminalPlugin(local_ctx)
+    finally:
+        os.unsetenv("LINES")
+        os.unsetenv("COLUMNS")
+    try:
+        _type(plugin, 'echo "lines=${LINES-unset} columns=${COLUMNS-unset}"')
+        assert _wait_for(plugin, lambda: "lines=unset columns=unset"
+                         in _shown(plugin))
+    finally:
+        plugin.on_exit()
+
+
 def test_escape_sequences_from_a_real_shell_reach_the_grid(local):
     _type(local, r"printf '\033[2J\033[3;5H\033[1;32mgreen\033[0m'")
 

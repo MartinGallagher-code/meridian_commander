@@ -397,8 +397,13 @@ def spawn(path: str, argv: list[str]) -> tuple[int, int]:
         os.environ["TERM"] = TERM
         # The size comes from the pty, and follows the pane; a LINES or
         # COLUMNS inherited from the outer shell would pin it instead.
-        os.environ.pop("LINES", None)
-        os.environ.pop("COLUMNS", None)
+        # unsetenv as well as the pop: GNU readline, once anything imports
+        # it, exports both into the C environment, where os.environ -- a
+        # copy taken at start-up -- never sees them, so the pop alone left
+        # them for the program.
+        for name in ("LINES", "COLUMNS"):
+            os.environ.pop(name, None)
+            os.unsetenv(name)
         try:
             os.execvp(argv[0], argv)
         except OSError as exc:

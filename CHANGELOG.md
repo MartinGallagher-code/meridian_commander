@@ -57,6 +57,16 @@ own section here, so not every version below is published to PyPI.
   typed command, or a saved one without a directory of its own, is refused
   with a message saying so. (MC-027)
 
+### Fixed
+
+- The terminal in a pane (`t`), and the outside pagers and editors run in
+  one, no longer hand the program a `LINES` or `COLUMNS` that only the C
+  library held. GNU readline, once anything in the process imports it,
+  exports both into the environment where Python's `os.environ` never sees
+  them, so removing them there missed them, and the program was pinned to
+  that size (24×80) instead of following the pane. They are now unset in
+  the child as well. Background commands start the same way. (MC-027)
+
 ### Changed
 
 - The pty the terminal plug-in starts its program on is forked by

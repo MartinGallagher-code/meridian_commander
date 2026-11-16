@@ -1852,7 +1852,9 @@ def test_the_jobs_list_shows_commands_and_their_state(app, running, tmp_path,
     assert JobsPane.lines_for_command(web) == (
         "&1. running   web: fake-server",
         f"    in {app.left.path}  up 3m07s")
-    once.finished = once.started + 2
+    # Exact times: (started + 2) - started is not always 2.0 in floating
+    # point, and the display truncates to whole seconds.
+    once.started, once.finished = 100.0, 102.0
     assert JobsPane.lines_for_command(once) == (
         "&2. exited (status 2) once: exit 2",
         f"    in {app.left.path}  ran 2s")
