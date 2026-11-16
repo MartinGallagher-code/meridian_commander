@@ -325,3 +325,32 @@ def test_a_new_size_gets_a_new_window(app):
     assert pane._window(screen, 1, 40, 20, 40) is first
     pane._window(screen, 1, 40, 22, 40)
     assert made == [(20, 40, 1, 40), (22, 40, 1, 40)]
+
+
+
+def test_a_table_saved_from_the_full_view_is_listed_after(app, files,
+                                                          monkeypatch):
+    from meridian_commander.tableview import TableView
+
+    from support import TAKE_DEFAULT, _ScriptedDialogs
+
+    opened = []
+
+    def run(view, stdscr):
+        opened.append(view)
+        view.handle_key(curses.KEY_F2, stdscr, 24, 80)
+
+    monkeypatch.setattr(TableView, "run", run)
+    monkeypatch.setattr(curses, "curs_set", lambda n: None)
+    _ScriptedDialogs(monkeypatch, prompt=[TAKE_DEFAULT])
+    _point_at(app.left, "runs.tsv")
+    app._quick_view()
+    pane = _quick(app)
+    pane.follow()
+    assert pane.handle_key(10) is True
+    # As F3 has it: the other pane -- the quick view's own -- is where a
+    # save goes when the table's directory cannot take it.
+    assert opened[0].elsewhere is app.right
+    assert (files / "left" / "runs.view.tsv").read_text() == \
+        "run\tms\n1\t20\n2\t30\n"
+    assert "runs.view.tsv" in [e.name for e in app.left.entries]

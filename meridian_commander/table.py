@@ -5,8 +5,9 @@
 This is the model behind :mod:`meridian_commander.tableview`: reading a file
 into records, bounded, and the view layer over them -- which rows a stack of
 filters keeps, the order a stack of sort keys puts them in, the display
-widths that line the columns up, and the summary of one column.  Nothing
-here draws, so all of it is tested without a screen.
+widths that line the columns up, the summary of one column, and the text a
+view is saved as (``F2``).  Nothing here draws, so all of it is tested
+without a screen.
 
 There are two ways of reading, and the file's name chooses between them:
 
@@ -220,6 +221,102 @@ def read_table(fs, path: str) -> Table:
     return Table(records[:limit], delimiter, quoted, truncated,
                  [delimiter.join(record) for record in preamble
                   if record != [""]])
+
+
+# -- writing a view ------------------------------------------------------------
+#: The format a saved view takes from its name: the delimiter, and whether
+#: cells are quoted.  The same rule as reading, so a file saved here opens in
+#: the browser exactly as it was saved.
+_WRITE = {".tsv": ("\t", False), ".tab": ("\t", False), ".psv": ("|", False),
+          ".csv": (",", True)}
+
+
+def format_for(name: str, delimiter: str, quoted: bool) -> tuple[str, bool]:
+    """The delimiter and quoting a view saved as ``name`` is written with.
+
+    ``.tsv`` and ``.tab`` are tab-separated and ``.psv`` pipe-separated, all
+    unquoted, as they are read; ``.csv`` is quoted, through :mod:`csv`.  Any
+    other name keeps ``delimiter`` and ``quoted``, the source's own.  So does
+    a ``.csv`` saved from a CSV: its delimiter was read off its first line,
+    and a CSV that a European spreadsheet separated with semicolons should
+    not come back separated with commas.
+    """
+    low = name.lower()
+    for suffix, (wanted, quote) in _WRITE.items():
+        if low.endswith(suffix):
+            if quote and quoted:
+                return delimiter, True
+            return wanted, quote
+    return delimiter, quoted
+
+
+def view_records(records: Sequence[Sequence[str]], order: Sequence[int],
+                 columns: Sequence[int], header: bool) -> list[list[str]]:
+    """What a view shows, as the records to write.
+
+    The header first when ``header`` (it is record 0), then the records in
+    ``order``, each cut down to ``columns`` -- the columns shown, left to
+    right.  Cells are taken as the file has them, not as the grid draws
+    them, and a short row stays short rather than being padded: with nothing
+    hidden, the rows come out exactly as they went in.
+    """
+    rows = ([0] if header else []) + list(order)
+    return [[records[index][column] for column in columns
+             if column < len(records[index])] for index in rows]
+
+
+class CellError(ValueError):
+    """A cell an unquoted format cannot hold: where it is, and what it holds.
+
+    ``row`` and ``column`` count in the records being written, from 0.
+    """
+
+    def __init__(self, row: int, column: int, holds: str) -> None:
+        super().__init__(f"record {row + 1}, field {column + 1} holds {holds}")
+        self.row = row
+        self.column = column
+        self.holds = holds
+
+
+def _csv_text(records: Iterable[Sequence[str]], delimiter: str) -> str:
+    # Each row is written ending "\r\n" and then made to end "\n".  csv quotes
+    # a cell holding a character of the line ending it was given, and, before
+    # Python 3.12, only those: given "\n", Python 3.9 leaves a lone "\r" bare,
+    # and the reader then ends the row there.  Given "\r\n", every version
+    # quotes both halves of a line break.
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=delimiter, lineterminator="\r\n")
+    lines = []
+    for record in records:
+        buffer.seek(0)
+        buffer.truncate()
+        writer.writerow(record)
+        lines.append(buffer.getvalue()[:-2] + "\n")
+    return "".join(lines)
+
+
+def serialise(records: Sequence[Sequence[str]], delimiter: str,
+              quoted: bool) -> str:
+    """``records`` as the text of a file separated by ``delimiter``.
+
+    Quoted, through :mod:`csv`, so a delimiter, quote or line break in a cell
+    survives.  Unquoted, a cell is written as it is: a ``"`` stays a ``"``,
+    as the browser reads it back -- and a cell holding the delimiter or a
+    line break cannot be written at all, since it would come back as two
+    cells or two rows.  That raises :class:`CellError` for the first such
+    cell, rather than mangling it.
+    """
+    if quoted:
+        return _csv_text(records, delimiter)
+    name = DELIMITER_NAMES.get(delimiter, repr(delimiter))
+    forbidden = ((delimiter, f"a {name}"), ("\n", "a line break"),
+                 ("\r", "a line break"))
+    for row, record in enumerate(records):
+        for column, value in enumerate(record):
+            for char, holds in forbidden:
+                if char in value:
+                    raise CellError(row, column, holds)
+    return "".join(delimiter.join(record) + "\n" for record in records)
 
 
 # -- display widths ------------------------------------------------------------

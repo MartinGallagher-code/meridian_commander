@@ -27,6 +27,10 @@ And the ways of finding one's way across a wide one:
   which ``Enter`` turns into a filter.
 - ``-`` hides the cursor's column, and ``+`` brings every hidden one back.
 
+And ``F2`` (or ``Ctrl-S``) saves what is on the screen as a file of its own:
+the rows the filters keep, in the sort's order, the columns not hidden, and
+the header while it is shown (:mod:`meridian_commander.saveview`).
+
 The keys the spreadsheet grid has mean the same here.  Reading, filtering,
 sorting and summarising live in :mod:`meridian_commander.table`; this module
 draws.
@@ -36,7 +40,7 @@ from __future__ import annotations
 
 import curses
 
-from . import theme
+from . import saveview, theme
 from .filesystems import FileSystem
 from .sheetview import (
     MIN_COL_WIDTH,
@@ -45,6 +49,8 @@ from .sheetview import (
     looks_numeric,
 )
 from .table import (
+    DELIMITER_NAMES,
+    CellError,
     Summary,
     Table,
     View,
@@ -53,13 +59,16 @@ from .table import (
     decimals,
     display_width,
     fit,
+    format_for,
     format_number,
     is_numeric,
     parse_filter,
     quick_filter,
     read_table,
+    serialise,
     shown_value,
     summarise,
+    view_records,
     wrap,
 )
 from .util import rjust, run_full_screen, truncate
@@ -71,8 +80,10 @@ QUIT_KEYS = (ord("q"), ord("Q"), 27, curses.KEY_F3, curses.KEY_F10)
 ENTER_KEYS = (10, 13, curses.KEY_ENTER)
 BACKSPACE_KEYS = (curses.KEY_BACKSPACE, 127, 8)
 
-FOOTER_KEYS = ("Enter row  [f]ilter  =/! this value  Bksp/0 unfilter  "
-               "[s]ort  [i] summary  [F]reeze  -/+ hide/show  [/]find  "
+# "=/! value" rather than "this value", so that F2 save is still on an
+# 80-column screen beside a short cell.
+FOOTER_KEYS = ("Enter row  [f]ilter  =/! value  Bksp/0 unfilter  [s]ort  "
+               "F2 save  [i] summary  [F]reeze  -/+ hide/show  [/]find  "
                "[H]eader  [c]olour  [w]idth  [#]comments  [q]uit")
 RECORD_KEYS = "Up/Down row  PgUp/PgDn scroll  Enter/q back to the table"
 SUMMARY_KEYS = ("Up/Down value  Enter/= keep its rows  ! hide them  "
@@ -150,6 +161,11 @@ class TableView:
         self._measured: dict[tuple[bool, int], tuple[list[int], list[bool],
                                                      list[int]]] = {}
         self._labels: dict[bool, list[str]] = {}
+        #: Where F2 offers to save when the file's own directory cannot be
+        #: written: the other pane, which the application sets.
+        self.elsewhere: saveview.Place | None = None
+        #: Every file F2 has written, so the application can list them.
+        self.saved: list[saveview.Written] = []
         self.table = self._load()
         self.ncols = self.table.ncols
         self.refresh()
@@ -467,6 +483,62 @@ class TableView:
         count = len(self.hidden)
         self.hidden.clear()
         self.notice = f" {_count(count, 'hidden column')} shown again "
+
+    # -- saving the view ---------------------------------------------------------
+    def save_view(self, stdscr) -> None:
+        """Save what is on the screen as a file of its own (``F2``).
+
+        The rows the filters keep, in the sort's order, the columns not
+        hidden, and the header while it is shown.  Frozen columns only stay
+        put while the rest scroll, so they are saved where they are.
+        """
+        if self.error:
+            self.notice = " nothing to save: the file could not be read "
+            return
+        if not self.order:
+            self.notice = " no rows to save "
+            return
+        columns = self.shown()
+        records = view_records(self.records, self.order, columns,
+                               header=bool(self.first))
+        notes: list[str] = []
+        caveat = ""
+        if self.table.truncated:
+            # The rows a filter kept are the rows it found among those read:
+            # a result that looks whole is not, and both places say so.
+            read = _count(self.data_rows(), "row")
+            notes.append(f"Only the {read} read can be saved: the file goes "
+                         f"on past them.")
+            caveat = f", from the first {read} only: the file goes on"
+        self.notice, written = saveview.save_as(
+            stdscr, self.fs, self.path, title="Save view",
+            what=saveview.shape(len(self.order), len(columns)),
+            base=self.name, tag="view",
+            render=lambda name: self._render(records, columns, name),
+            elsewhere=self.elsewhere, notes=notes, caveat=caveat)
+        if written is not None:
+            self.saved.append(written)
+
+    def _render(self, records: list[list[str]], columns: list[int],
+                name: str) -> bytes:
+        """The bytes of the view saved as ``name``, in the format it asks for.
+
+        Raises :class:`ValueError` naming the first cell the format cannot
+        hold, as the user knows it: the row's number and the column's name.
+        """
+        delimiter, quoted = format_for(name, self.table.delimiter,
+                                       self.table.quoted)
+        try:
+            return serialise(records, delimiter, quoted).encode("utf-8")
+        except CellError as exc:
+            header = bool(self.first)
+            row = ("the header" if header and exc.row == 0 else
+                   f"row {self.number(self.order[exc.row - header]):,}")
+            column = self.labels()[columns[exc.column]]
+            raise ValueError(
+                f"{row}, column {column}, holds {exc.holds}, which a "
+                f"{DELIMITER_NAMES[delimiter]}-separated file cannot hold; "
+                f"save it as .csv to keep it") from None
 
     # -- the column summary ------------------------------------------------------
     def open_summary(self) -> None:
@@ -925,6 +997,8 @@ class TableView:
             self._prompt_search(stdscr)
         elif key == ord("#"):
             self._show_comments(stdscr)
+        elif key in saveview.SAVE_KEYS:
+            self.save_view(stdscr)
         elif key == ord("n"):
             if self.search and not self.find_next(1):
                 self.notice = " no match "

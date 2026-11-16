@@ -12,6 +12,58 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.25.0] — 2026-11-16
+
+### Added
+
+- **Save the table's view as a file** (`F2`, or `Ctrl-S`, in the table
+  browser). What the screen shows is written as a new file: the rows the
+  filters keep, in the sort's order, the columns not hidden, and the header
+  row while it is shown. Frozen columns are saved in place, the `#` comment
+  lines above the table are left out, and cells are written as the file has
+  them, not as drawn. It asks for the name with one filled in —
+  `results.view.tsv` beside `results.tsv`, numbered (`results.view2.tsv`)
+  when taken — and `Esc` cancels. The name's extension sets the format:
+  `.tsv`/`.tab` tab-separated and `.psv` pipe-separated, unquoted, as the
+  browser reads them; `.csv` through the `csv` module, so a comma, quote or
+  line break stays in its cell (a `.csv` saved from a semicolon CSV keeps
+  its semicolons); any other name keeps the source's format. A cell a
+  `.tsv`/`.tab`/`.psv` cannot hold — its delimiter or a line break, which a
+  CSV cell can have — is not mangled: the save is refused, naming the first
+  such cell by row number and column name, and `.csv` is suggested. An
+  existing file is replaced only after a yes, and the file being browsed is
+  never written over, by any name (a link to it included). The footer then
+  says what was written ("wrote 1,204 rows × 7 columns to
+  results.view.tsv"), and the pane listing that directory shows the file —
+  at once when the table is in a pane, or when it closes, full-screen or
+  opened from quick view. (MC-029)
+- The file goes through the pane's own backend, so a view saves on SFTP, SSH
+  and FTP panes as on local ones; a write that fails, a remote close that
+  fails included, says why and leaves the table on the same view. Inside an
+  archive (a new file would rewrite the whole archive) or a local directory
+  you cannot write to, the other pane's directory is offered instead, with
+  the whole path and a line saying why; if that cannot be written either, it
+  says so. A table read only in part (`[truncated]`) can still be saved: the
+  prompt says only the rows read can be, and how many, and the footer
+  repeats it. (MC-029)
+- **The same key in the spreadsheet grid** saves the sheet on the screen —
+  not the others — as `<book>.<sheet>.tsv` (or `.csv`, `.psv`, by the name
+  given), with the values as the grid shows them and every row as wide as
+  the widest; a cell a `.tsv` cannot hold is named by its reference
+  (`B7`). (MC-029)
+- `dialogs.prompt` takes `notes`: lines said under the field, which the save
+  prompt uses for the truncated-table and other-pane caveats.
+
+### Changed
+
+- The table browser's footer reads `=/! value` rather than `=/! this value`,
+  so `F2 save` still fits on an 80-column screen beside a short cell.
+- `derive_output_path` (the `name.tag.ext` sibling, numbered if taken) and
+  `write_bytes` (a write whose failed close counts as a failure) moved from
+  `plugins/_tabular` and `plugins/_io` to the new core module `saveview`, so
+  the browsers need not import a plug-in module; the plug-ins hand them on
+  under their old names, so nothing that calls them changed.
+
 ## [1.24.0] — 2026-11-16
 
 ### Added
@@ -1297,6 +1349,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.25.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.24.0...v1.25.0
 [1.24.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.23.0...v1.24.0
 [1.23.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.22.0...v1.23.0
 [1.22.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.21.0...v1.22.0

@@ -3457,11 +3457,37 @@ class App:
             return
         try:
             view = viewer_for(panel.fs, target)
+            self._offer_elsewhere(view, panel)
             if not self._view_in_pane(view):
                 view.run(self.stdscr)
+                self._list_saved(view)
         except Exception as exc:
             dialogs.message(self.stdscr, "View error", str(exc), error=True)
         curses.curs_set(0)
+
+    def _offer_elsewhere(self, view, panel: Panel) -> None:
+        """Tell a browser that can save (F2) where else it may: the pane
+        opposite ``panel``, the one its file is listed in.
+
+        A table's view is saved beside the table, unless that directory
+        cannot take a new file -- inside an archive, or read-only -- and then
+        the other pane's directory is offered instead.
+        """
+        if hasattr(view, "elsewhere"):
+            view.elsewhere = self.right if panel is self.left else self.left
+
+    def _list_saved(self, view, since: int = 0) -> None:
+        """Refresh every pane listing a directory ``view`` has saved a file
+        into, counting from its ``since``-th save, so the new file shows.
+
+        A browser that writes nothing has no ``saved`` and changes nothing.
+        """
+        for fs, path in getattr(view, "saved", [])[since:]:
+            directory = fs.normpath(fs.dirname(path))
+            for panel in (self.left, self.right):
+                if same_place(panel.fs, fs) \
+                        and panel.fs.normpath(panel.path) == directory:
+                    panel.refresh()
 
     def _sole_file(self, panel) -> tuple[str | None, str]:
         """The one file a pane is offering, or ``None`` and why not.
@@ -4306,11 +4332,14 @@ class App:
             "  h              this pane becomes head + tail of the file the\n"
             "                 other pane is on, and follows its cursor;\n"
             "                 +/- more/fewer lines, Esc gives the pane back\n"
-            "  F3 on .xlsx    spreadsheet grid: Tab sheet, / find, w width\n"
+            "  F3 on .xlsx    spreadsheet grid: Tab sheet, / find, w width,\n"
+            "                 F2/Ctrl-S save the sheet as a .tsv (or .csv)\n"
             "  F3 on .tsv/.csv  table: f filter, =/! this value, Bksp/0\n"
             "                 unfilter, s sort, Enter row, H header, c colour,\n"
             "                 # the comment lines above the table, i column\n"
-            "                 summary, F freeze columns, -/+ hide/show columns\n"
+            "                 summary, F freeze columns, -/+ hide/show columns,\n"
+            "                 F2/Ctrl-S save the rows and columns shown as a\n"
+            "                 new file: .tsv .tab .psv or .csv, by its name\n"
             "  F3 on .docx    document view: headings, lists, tables, w wrap\n"
             "  F3 on .pptx    slide browser: Tab slide, t notes, / find\n"
             "  F3 on .md      markdown rendered; r shows the source\n"

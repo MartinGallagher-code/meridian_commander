@@ -37,7 +37,8 @@ the sync engine are written once and work across any pair of backends.
 | `browsers.py` | picks the browser for a file: grid, table, document, image or text |
 | `ooxml.py` | the Office Open XML package layer, shared by the readers |
 | `xlsx.py` / `sheetview.py` | stdlib `.xlsx` reader and the full-screen grid |
-| `table.py` / `tableview.py` | TSV/CSV reading, filters, sorting and column summaries, and the table browser |
+| `table.py` / `tableview.py` | TSV/CSV reading, filters, sorting, column summaries and the text a view is saved as, and the table browser |
+| `saveview.py` | saving a browser's view as a file (`F2`): the name offered, where it goes, the checks, the write through the pane's backend |
 | `docx.py` | stdlib `.docx` reader and the document viewer |
 | `pptx.py` | stdlib `.pptx` reader and the slide browser |
 | `markdown.py` | Markdown rendered to styled lines, and its viewer |

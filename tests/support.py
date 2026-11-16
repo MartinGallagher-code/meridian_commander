@@ -83,6 +83,10 @@ class _StubScreen:
         pass
 
 
+#: A scripted prompt answer that takes what the prompt offered, as Enter does.
+TAKE_DEFAULT = object()
+
+
 class _ScriptedDialogs:
     """Scripted stand-ins for the blocking dialogs.
 
@@ -105,6 +109,8 @@ class _ScriptedDialogs:
         self.menu_texts: list[str] = []   # the text each menu showed above
         self.prompts: list[str] = []
         self.prompt_toggles: list[list] = []   # the switches each prompt had
+        self.prompt_defaults: list[str] = []   # the answer each one offered
+        self.prompt_notes: list[list] = []     # the lines under each field
         self.messages: list[tuple] = []
         monkeypatch.setattr(dialogs, "menu", self._menu)
         monkeypatch.setattr(dialogs, "prompt", self._prompt)
@@ -121,8 +127,10 @@ class _ScriptedDialogs:
         return answer
 
     def _prompt(self, stdscr, title, label, default="", is_password=False,
-                toggles=None):
+                toggles=None, notes=None):
         self.prompts.append(label)
+        self.prompt_defaults.append(default)
+        self.prompt_notes.append(list(notes or []))
         self.prompt_toggles.append(
             [(t.label, t.on) for t in toggles] if toggles else [])
         if toggles and self.toggle_answers:
@@ -130,7 +138,8 @@ class _ScriptedDialogs:
             for toggle in toggles:
                 if toggle.label in wanted:
                     toggle.on = wanted[toggle.label]
-        return self.prompt_answers.pop(0)
+        answer = self.prompt_answers.pop(0)
+        return default if answer is TAKE_DEFAULT else answer
 
     def _confirm(self, stdscr, title, text, default_yes=False):
         self.messages.append((title, text, False))

@@ -154,8 +154,14 @@ class ViewPane(PanePlugin):
         if isinstance(self.view, ImageView) and key in FULL_SCREEN_KEYS:
             self._full_screen()
             return True
-        return bool(self.view.handle_key(key, self.ctx.app.stdscr,
-                                         height, width))
+        saved = len(getattr(self.view, "saved", ()))
+        going = bool(self.view.handle_key(key, self.ctx.app.stdscr,
+                                          height, width))
+        if len(getattr(self.view, "saved", ())) != saved:
+            # A view saved as a file (F2 in a table): the listing beside it
+            # shows the new file at once, as it shows an edit saved.
+            self.ctx.app._list_saved(self.view, saved)
+        return going
 
     def _menu_key(self, key: int | str):
         """The key after Ctrl-]: one of the pane's own commands."""

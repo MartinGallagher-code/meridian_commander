@@ -152,16 +152,21 @@ class Toggle:
 
 def prompt(stdscr, title: str, label: str, default: str = "",
            is_password: bool = False,
-           toggles: list[Toggle] | None = None) -> str | None:
+           toggles: list[Toggle] | None = None,
+           notes: list[str] | None = None) -> str | None:
     """Single-line text input.  Returns the string, or None if cancelled.
 
     ``toggles`` are switches listed under the field, each flipped by Ctrl and
     its key while the field is being typed into -- a letter on its own is
-    text, so it cannot be the key.
+    text, so it cannot be the key.  ``notes`` are lines said under them: what
+    the answer will mean, or a caveat about it -- the save of a table read
+    only in part says so there.
     """
     toggles = toggles or []
-    width = max(len(title) + 8, len(label) + 6, 50)
-    height = 5 + len(toggles)
+    notes = notes or []
+    width = max(len(title) + 8, len(label) + 6, 50,
+                *(len(note) + 6 for note in notes))
+    height = 5 + len(toggles) + len(notes)
     win = _center(stdscr, height, width)
     buf = list(default)
     pos = len(buf)
@@ -175,6 +180,9 @@ def prompt(stdscr, title: str, label: str, default: str = "",
                 mark = "x" if toggle.on else " "
                 text = f"[{mark}] {toggle.label}   Ctrl-{toggle.key.upper()}"
                 theme.paint(win, 3 + row, 3, text[: w - 6], "dialog")
+            room = max(0, win_h - 5 - len(toggles))
+            for row, note in enumerate(notes[:room], start=3 + len(toggles)):
+                theme.paint(win, row, 3, note[: w - 6], "dialog")
             field_w = w - 6
             shown = "".join("*" if is_password else c for c in buf)
             start = max(0, pos - field_w + 1)

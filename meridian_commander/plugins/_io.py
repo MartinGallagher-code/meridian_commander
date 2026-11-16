@@ -15,6 +15,10 @@ from __future__ import annotations
 
 import hashlib
 
+# Writing lives in the core, where the table browser's save (F2) uses it too;
+# it is handed on from here, so every plug-in keeps calling _io.write_bytes.
+from ..saveview import write_bytes as write_bytes
+
 CHUNK = 64 * 1024
 
 
@@ -53,25 +57,6 @@ def read_bytes(fs, path, *, max_bytes: int | None = None):
     finally:
         close(stream)
     return b"".join(chunks), truncated
-
-
-def write_bytes(fs, path, data: bytes) -> None:
-    """Write ``data`` to ``path`` through the filesystem backend.
-
-    ``close()`` is *not* swallowed here, unlike on the read side.  A remote
-    backend sends on close -- paramiko flushes there, and the FTP writer
-    raises there when the transfer failed -- so swallowing it turned a write
-    that never arrived into a plug-in reporting "changed a.txt" for a file it
-    had emptied.  A failure on the way in is only a closed handle; a failure
-    on the way out is the write.
-    """
-    stream = fs.open_write(path)
-    try:
-        stream.write(data)
-    finally:
-        closer = getattr(stream, "close", None)
-        if callable(closer):
-            closer()
 
 
 def hash_file(fs, path, algo: str) -> str:

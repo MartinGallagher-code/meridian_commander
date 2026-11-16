@@ -513,6 +513,36 @@ def test_a_prompt_switch_flips_with_ctrl_and_its_key(monkeypatch):
     assert keep.code == 16
 
 
+def test_a_prompt_says_its_notes_under_the_field_and_widens_for_them(
+        monkeypatch):
+    note = "Only the 50,000 rows read can be saved: the file goes on past them."
+    keep = dialogs.Toggle("Keep permissions", "p")
+    captured = scripted_menu(monkeypatch, [10])
+    answer = with_curses_screen(
+        24, 100, lambda s: dialogs.prompt(s, "Save view", "Save as:",
+                                          default="a.tsv", toggles=[keep],
+                                          notes=[note, "Second."]))
+    assert answer == "a.tsv"
+    window = captured["window"]
+    assert window.getmaxyx() == (5 + 1 + 2, len(note) + 6)
+    drawn = [d for d in window.drawn if len(d) > 2]
+    rows = {d[2]: d[0] for d in drawn if isinstance(d[2], str)}
+    # Under the switch, each on a line of its own.
+    assert rows["[x] Keep permissions   Ctrl-P"] == 3
+    assert rows[note] == 4 and rows["Second."] == 5
+
+
+def test_notes_that_do_not_fit_a_short_screen_are_left_out(monkeypatch):
+    captured = scripted_menu(monkeypatch, [27])
+    # Eight rows make a dialog six tall: the frame, the label, the field, the
+    # blank line above the frame, and room for one note.
+    with_curses_screen(
+        8, 70, lambda s: dialogs.prompt(s, "Save view", "Save as:",
+                                        notes=["one", "two", "three"]))
+    drawn = "\n".join(str(d) for d in captured["window"].drawn)
+    assert "'one'" in drawn and "'two'" not in drawn
+
+
 # -- the application -----------------------------------------------------------
 
 @pytest.fixture(autouse=True)
