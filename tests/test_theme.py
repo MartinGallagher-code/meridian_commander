@@ -344,6 +344,15 @@ def test_a_footer_sits_in_the_bottom_border():
     assert "╡ 12 items ╞" in rows[3]
 
 
+def test_a_footer_too_long_for_its_frame_leaves_the_corner():
+    """It was cut to the inner width but written from two columns in, so
+    a long footer -- a find result's path, in a narrow pane -- took the
+    bottom-right corner with it."""
+    rows = _screen(8, 40, lambda s: theme.frame(
+        s, 0, 0, 4, 12, "frame", footer="run_07/out/results.tsv  6"))
+    assert rows[3][:12] == "╚═╡ run_07/╝"
+
+
 def test_a_caption_too_long_for_its_frame_keeps_the_caption():
     rows = _screen(6, 40,
                    lambda s: theme.frame(s, 0, 0, 3, 14, "frame",

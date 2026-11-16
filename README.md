@@ -284,6 +284,15 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   panes included, cancellable) and get a **browsable result list**: view or
   edit a hit right from the list, or press Enter to jump the pane to the
   containing directory with the cursor on the file.
+- **Find results in a pane** (`p` in that list, or **Command ▸ Find files to
+  pane…**) — every hit from the whole tree, listed in the pane by its path
+  below the directory searched (`run_07/out/results.tsv`), where the pane's
+  own keys work on the real files: tag by pattern, filter, `F3`/`F4`, quick
+  view, `a`, `l`, `r`, `w`, `F8` to the trash, and `F5`/`F6` — in the
+  background too — which keep that path under the target, so run trees whose
+  every run has the same file names stay apart. Local, SFTP, SSH and FTP panes
+  and archives alike. `Ctrl-R` drops hits that have gone; `<` brings the
+  directory back. Midnight Commander calls it *panelize*.
 - **Find the space** (`u`) — every subdirectory shows what is under it instead
   of `<DIR>`, with a bar scaled to the biggest thing in the directory, so you
   follow the longest bar down the tree with `Enter` and end up standing in

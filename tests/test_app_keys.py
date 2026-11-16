@@ -69,6 +69,9 @@ class _RemoteLike:
     def rename(self, src, dst):
         self._local.rename(src, dst)
 
+    def chmod(self, path, mode):
+        self._local.chmod(path, mode)
+
 
 class _SftpLike(_RemoteLike, SFTPFileSystem):
     def label(self):
@@ -833,8 +836,9 @@ def test_find_files_jumps_to_a_result(app, tmp_path, monkeypatch):
 
 
 class _FakeBrowser:
-    def __init__(self, result):
+    def __init__(self, result, to_pane=False):
         self.result = result
+        self.to_pane = to_pane
 
     def run(self, stdscr):
         return self.result

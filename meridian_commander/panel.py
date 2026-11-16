@@ -7,6 +7,11 @@ directory within it.  It knows nothing about curses -- the application draws it
 -- but it holds all the state a pane needs: the sorted entries, where the
 highlight bar is, which items are tagged for a batch operation, and the scroll
 offset.  :class:`Search` is the type-to-jump search over a panel's listing.
+
+A panel can also hold a list of find results in place of its directory's
+listing (:meth:`Panel.show_results`): the hits from the whole tree under the
+directory, each named by its path below it.  :meth:`Panel.path_of` is how
+every action turns a listed name into a path, so they all work on either.
 """
 
 from __future__ import annotations
@@ -14,8 +19,8 @@ from __future__ import annotations
 import bisect
 import fnmatch
 import re
-from dataclasses import dataclass, field
-from typing import Callable, Optional
+from dataclasses import dataclass, field, replace
+from typing import Callable, Iterable, Optional
 
 from .filesystems import DirEntry, FileSystem
 from .usage import TreeSizer
@@ -32,6 +37,15 @@ HISTORY_LIMIT = 100
 
 #: The characters that make a filter a glob rather than a plain substring.
 GLOB_CHARS = "*?["
+
+
+def is_hidden(name: str) -> bool:
+    """Whether ``name`` is a dotfile, or -- a find result -- is inside one.
+
+    A hit's name is its path below the directory searched, so a dot at the
+    start of any part of it hides it, as the directory it is in would be.
+    """
+    return name.startswith(".") or "/." in name
 
 
 def name_matches(pattern: str, name: str) -> bool:
@@ -114,6 +128,15 @@ class Panel:
     #: elsewhere, F2 connecting it, Enter going into an archive.
     history: list[Place] = field(default_factory=list)
     future: list[Place] = field(default_factory=list)
+    #: The hits of a find, listed in place of the directory (MC-026), or
+    #: None for the directory's own listing.  Each is named by its path below
+    #: :attr:`path`, the directory searched.  Held rather than listed, so the
+    #: pane redraws, sorts and filters without asking the backend again;
+    #: :meth:`recheck` asks.
+    results: list[DirEntry] | None = None
+    #: What the find looked for, and whether it stopped at its cap.
+    results_pattern: str = ""
+    results_truncated: bool = False
 
     # ".." pseudo-entry so the user can always step up a directory.
     PARENT = ".."
@@ -135,13 +158,18 @@ class Panel:
         target = keep_name or self.current_name()
         fallback = self.cursor
         self.error = None
-        try:
-            entries = self.fs.listdir(self.path)
-        except Exception as exc:
-            entries = []
-            self.error = str(exc)
+        if self.results is not None:
+            # A list of find results is held, not listed: asking the backend
+            # about every hit is Ctrl-R's job (recheck), not every redraw's.
+            entries = list(self.results)
+        else:
+            try:
+                entries = self.fs.listdir(self.path)
+            except Exception as exc:
+                entries = []
+                self.error = str(exc)
         if not self.show_hidden:
-            entries = [e for e in entries if not e.name.startswith(".")]
+            entries = [e for e in entries if not is_hidden(e.name)]
         self.listed = self._sorted(entries)
         self.entries = self._filtered()
         # Drop selections for entries that no longer exist -- not for those a
@@ -208,7 +236,9 @@ class Panel:
     def start_sizing(self) -> None:
         """Begin measuring the subdirectories that have no total yet."""
         self.sizer = None
-        if not self.show_sizes:
+        if not self.show_sizes or self.results is not None:
+            # A list of find results is not measured: u refuses there, and
+            # the setting waits for the directory to come back.
             return
         if self._sized_fs is not self.fs:
             # Another backend: identity, not type, exactly as same_fs compares
@@ -263,7 +293,8 @@ class Panel:
         """
         if not entry.is_dir:
             return entry.size or 0
-        if entry.name == self.PARENT or not self.show_sizes:
+        if (entry.name == self.PARENT or not self.show_sizes
+                or self.results is not None):
             return None
         path = self.path_of(entry)
         if path in self.sizes:
@@ -295,7 +326,7 @@ class Panel:
             if self.sort_key == "natural":
                 return natural_key(e.name)
             if self.sort_key == "ext":
-                name = e.name
+                name = e.name.rsplit("/", 1)[-1]    # a hit's own name
                 dot = name.rfind(".")
                 return name[dot:].lower() if dot > 0 else ""
             return e.name.lower()
@@ -308,7 +339,9 @@ class Panel:
         return parent + dirs + files
 
     def _at_root(self) -> bool:
-        return self.fs.parent(self.path) == self.path
+        # A list of find results always has "..", its way back to the
+        # directory searched -- the root itself included.
+        return self.results is None and self.fs.parent(self.path) == self.path
 
     def _restore_cursor(self, name: str | None, fallback: int = 0) -> None:
         self.cursor = fallback
@@ -387,6 +420,8 @@ class Panel:
         return False
 
     def go_parent(self) -> bool:
+        if self.leave_results():
+            return True
         parent = self.fs.parent(self.path)
         leaving = self.fs.basename(self.path)
         if parent == self.path:
@@ -421,6 +456,7 @@ class Panel:
         here = self._here()
         old = self.path
         self.path = self.fs.normpath(self.resolve(path))
+        held = self._set_aside()
         self.selected.clear()
         self.filter = ""
         self.cursor = 0
@@ -432,6 +468,7 @@ class Panel:
             # listing is never empty on success (a readable directory still
             # carries the ".." entry), so the error alone is the signal.
             self.path = old
+            self._put_back(held)
             self.refresh()
             return False
         if self.path != old:
@@ -464,6 +501,7 @@ class Panel:
     def _point(self, fs: FileSystem, path: str,
                keep_name: str | None = None) -> bool:
         old_fs, old_path = self.fs, self.path
+        held = self._set_aside()
         self.fs = fs
         self.path = fs.normpath(path)
         self.selected.clear()
@@ -475,13 +513,189 @@ class Panel:
         if self.error:
             self.fs = old_fs
             self.path = old_path
+            self._put_back(held)
             self.refresh()
             return False
         return True
 
+    # -- a list of find results (MC-026) -------------------------------------
+    def show_results(self, pattern: str, matches, truncated: bool = False
+                     ) -> None:
+        """List find's hits in place of the directory they were found under.
+
+        ``matches`` are find's ``(relative path, DirEntry)`` pairs.  Each hit
+        is listed under its relative path, so tagging, the filter, sorting
+        and the search all work on it as on any name, and :meth:`path_of`
+        takes it to the real file.  :attr:`path` stays the directory
+        searched, and nothing is recorded in the history: the list is a view
+        of that directory, not a place of its own.
+        """
+        self.results = [replace(entry, name=rel) for rel, entry in matches]
+        self.results_pattern = pattern
+        self.results_truncated = truncated
+        self.selected.clear()
+        self.filter = ""
+        self.cursor = 0
+        self.top = 0
+        self.refresh()
+
+    def leave_results(self) -> bool:
+        """Show the directory searched again; False if this is not a list.
+
+        The cursor lands on the way to the hit it was on: ``run_07`` for
+        ``run_07/out/results.tsv``.
+        """
+        if self.results is None:
+            return False
+        name = self.current_name() or ""
+        self.results = None
+        self.selected.clear()
+        self.filter = ""
+        self.cursor = 0
+        self.top = 0
+        self.refresh(keep_name=name.split("/")[0])
+        return True
+
+    def _set_aside(self) -> tuple:
+        """Leave a list of find results for somewhere new; what to put back.
+
+        Every move -- :meth:`chdir`, :meth:`set_location`, going back or
+        forward -- leaves the list, and one that fails comes back to it.
+        """
+        held = (self.results, self.results_pattern, self.results_truncated)
+        self.results = None
+        return held
+
+    def _put_back(self, held: tuple) -> None:
+        self.results, self.results_pattern, self.results_truncated = held
+
+    def recheck(self, names: Iterable[str] | None = None) -> int:
+        """Ask the backend about the hits again; how many have gone.
+
+        The hits named in ``names`` and those inside them -- a directory
+        deleted or moved takes what was found in it -- or, with no names,
+        all of them.  Each directory that holds one is listed once -- the
+        question find itself asked, so a hit comes back just as find
+        described it, a link as a link -- rather than each hit asked about
+        alone, which on a server would be a round trip apiece.  A hit no
+        longer there, or in a directory that can no longer be listed, leaves
+        the list.  The listing is not rebuilt here; :meth:`reload` does both.
+        """
+        hits = self.results
+        if hits is None:
+            return 0
+        wanted = None if names is None else set(names)
+
+        def asked(name: str) -> bool:
+            parts = name.split("/")
+            return wanted is None or any(
+                "/".join(parts[:i]) in wanted for i in range(1, len(parts) + 1))
+
+        by_parent: dict[str, list[int]] = {}
+        for index, entry in enumerate(hits):
+            if asked(entry.name):
+                parent = entry.name.rpartition("/")[0]
+                by_parent.setdefault(parent, []).append(index)
+        fresh: dict[int, DirEntry | None] = {}
+        for parent, indexes in by_parent.items():
+            try:
+                listed = {e.name: e for e in self.fs.listdir(
+                    self.path_of(parent) if parent else self.path)}
+            except Exception:
+                listed = {}
+            for index in indexes:
+                name = hits[index].name
+                found = listed.get(name.rpartition("/")[2])
+                fresh[index] = None if found is None \
+                    else replace(found, name=name)
+        kept: list[DirEntry] = []
+        for index, entry in enumerate(hits):
+            now = fresh.get(index, entry)
+            if now is not None:
+                kept.append(now)
+        self.results = kept
+        return len(hits) - len(kept)
+
+    def reload(self, names: Iterable[str] | None = None,
+               keep_name: str | None = None) -> int:
+        """Refresh after a change, asking again about the hits it touched.
+
+        In a directory this is :meth:`refresh`.  In a list of find results
+        the hits in ``names`` -- all of them when it is ``None`` -- are asked
+        about first (:meth:`recheck`): those deleted or moved away leave the
+        list, the rest show their new size, time or mode.  Returns how many
+        left it.
+        """
+        gone = self.recheck(names) if self.results is not None else 0
+        self.refresh(keep_name=keep_name)
+        return gone
+
+    def result_name(self, typed: str) -> str | None:
+        """The name a path typed in a list of find results is listed by.
+
+        Taken from the directory searched, as any typed name is; ``None``
+        when it lands outside that directory, where the list has no name
+        for it.
+        """
+        root = self.fs.normpath(self.path).rstrip(self.fs.sep) + self.fs.sep
+        full = self.fs.normpath(self.resolve(typed))
+        if not full.startswith(root):
+            return None
+        return full[len(root):].replace(self.fs.sep, "/")
+
+    def add_result(self, name: str) -> bool:
+        """List ``name``, made under the directory searched; True if it is there.
+
+        Asked about like any other hit, so nothing that is not there is
+        listed.  A list of find results only.
+        """
+        hits = self.results
+        assert hits is not None
+        if all(entry.name != name for entry in hits):
+            hits.append(DirEntry(name=name, is_dir=False))
+        self.recheck([name])
+        return any(entry.name == name for entry in self.results or ())
+
+    def rename_result(self, old: str, new: str) -> None:
+        """The hit ``old`` is now called ``new``: list it under that name.
+
+        What was found inside it, a directory, moves with it.  Anything
+        listed as ``new`` already was replaced by the rename, so it goes; the
+        hit is then asked about under its new name.
+        """
+        hits = self.results
+        assert hits is not None
+        inside = old + "/"
+        self.results = [
+            replace(entry, name=new + entry.name[len(old):])
+            if entry.name == old or entry.name.startswith(inside) else entry
+            for entry in hits if entry.name != new]
+        self.recheck([new])
+
+    @staticmethod
+    def outermost(entries: list[DirEntry]) -> list[DirEntry]:
+        """``entries`` less any that are inside another of them, a directory.
+
+        Only a list of find results can hold both a directory and something
+        in it.  What is inside goes with its directory -- copied, moved or
+        deleted as part of it -- so taking it again on its own would copy
+        it twice, or fail to find what had already gone.
+        """
+        dirs = {e.name for e in entries if e.is_dir and not e.is_symlink}
+
+        def inside(name: str) -> bool:
+            parts = name.split("/")
+            return any("/".join(parts[:i]) in dirs
+                       for i in range(1, len(parts)))
+
+        return [e for e in entries if not inside(e.name)]
+
     # -- history ------------------------------------------------------------
     def _here(self) -> Place:
-        return (self.fs, self.path, self.current_name())
+        # In a list of find results the place is the directory searched, and
+        # the cursor goes back to the way to the hit it was on.
+        name = self.current_name()
+        return (self.fs, self.path, name.split("/")[0] if name else None)
 
     def _left(self, place: Place) -> None:
         """``place`` has just been left for somewhere new."""
@@ -501,7 +715,12 @@ class Panel:
         gets each place's backend first and answers the one to use, or
         ``None`` for a backend that is gone: it is how an archive that was
         closed after the pane left it is opened again.
+
+        From a list of find results it is the directory searched: the list is
+        a view of that directory, not a place of its own.
         """
+        if self.leave_results():
+            return True
         return self._travel(self.history, self.future, revive)
 
     def forward(self, revive: Callable[[FileSystem], FileSystem | None]

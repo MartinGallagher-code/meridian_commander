@@ -648,10 +648,16 @@ def test_only_path_of_joins_a_pane_to_a_listed_name():
     import inspect
     import re
 
-    from meridian_commander import app, panel, peek, quickview
+    from meridian_commander import app, jobs, panel, peek, quickview
 
     pattern = re.compile(
         r"\.join\(\s*[\w.]*(?:\.path|_path)\s*,\s*[\w.]*name\s*\)")
     for module in (app, panel, peek, quickview):
         assert pattern.findall(inspect.getsource(module)) == [], \
             module.__name__
+    # Nor a target, or a job's source, from a name handed over whole: a find
+    # result keeps its path below the directory it was found in, and that
+    # path is split and joined part by part, wherever it goes.
+    whole = re.compile(r"\.join\(\s*[\w.]+\s*,\s*(?:[\w.]*\.name|name)\s*\)")
+    for module in (app, jobs, panel, peek, quickview):
+        assert whole.findall(inspect.getsource(module)) == [], module.__name__
