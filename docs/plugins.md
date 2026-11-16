@@ -30,8 +30,8 @@ out:
 
 Typing still works exactly as it always did; the menu just builds the same line
 for you. Plug-ins whose input is genuinely free text (Find, Grep, JSON push,
-Run remote script) have no menu, and the three that already run on keys
-(Terminal, Processes, Provost data) never needed one.
+Run remote script) have no menu, and the four that already run on keys
+(Terminal, Processes, Containers, Provost data) never needed one.
 
 ## Built-in plug-ins
 
@@ -43,6 +43,14 @@ Run remote script) have no menu, and the three that already run on keys
   over the pane's SSH connection. Auto-refreshing; sort with `c`/`m`/`t`/`p`/
   `n`/`u`, filter with `/`, and kill the process under the cursor with
   `F8`/`k`/`Del` (choosing TERM, KILL, HUP or INT).
+- **Containers** — Podman or Docker on this machine: the downloaded images
+  and the containers, running ones first (`a` adds the stopped ones), one key
+  apart (`i` and `c`). `Enter` opens a shell inside a running container in
+  the pane's terminal, `p` pulls an image by name, `f` searches the
+  registries, `s` starts or stops a container, `R` restarts it and `F8`
+  removes a container or an image after asking. Auto-refreshing; filter with
+  `/`, sort with `o`. Local panes only. See
+  [Containers](usage.md#containers-podman-and-docker) in the usage guide.
 - **Find in other pane** — recursively search the other pane's directory by
   glob pattern (works on remote panes too).
 - **Grep in other pane** — the content-search sibling of Find: recursively

@@ -112,3 +112,26 @@ of `less -Ps%f`, an editor of `vim -c "set titlestring=%f"` and a saved
 location under `/srv/reports/100%complete` all mean what they say. Both files
 are read with INI interpolation switched off, since every value in them is a
 literal rather than a template.
+
+## `[plugin:containers]` — Podman or Docker
+
+The [Containers](usage.md#containers-podman-and-docker) plug-in reads four
+settings, shown here with their defaults:
+
+```ini
+[plugin:containers]
+# auto: Podman if it is installed, otherwise Docker; or podman, or docker
+engine = auto
+# seconds between automatic refreshes of the lists
+refresh = 3
+# seconds a listing or a registry search may take
+timeout = 10
+# how many results a registry search asks for
+search_limit = 25
+```
+
+Comments go on lines of their own: a `;` after a value is part of the value.
+An `engine` that is not installed stops the plug-in from opening, with a
+message naming it. Starting, stopping, restarting and removing are not bound
+by `timeout`: they run in the background and may take up to two minutes,
+since stopping waits out the container's grace period.

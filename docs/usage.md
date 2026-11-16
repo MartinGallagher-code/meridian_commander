@@ -1090,6 +1090,98 @@ A pane is half the screen, and a few programs assume 80 columns. `!` hands a
 program the whole real terminal instead: full width, true colour and the
 outer terminal's own mouse handling.
 
+## Containers: Podman and Docker
+
+**Containers** (`p`, then `l`) puts this machine's Podman or Docker in the
+active pane: what you have downloaded, what is running, a way to download
+more, and a way into a running container. It runs the `podman` or `docker`
+command line, the same commands you would type, and nothing else: no SDK and
+no talking to a socket, so it sees exactly what your own `podman` or
+`docker` sees.
+
+It works on **local panes only**. An SFTP, SSH, FTP or archive pane is
+refused with a message, and nothing is run.
+
+**Two lists, one key apart.**
+
+- **Containers** (`c`, where it opens): name, status, image and published
+  ports. The running ones are listed; `a` adds the stopped ones, and `a`
+  again hides them.
+- **Images** (`i`): repository, tag, short ID, age and size — what
+  `podman images` or `docker images` lists. An image with two names is
+  listed under each.
+
+The lists refresh by themselves every few seconds and keep the cursor on the
+same container or image (by its ID) as they do. `/` filters (on the name,
+the image, the ID or the status; `Esc` clears it), `o` sorts by the next
+column and `O` reverses the order. `r` refreshes at once. `?` lists every
+key.
+
+**Getting into a container.** `Enter` on a running container opens a shell
+inside it — `podman exec -it ID sh` — in the pane's own terminal, the one
+`t` opens. It has all that terminal's keys: `Ctrl-]` then `Tab` for the
+other pane, `z` to zoom, `q` to close, `PgUp` to scroll back. Leaving the
+shell (`exit`, `Ctrl-D`) brings the list back. On a stopped container it says
+so instead (`s` starts it). If the container has no `sh` — a distroless or
+`scratch` image — or the shell ends with an error, the engine's message stays
+on the screen until you press a key.
+
+**Downloading.** `p` asks for an image name in the pane's footer
+(`quay.io/podman/hello`, `alpine:3.20`, `docker.io/library/nginx`) and pulls
+it in the pane's terminal, with the engine's own progress. When it ends, the
+images list comes back with the new image under the cursor. If the pull
+fails — a name that does not exist, no network, a short name with no
+registry to look in — the error stays on the screen until you press a key.
+Podman asks *which registry* a short name should come from when more than one
+could serve it; that question is asked in the terminal, where you can answer
+it.
+
+**Finding something to download.** `f` asks for a search term and lists what
+the registries return, name and description, in their own order. `Enter` on
+a result pulls it; `Esc` goes back to the images. Podman searches the
+registries named under `unqualified-search-registries` in
+`/etc/containers/registries.conf` (or `~/.config/containers/registries.conf`);
+when none is named it finds nothing, so name the registry in the term:
+`quay.io/alpine`. Docker searches Docker Hub only.
+
+**Managing.** Each of these asks first in the footer, naming the item by its
+name and ID; `Enter` or `y` goes ahead, `Esc` (or any other key) cancels. The
+result is shown in the footer and on the status line.
+
+| Key | On | Does |
+|---|---|---|
+| `s` | a container | start it if it is stopped, stop it if it is running |
+| `R` | a container | restart it |
+| `F8`, `Del` | a container | remove it — refused while it is running: stop it first |
+| `F8`, `Del` | an image | remove it; an image listed under several names loses only the name under the cursor |
+
+These run in the background, so the list stays usable while a container takes
+its ten seconds to stop. Nothing is ever forced and nothing deletes in bulk:
+when the engine refuses — an image a container still uses — its message is
+what you see.
+
+**Which engine.** Podman if it is installed, otherwise Docker; `engine =` under
+[`[plugin:containers]`](configuration.md#plugincontainers--podman-or-docker)
+chooses one. With neither installed the plug-in does not open, and says so.
+If the engine is installed but cannot be reached, the pane shows the engine's
+own message and that `r` retries, and stops refreshing by itself until you
+do. That happens while Podman's virtual machine is stopped on macOS
+(`podman machine start`), while Docker's daemon is not running, or when you
+have no permission on Docker's socket (join the `docker` group, or run
+Docker rootless). Every listing has a time limit, so a daemon that has hung
+cannot freeze the file manager.
+
+**Rootless and rootful.** The lists are what *your* `podman` or `docker`
+sees. Rootless Podman lists only your own images and containers;
+`sudo podman` keeps a separate set, which this pane does not show.
+
+**Safe with any name.** Every command is run as a list of arguments, never
+through a shell, and containers and images are acted on by their IDs. A name
+you type is pulled only if it is an image name (letters, digits and
+`._/:@+-`, starting with a letter or digit), so nothing typed can run a
+command or be read as an option; a search term is passed after `--` for the
+same reason.
+
 ## Searching a pane by name
 
 In a pane almost every key is a hotkey — `d` deletes, `q` quits, `8` is `F8` —
