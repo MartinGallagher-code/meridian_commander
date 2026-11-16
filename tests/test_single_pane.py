@@ -485,6 +485,7 @@ def test_load_errors_still_say_both_panes_are_on_screen(single, monkeypatch):
 
 
 @pytest.mark.parametrize("module, cls", [
+    ("containers", "ContainersPlugin"),
     ("processes", "ProcessesPlugin"),
     ("json_push", "JsonPush"),
     ("run_remote_script", "RunRemoteScript"),
@@ -502,8 +503,8 @@ def test_the_built_ins_that_ignore_the_other_pane_say_so(module, cls):
 def test_every_other_built_in_is_given_both_panes():
     from meridian_commander.plugins import discover
 
-    alone = {"Processes", "JSON push", "Run remote script", "SSH doctor",
-             "Terminal"}
+    alone = {"Containers", "Processes", "JSON push", "Run remote script",
+             "SSH doctor", "Terminal"}
     classes, _errors = discover()
     for cls in classes:
         assert cls.uses_other_pane is (cls.name not in alone), cls.name

@@ -315,6 +315,14 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   `PgUp` scrolls back through what went off the top (so does the mouse
   wheel). Exiting the shell closes it too. `!` still hands a program the
   whole real terminal instead.
+- **Containers** (`p`, then `l`) — Podman or Docker in a pane: the images you
+  have downloaded and the containers that are running (and the stopped ones,
+  on `a`). `Enter` opens a shell inside a running container in the pane's own
+  terminal; `p` pulls an image by name and `f` finds one in the registries,
+  with the engine's progress on screen; `s` starts or stops a container, `R`
+  restarts it and `F8` removes a container or an image, each after asking.
+  Local panes; Podman is used when both are installed. See
+  [Containers](https://meridian-commander.readthedocs.io/en/latest/usage.html#containers-podman-and-docker).
 - **Mouse support** — click to select, double-click to open, wheel to scroll,
   and **right-click for a context menu** of actions (view, edit, copy, move,
   rename, delete, tag, mkdir, new file, compare, head+tail, terminal).
