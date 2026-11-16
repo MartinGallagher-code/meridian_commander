@@ -370,6 +370,60 @@ ASCII_BOX.update({ord(k): v for k, v in {
 }.items()})
 
 
+# -- the process ---------------------------------------------------------------
+
+def spawn(path: str, argv: list[str]) -> tuple[int, int]:
+    """Fork a pty running ``argv`` in ``path``: ``(pid, master fd)``.
+
+    The child is the leader of a session of its own, with the pty as its
+    controlling terminal, so ``Ctrl-C`` typed into the pty reaches it and
+    ``os.killpg(pid, ...)`` reaches everything it starts.  The master is
+    non-blocking.  The pane's terminal and the background commands of
+    :mod:`meridian_commander.background` both start their programs here, so
+    the forked child below is the one block in the tree no tracer can see.
+    """
+    import fcntl
+    import pty
+
+    pid, fd = pty.fork()
+    # pragma: no cover -- this branch runs only in the forked child, which
+    # replaces its own process image with the shell a few lines later, so
+    # no in-process coverage tracer can ever observe it.
+    if pid == 0:  # child  # pragma: no cover
+        try:
+            os.chdir(path)
+        except OSError:
+            pass
+        os.environ["TERM"] = TERM
+        # The size comes from the pty, and follows the pane; a LINES or
+        # COLUMNS inherited from the outer shell would pin it instead.
+        # unsetenv as well as the pop: GNU readline, once anything imports
+        # it, exports both into the C environment, where os.environ -- a
+        # copy taken at start-up -- never sees them, so the pop alone left
+        # them for the program.
+        for name in ("LINES", "COLUMNS"):
+            os.environ.pop(name, None)
+            os.unsetenv(name)
+        try:
+            os.execvp(argv[0], argv)
+        except OSError as exc:
+            # On the pane's own screen, where whoever asked for it is
+            # looking, rather than nowhere.
+            os.write(2, f"{argv[0]}: {exc.strerror}\r\n".encode())
+        os._exit(127)
+    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+    fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+    return pid, fd
+
+
+def set_size(fd: int, rows: int, cols: int) -> None:
+    """Tell the pty on ``fd`` its size; the program gets a SIGWINCH."""
+    import fcntl
+    import termios
+
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+
+
 # -- the plug-in ---------------------------------------------------------------
 
 class TerminalPlugin(PanePlugin):
@@ -417,35 +471,8 @@ class TerminalPlugin(PanePlugin):
 
     def _start_local(self, path: str, command: list[str] | None = None) -> None:
         """Fork a pty running ``command`` in ``path``: the shell by default."""
-        import fcntl
-        import pty
-
         argv = command or [os.environ.get("SHELL", "/bin/sh")]
-        pid, fd = pty.fork()
-        # pragma: no cover -- this branch runs only in the forked child, which
-        # replaces its own process image with the shell a few lines later, so
-        # no in-process coverage tracer can ever observe it.
-        if pid == 0:  # child  # pragma: no cover
-            try:
-                os.chdir(path)
-            except OSError:
-                pass
-            os.environ["TERM"] = TERM
-            # The size comes from the pty, and follows the pane; a LINES or
-            # COLUMNS inherited from the outer shell would pin it instead.
-            os.environ.pop("LINES", None)
-            os.environ.pop("COLUMNS", None)
-            try:
-                os.execvp(argv[0], argv)
-            except OSError as exc:
-                # On the pane's own screen, where whoever asked for it is
-                # looking, rather than nowhere.
-                os.write(2, f"{argv[0]}: {exc.strerror}\r\n".encode())
-            os._exit(127)
-        self._pid = pid
-        self._fd = fd
-        flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-        fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+        self._pid, self._fd = spawn(path, argv)
 
     def _start_remote(self, fs, path: str) -> None:
         client = getattr(fs, "_client", None)
@@ -739,11 +766,7 @@ class TerminalPlugin(PanePlugin):
     def _resize(self, rows: int, cols: int) -> None:
         if self._fd is not None:
             try:
-                import fcntl
-                import termios
-
-                fcntl.ioctl(self._fd, termios.TIOCSWINSZ,
-                            struct.pack("HHHH", rows, cols, 0, 0))
+                set_size(self._fd, rows, cols)
             except Exception:
                 pass
         elif self._chan is not None:

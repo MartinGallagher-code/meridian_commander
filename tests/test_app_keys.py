@@ -1805,3 +1805,368 @@ def test_remote_and_archive_panes_are_searched_without_asking_them_again(
     app.handle_key(curses.KEY_BACKSPACE)
     app.handle_key(ord("/"))
     assert asked == []
+
+
+# -- background commands (MC-027): the & menu and its dialogs -------------------
+
+from meridian_commander import commands as saved_commands  # noqa: E402
+from meridian_commander.app import MENUS  # noqa: E402
+from meridian_commander.commandpane import CommandPane  # noqa: E402
+from meridian_commander.commands import SavedCommand  # noqa: E402
+
+from command_stubs import wait_until  # noqa: E402
+from support import terminal_text  # noqa: E402
+
+
+@pytest.fixture
+def commanding(app, stubs):
+    """The app, with the stub programs on its PATH; its commands are
+    stopped at the end."""
+    yield app
+    app.commands.stop_all(0.5)
+
+
+def _shown(command) -> str:
+    with command.lock:
+        return terminal_text(command.screen)
+
+
+def _record_defaults(monkeypatch):
+    """What each prompt was filled with, on top of the scripted answers."""
+    defaults = []
+    scripted = dialogs.prompt
+
+    def prompt(stdscr, title, label, default="", **kwargs):
+        defaults.append(default)
+        return scripted(stdscr, title, label, default, **kwargs)
+
+    monkeypatch.setattr(dialogs, "prompt", prompt)
+    return defaults
+
+
+def test_ampersand_opens_the_commands_menu(commanding, monkeypatch):
+    saved_commands.save([SavedCommand("http", "python3 -m http.server 8000"),
+                         SavedCommand("docs", "make livehtml", "/srv/docs")])
+    scripted = _ScriptedDialogs(monkeypatch, menu=[None])
+    commanding.handle_key(ord("&"))
+    title, options = scripted.menus[0]
+    assert title == "Background commands"
+    assert options == ["docs  --  make livehtml  (in /srv/docs)",
+                       "http  --  python3 -m http.server 8000",
+                       "Type a command...", "Add...", "Edit...", "Delete...",
+                       "Cancel"]
+    # Each saved command has a letter of its own -- docs gives way to
+    # Delete's d -- and the five fixed entries keep their initials.
+    assert scripted.menu_keys[0] == ["b", "h", "t", "a", "e", "d", "c"]
+    assert scripted.menu_texts[0] == \
+        f"Blank directory: {commanding.left.path}"
+    assert commanding.commands.commands == []
+
+
+def test_the_command_menu_offers_it(commanding, monkeypatch):
+    command_menu = next(m for m in MENUS if m["name"] == "command")
+    entry = next(i for i in command_menu["items"]
+                 if i.get("name") == "commands")
+    assert entry["key"] == "&"
+    assert entry["label"] == "Bac~k~ground commands..."
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Cancel"])
+    commanding._dispatch("commands")
+    assert scripted.menus[0][0] == "Background commands"
+    assert commanding.commands.commands == []
+
+
+def test_a_saved_command_starts_in_its_own_directory(commanding, tmp_path,
+                                                     monkeypatch):
+    site = tmp_path / "site"
+    site.mkdir()
+    saved_commands.save([SavedCommand("site", "fake-server 8123", str(site))])
+    _ScriptedDialogs(monkeypatch, menu=["site"])
+    commanding.handle_key(ord("&"))
+    [command] = commanding.commands.commands
+    assert (command.name, command.directory) == ("site", str(site))
+    assert commanding.message == (f"Command &1 'site' running in {site} "
+                                  f"-- J shows it")
+    assert wait_until(lambda: f"port 8123 from {site}" in _shown(command))
+    assert commanding.left.plugin is None            # in the background
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_a_blank_directory_is_the_active_panes(commanding, monkeypatch, side):
+    saved_commands.save([SavedCommand("here", "pwd")])
+    commanding.active = getattr(commanding, side)
+    _ScriptedDialogs(monkeypatch, menu=["here"])
+    commanding.handle_key(ord("&"))
+    assert commanding.commands.commands[0].directory == commanding.active.path
+
+
+def test_a_saved_directory_may_start_with_a_tilde(commanding, tmp_path,
+                                                  monkeypatch):
+    (tmp_path / "site").mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    saved_commands.save([SavedCommand("home", "true", "~/site")])
+    _ScriptedDialogs(monkeypatch, menu=["home"])
+    commanding.handle_key(ord("&"))
+    assert commanding.commands.commands[0].directory == str(tmp_path / "site")
+
+
+@pytest.mark.parametrize("directory", ["/no/such/directory", "site"])
+def test_a_saved_directory_that_is_not_one_is_refused(commanding, monkeypatch,
+                                                      directory):
+    saved_commands.save([SavedCommand("gone", "true", directory)])
+    scripted = _ScriptedDialogs(monkeypatch, menu=["gone"])
+    commanding.handle_key(ord("&"))
+    assert scripted.messages[-1] == (
+        "Background commands",
+        f"{directory} is not a directory\non this computer.", True)
+    assert commanding.commands.commands == []
+
+
+def test_a_saved_command_with_no_line_is_refused(commanding, monkeypatch):
+    saved_commands.save([SavedCommand("bare", "")])
+    scripted = _ScriptedDialogs(monkeypatch, menu=["bare"])
+    commanding.handle_key(ord("&"))
+    assert "'bare' has no command line" in scripted.last_message
+    assert commanding.commands.commands == []
+
+
+def test_a_saved_command_already_running_is_offered_to_show(commanding,
+                                                            monkeypatch):
+    saved_commands.save([SavedCommand("web", "fake-server")])
+    scripted = _ScriptedDialogs(
+        monkeypatch, menu=["web", "web", "Show it", "web", "Cancel",
+                           "web", "Start another"])
+    commanding.handle_key(ord("&"))
+    [first] = commanding.commands.commands
+    commanding.handle_key(ord("&"))
+    assert scripted.menus[2] == ("web", ["Show it", "Start another", "Cancel"])
+    assert scripted.menu_texts[2] == "'web' is running already (&1)."
+    pane = commanding.left.plugin
+    assert isinstance(pane, CommandPane) and pane.command is first
+    commanding._close_plugin(commanding.left)
+    commanding.handle_key(ord("&"))                  # then Cancel
+    assert commanding.commands.commands == [first]
+    commanding.handle_key(ord("&"))                  # then Start another
+    assert len(commanding.commands.running()) == 2
+
+
+def test_typing_a_command_runs_it_with_the_shell_here(commanding, monkeypatch):
+    scripted = _ScriptedDialogs(
+        monkeypatch, menu=["Type a command..."],
+        prompt=["  echo typed-$((6*7)) | tr - +  ", None])
+    commanding.handle_key(ord("&"))
+    [command] = commanding.commands.commands
+    assert command.line == "echo typed-$((6*7)) | tr - +"
+    assert (command.name, command.directory) == ("echo", commanding.left.path)
+    assert scripted.prompts[0] == f"Command to run in {commanding.left.path}:"
+    assert wait_until(lambda: "typed+42" in _shown(command))
+    # Offered to save, and Esc said no.
+    assert scripted.prompts[1] == "Save it to the list as (Esc: not saved):"
+    assert saved_commands.load() == []
+
+
+def test_a_typed_command_that_cannot_start_is_not_offered_to_save(
+        commanding, monkeypatch):
+    from meridian_commander import background
+
+    def no_pty(directory, argv):
+        raise OSError("out of pseudo-terminals")
+
+    monkeypatch.setattr(background, "spawn", no_pty)
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Type a command..."],
+                                prompt=["fake-server"])
+    commanding.handle_key(ord("&"))
+    assert scripted.last_message == ("Could not start fake-server:\n"
+                                     "out of pseudo-terminals")
+    assert len(scripted.prompts) == 1 and commanding.commands.commands == []
+
+
+@pytest.mark.parametrize("typed", [None, "   "])
+def test_esc_or_nothing_typed_runs_nothing(commanding, monkeypatch, typed):
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Type a command..."],
+                                prompt=[typed])
+    commanding.handle_key(ord("&"))
+    assert commanding.commands.commands == [] and len(scripted.prompts) == 1
+
+
+def test_a_typed_command_can_be_saved(commanding, tmp_path, monkeypatch):
+    scripted = _ScriptedDialogs(
+        monkeypatch, menu=["Type a command..."],
+        prompt=["fake-server 8200", " site ", str(tmp_path)])
+    defaults = _record_defaults(monkeypatch)
+    commanding.handle_key(ord("&"))
+    assert defaults == ["", "fake-server", commanding.left.path]
+    assert scripted.prompts[2] == ("Directory (blank: the active pane's when "
+                                   "started):")
+    assert saved_commands.load() == [
+        SavedCommand("site", "fake-server 8200", str(tmp_path))]
+    [command] = commanding.commands.commands
+    assert command.name == "site"                    # the running one too
+    assert commanding.message == ("Command &1 running, and saved as 'site' "
+                                  "-- & starts it again")
+
+
+@pytest.mark.parametrize("answers", [["bad[name"], ["ok", None]])
+def test_a_typed_command_not_saved_after_all(commanding, monkeypatch,
+                                             answers):
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Type a command..."],
+                                prompt=["true"] + answers)
+    commanding.handle_key(ord("&"))
+    assert saved_commands.load() == []
+    assert len(commanding.commands.commands) == 1    # it still ran
+    if answers == ["bad[name"]:
+        assert scripted.messages[-1][2] is True
+        assert "cannot be empty, contain [ or ]" in scripted.last_message
+
+
+def test_adding_a_command(commanding, monkeypatch):
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Add..."],
+                                prompt=[" web ", " fake-server 9 ", "  "])
+    defaults = _record_defaults(monkeypatch)
+    commanding.handle_key(ord("&"))
+    assert defaults == ["", "", ""]
+    assert scripted.prompts == ["Name:", "Command line (run by your shell):",
+                                "Directory (blank: the active pane's when "
+                                "started):"]
+    assert saved_commands.load() == [SavedCommand("web", "fake-server 9")]
+    assert commanding.message == ("Command 'web' saved -- & then its letter "
+                                  "starts it")
+    assert commanding.commands.commands == []        # saved, not started
+
+
+@pytest.mark.parametrize("answers", [[None], ["web", None],
+                                     ["web", "true", None]])
+def test_esc_at_any_prompt_adds_nothing(commanding, monkeypatch, answers):
+    _ScriptedDialogs(monkeypatch, menu=["Add..."], prompt=answers)
+    commanding.handle_key(ord("&"))
+    assert saved_commands.load() == []
+
+
+@pytest.mark.parametrize("answers, said", [
+    (["DEFAULT"], "cannot be empty, contain [ or ],\nor be called DEFAULT."),
+    (["  "], "cannot be empty"),
+    (["web", "   "], "A command needs a command line."),
+])
+def test_adding_refuses_what_cannot_be_kept(commanding, monkeypatch, answers,
+                                            said):
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Add..."], prompt=answers)
+    commanding.handle_key(ord("&"))
+    assert said in scripted.last_message and scripted.messages[-1][2]
+    assert saved_commands.load() == []
+
+
+@pytest.mark.parametrize("replace", [False, True])
+def test_adding_over_a_name_already_there_asks(commanding, monkeypatch,
+                                               replace):
+    saved_commands.save([SavedCommand("web", "old")])
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Add..."],
+                                prompt=["web", "new", ""], confirm=[replace])
+    commanding.handle_key(ord("&"))
+    assert scripted.messages[-1][1] == "'web' already exists.\nReplace it?"
+    assert saved_commands.load() == [
+        SavedCommand("web", "new" if replace else "old")]
+
+
+def test_editing_changes_an_entry_in_place_renaming_it(commanding,
+                                                       monkeypatch):
+    saved_commands.save([SavedCommand("alpha", "a"),
+                         SavedCommand("web", "serve", "/srv/web")])
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Edit...", "web"],
+                                prompt=["site", "serve --port 9", ""])
+    defaults = _record_defaults(monkeypatch)
+    commanding.handle_key(ord("&"))
+    assert scripted.menus[1][0] == "Edit command"
+    assert scripted.menus[1][1] == ["alpha  --  a",
+                                    "web  --  serve  (in /srv/web)", "Cancel"]
+    assert scripted.menu_keys[1] == ["a", "w", "c"]
+    assert defaults == ["web", "serve", "/srv/web"]   # filled in as they were
+    assert saved_commands.load() == [SavedCommand("alpha", "a"),
+                                     SavedCommand("site", "serve --port 9")]
+    assert commanding.message == "Command 'site' saved"
+
+
+def test_editing_without_a_rename_does_not_ask(commanding, monkeypatch):
+    saved_commands.save([SavedCommand("web", "serve")])
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Edit...", "web"],
+                                prompt=["web", "serve -v", ""])
+    commanding.handle_key(ord("&"))
+    assert saved_commands.load() == [SavedCommand("web", "serve -v")]
+    assert not any("already exists" in text for _, text, _ in scripted.messages)
+
+
+@pytest.mark.parametrize("menu, prompt", [
+    (["Edit...", "Cancel"], []), (["Edit...", None], []),
+    (["Edit...", "web"], [None]),
+])
+def test_an_edit_given_up_changes_nothing(commanding, monkeypatch, menu,
+                                          prompt):
+    saved_commands.save([SavedCommand("web", "serve")])
+    _ScriptedDialogs(monkeypatch, menu=menu, prompt=prompt)
+    commanding.handle_key(ord("&"))
+    assert saved_commands.load() == [SavedCommand("web", "serve")]
+
+
+@pytest.mark.parametrize("entry", ["Edit...", "Delete..."])
+def test_nothing_to_edit_or_delete_says_so(commanding, monkeypatch, entry):
+    scripted = _ScriptedDialogs(monkeypatch, menu=[entry])
+    commanding.handle_key(ord("&"))
+    assert scripted.messages == [("Background commands",
+                                  "No commands saved yet.", False)]
+
+
+def test_deleting_asks_first(commanding, monkeypatch):
+    saved_commands.save([SavedCommand("web", "serve"),
+                         SavedCommand("zz", "x")])
+    scripted = _ScriptedDialogs(monkeypatch,
+                                menu=["Delete...", "web", "Delete...", "web"],
+                                confirm=[False, True])
+    commanding.handle_key(ord("&"))
+    assert scripted.messages[-1] == ("Delete command",
+                                     "Delete 'web'?\nserve", False)
+    assert len(saved_commands.load()) == 2
+    commanding.handle_key(ord("&"))
+    assert saved_commands.load() == [SavedCommand("zz", "x")]
+    assert commanding.message == "Command 'web' deleted"
+
+
+def test_a_list_that_cannot_be_written_says_so(commanding, monkeypatch):
+    saved_commands.save([SavedCommand("web", "serve")])
+
+    def refused(items, path=None):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(saved_commands, "save", refused)
+    scripted = _ScriptedDialogs(
+        monkeypatch, menu=["Add...", "Delete...", "web"],
+        prompt=["new", "x", ""], confirm=[True])
+    commanding.handle_key(ord("&"))
+    assert scripted.messages[-1] == (
+        "Background commands",
+        "Could not write commands:\nread-only file system", True)
+    commanding.handle_key(ord("&"))
+    assert scripted.messages[-1] == (
+        "Delete command", "Could not write commands:\nread-only file system",
+        True)
+
+
+def test_the_help_describes_background_commands(app, monkeypatch):
+    scripted = _ScriptedDialogs(monkeypatch)
+    app.handle_key(curses.KEY_F1)
+    text = scripted.last_message
+    for phrase in ("  &              background commands", "Type a command",
+                   "Add/Edit/Delete the list", "Ctrl-] then q hides it, k stops it",
+                   "local panes only", "Quitting stops them",
+                   "Enter shows one in", "k stops it, d removes an ended one"):
+        assert phrase in text
+
+
+def test_the_manual_describes_what_the_help_does():
+    """F1 and the manual name the same keys, where the manual is shipped."""
+    usage = os.path.join(os.path.dirname(__file__), "..", "docs", "usage.md")
+    if not os.path.exists(usage):
+        pytest.skip("the manual is not part of this tree")
+    with open(usage, encoding="utf-8") as handle:
+        text = handle.read()
+    assert "## Running commands in the background" in text
+    for phrase in ("| `&` |", "**Type a command…**", "`Ctrl-]` then `q`",
+                   "`Ctrl-]` then `k`", "commands.ini", "`d` removes"):
+        assert phrase in text

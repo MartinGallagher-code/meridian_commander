@@ -163,6 +163,10 @@ status line says how it went.
 Background delete, background sync and resuming a job after a restart are not
 done.
 
+The jobs list also shows the commands running in the background (`&`), under
+the copies and moves — see [Running commands in the
+background](usage.md#running-commands-in-the-background).
+
 ## How synchronization works
 
 `F9` builds a plan by walking both panes' directory trees:

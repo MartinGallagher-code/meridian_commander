@@ -36,6 +36,7 @@ Key bindings (also shown in the F1 help screen)::
     T              the trash (this pane)
     =              other pane: same location as this one
     b              presets: saved locations to return to
+    &              background commands: start, type, add, edit, delete
     z              single pane: one pane at full width, the other kept
     /              search this pane: type a name, the cursor jumps to it
 """
@@ -54,6 +55,7 @@ import sys
 import time
 
 from . import dialogs, extedit, presets, runner, shellinit, theme
+from . import commands as saved_commands
 from .attributes import AttributeChange, apply_change, common_bits
 from .editor import Editor
 from .filesystems import (
@@ -86,6 +88,8 @@ from .peek import PeekPane
 from .quickview import QuickViewPane
 from .jobs import RULES, Job, JobQueue
 from .jobspane import JobsPane
+from .background import Command, CommandList
+from .commandpane import CommandPane
 from .opener import SystemOpener
 from .trash import (
     TrashUnavailable,
@@ -202,6 +206,8 @@ MENUS: list[dict] = [
             {"label": "~Q~uick view in the other pane", "name": "quick_view",
              "key": "Ctrl+Q"},
             {"label": "~J~obs in this pane", "name": "jobs", "key": "J"},
+            {"label": "Bac~k~ground commands...", "name": "commands",
+             "key": "&"},
             {"sep": True},
             {"label": "~T~erminal in this pane", "name": "terminal", "key": "t"},
             {"label": "Full-screen she~l~l", "name": "shell", "key": "!"},
@@ -391,6 +397,8 @@ class App:
         self.jobs = JobQueue()
         #: Quit once the last background job has ended.
         self._quit_when_done = False
+        #: Commands running in the background, and ended ones (MC-027).
+        self.commands = CommandList()
 
         left_fs = LocalFileSystem()
         right_fs = LocalFileSystem()
@@ -634,7 +642,8 @@ class App:
             right -= len(note)
             theme.paint(stdscr, height - 2, right, note, "hint")
             room -= len(note) + 1
-        status = self.jobs.status()
+        status = "  ".join(text for text in (self.jobs.status(),
+                                             self.commands.status()) if text)
         if status and len(status) + 2 < room // 2:
             right -= len(status) + 1
             theme.paint(stdscr, height - 2, right, status, "hint")
@@ -906,6 +915,9 @@ class App:
     JOBS_POLL_MS = 500
     #: How long quitting waits for cancelled jobs to stop.
     JOBS_GRACE = 5.0
+    #: How often a command's end is looked for while one runs out of sight.
+    #: Its output does not wait for this: a thread of its own reads it.
+    COMMANDS_POLL_MS = 500
     SIZING_POLL_MS = 5
 
     def _tick_plugins(self) -> int | None:
@@ -918,6 +930,8 @@ class App:
         """
         poll: int | None = None
         jobs_running = bool(self.jobs.jobs) and self._tick_jobs()
+        commands_running = (bool(self.commands.commands)
+                            and self._tick_commands())
         for panel in (self.left, self.right):
             # A pane counting what is under its subdirectories is work in
             # progress too, and wants the same polling loop: that is what
@@ -948,6 +962,8 @@ class App:
                     poll = wanted
         if jobs_running and poll is None:
             poll = self.JOBS_POLL_MS
+        if commands_running and poll is None:
+            poll = self.COMMANDS_POLL_MS
         return poll
 
     def _tick_jobs(self) -> bool:
@@ -977,8 +993,24 @@ class App:
             self.running = False
         return False
 
+    def _tick_commands(self) -> bool:
+        """Say so when a background command ends; whether any still run."""
+        for command in self.commands.tick():
+            self._set_message(f"Command &{command.number} '{command.name}' "
+                              f"{command.state_text()} -- J shows its screen")
+        return bool(self.commands.running())
+
     def run(self) -> None:
         curses.curs_set(0)
+        # Whatever ends the loop -- a quit, Ctrl-C, an exception -- the
+        # backends are closed, which stops every background command.
+        try:
+            self._loop()
+        finally:
+            self.stdscr.timeout(-1)
+            self._close_backends()
+
+    def _loop(self) -> None:
         while self.running:
             poll = self._tick_plugins()
             if not self.running:          # the last job ended: quit, as asked
@@ -990,19 +1022,21 @@ class App:
             except KeyboardInterrupt:
                 if not self._may_quit():
                     continue
+                stop = self._commands_may_stop()
+                if stop is False:
+                    continue
                 if self.jobs.active():
                     self._quit_with_jobs()
                     if not self.running:
                         break
                     continue
-                if dialogs.confirm(self.stdscr, "Quit", "Exit Meridian Commander?"):
+                if stop or dialogs.confirm(self.stdscr, "Quit",
+                                           "Exit Meridian Commander?"):
                     break
                 continue
             if key == -1:      # poll timeout: loop to pump plugin output
                 continue
             self.handle_key(key)
-        self.stdscr.timeout(-1)
-        self._close_backends()
 
     # -- the menu bar -------------------------------------------------------
     def _menu_items(self, index: int) -> list[dict]:
@@ -1074,6 +1108,7 @@ class App:
             "link": self._link,
             "open_with": self._open_with,
             "jobs": self._jobs_pane,
+            "commands": self._commands_menu,
             "long": self._toggle_long,
             "trash": self._toggle_trash,
             "open_in_pane": self._toggle_open_in_pane,
@@ -1239,6 +1274,8 @@ class App:
             self._mirror_to_other_pane()
         elif key == ord("b"):  # presets: saved locations
             self._presets_menu()
+        elif key == ord("&"):  # background commands
+            self._commands_menu()
         elif key == 20:  # Ctrl-T sort
             self._sort_menu()
         elif key == ord("."):  # toggle hidden files in the active pane
@@ -1758,12 +1795,38 @@ class App:
     def _quit(self) -> None:
         if not self._may_quit():
             return
+        stop = self._commands_may_stop()
+        if stop is False:
+            return
         if self.jobs.active():
             self._quit_with_jobs()
             return
-        if dialogs.confirm(self.stdscr, "Quit", "Exit Meridian Commander?",
-                           default_yes=True):
+        if stop or dialogs.confirm(self.stdscr, "Quit",
+                                   "Exit Meridian Commander?",
+                                   default_yes=True):
             self.running = False
+
+    def _commands_may_stop(self) -> bool | None:
+        """Ask before quitting stops the background commands still running.
+
+        None when none is running, so nothing was asked; otherwise whether
+        the answer was yes.  A yes stands for "quit" too, so the usual
+        question is not asked after it.  Nothing is stopped here: closing
+        the backends does that, however the application ends.
+        """
+        running = self.commands.running()
+        if not running:
+            return None
+        count = len(running)
+        names = ", ".join(f"'{command.name}'" for command in running[:4])
+        if count > 4:
+            names += ", ..."
+        plural = "" if count == 1 else "s"
+        them = "it" if count == 1 else "them"
+        return dialogs.confirm(
+            self.stdscr, "Quit",
+            f"{count} background command{plural} still running:\n{names}\n\n"
+            f"Quitting stops {them}.  Quit?")
 
     def _quit_with_jobs(self) -> None:
         """Quit with background jobs still to finish: wait, or cancel them."""
@@ -3107,6 +3170,280 @@ class App:
             return
         self._set_message(f"Preset '{victim.name}' deleted")
 
+    # -- background commands (MC-027) ----------------------------------------
+    def _commands_menu(self) -> None:
+        """``&``: the saved commands, each a letter away, and the list's tools.
+
+        A saved command starts at once, in its own directory or in this
+        pane's.  The five fixed entries keep their initials whatever the
+        commands are called, as the presets' do.
+        """
+        items = saved_commands.load()
+        labels = [f"{item.name}  --  {item.label()}"[:60] for item in items]
+        extras = ["Type a command...", "Add...", "Edit...", "Delete...",
+                  "Cancel"]
+        keys = dialogs.accelerators([item.name for item in items],
+                                    reserved="taedc")
+        if _is_local(self.active.fs):
+            where = f"Blank directory: {self.active.path}"
+        else:
+            where = ("This pane is not on this computer: only a saved\n"
+                     "command with a directory of its own runs from it.")
+        choice = dialogs.menu(self.stdscr, "Background commands",
+                              labels + extras, keys=keys + list("taedc"),
+                              text=where)
+        if choice is None or choice == len(labels) + 4:
+            return
+        if choice < len(labels):
+            self._start_saved_command(items[choice])
+        elif choice == len(labels):
+            self._type_command()
+        elif choice == len(labels) + 1:
+            self._add_command()
+        elif choice == len(labels) + 2:
+            self._edit_command(items)
+        else:
+            self._delete_command(items)
+
+    def _start_saved_command(self, item: saved_commands.SavedCommand) -> None:
+        """Start a saved command, or show it if it is running already."""
+        if not item.command.strip():
+            dialogs.message(self.stdscr, "Background commands",
+                            f"'{item.name}' has no command line.\n"
+                            f"Edit... gives it one.", error=True)
+            return
+        running = self.commands.find(item.name)
+        if running is not None:
+            choice = dialogs.menu(
+                self.stdscr, item.name, ["Show it", "Start another", "Cancel"],
+                keys=["s", "a", "c"],
+                text=f"'{item.name}' is running already (&{running.number}).")
+            if choice == 0:
+                self._show_command(running)
+            if choice != 1:
+                return
+        directory = self._command_directory(item.directory)
+        if directory is not None:
+            self._start_command(item.name, item.command, directory)
+
+    def _command_directory(self, saved: str) -> str | None:
+        """Where a command runs: its own directory, or this pane's.
+
+        None, having said why, when that is not a directory on this
+        computer -- a remote or archive pane (MC-027 runs commands on this
+        computer only), or a saved directory that is not there.  Checked
+        here because the forked child cannot report a failed ``chdir``, and
+        a server started in the wrong place serves the wrong files.
+        """
+        if saved:
+            path = os.path.expanduser(saved)
+        elif _is_local(self.active.fs):
+            path = self.active.path
+        else:
+            dialogs.message(
+                self.stdscr, "Background commands",
+                f"This pane is {self.active.fs.label()}.\n"
+                f"A background command runs on this computer, so it\n"
+                f"starts from a local pane, or from a saved command\n"
+                f"that names a directory of its own.", error=True)
+            return None
+        if os.path.isabs(path) and os.path.isdir(path):
+            return path
+        dialogs.message(self.stdscr, "Background commands",
+                        f"{saved or path} is not a directory\n"
+                        f"on this computer.", error=True)
+        return None
+
+    def _start_command(self, name: str, line: str,
+                       directory: str) -> Command | None:
+        try:
+            command = self.commands.start(name, line, directory)
+        except OSError as exc:
+            dialogs.message(self.stdscr, "Background commands",
+                            f"Could not start {line}:\n{exc}", error=True)
+            return None
+        self._set_message(f"Command &{command.number} '{name}' running in "
+                          f"{directory} -- J shows it")
+        return command
+
+    def _type_command(self) -> None:
+        """Run a typed command line in this pane's directory, then offer to
+        save it to the list."""
+        directory = self._command_directory("")
+        if directory is None:
+            return
+        line = dialogs.prompt(self.stdscr, "Run in the background",
+                              f"Command to run in {directory}:")
+        if line is None or not line.strip():
+            return
+        line = line.strip()
+        name = os.path.basename(line.split()[0])
+        command = self._start_command(name, line, directory)
+        if command is None:
+            return
+        name = dialogs.prompt(self.stdscr, "Save command",
+                              "Save it to the list as (Esc: not saved):",
+                              default=name)
+        if name is None or not self._valid_command_name(name.strip()):
+            return
+        where = dialogs.prompt(self.stdscr, "Save command",
+                               "Directory (blank: the active pane's when "
+                               "started):", default=directory)
+        if where is None:
+            return
+        item = saved_commands.SavedCommand(name.strip(), line, where.strip())
+        if self._store_command(item):
+            command.name = item.name
+            self._set_message(f"Command &{command.number} running, and saved "
+                              f"as '{item.name}' -- & starts it again")
+
+    def _valid_command_name(self, name: str) -> bool:
+        if saved_commands.valid_name(name):
+            return True
+        dialogs.message(self.stdscr, "Background commands",
+                        "A command's name cannot be empty, contain [ or ],\n"
+                        "or be called DEFAULT.", error=True)
+        return False
+
+    def _command_form(self, title: str, item: saved_commands.SavedCommand
+                      ) -> saved_commands.SavedCommand | None:
+        """Name, command line and directory, one prompt each; None on Esc."""
+        name = dialogs.prompt(self.stdscr, title, "Name:", default=item.name)
+        if name is None or not self._valid_command_name(name.strip()):
+            return None
+        line = dialogs.prompt(self.stdscr, title,
+                              "Command line (run by your shell):",
+                              default=item.command)
+        if line is None:
+            return None
+        if not line.strip():
+            dialogs.message(self.stdscr, title, "A command needs a command "
+                            "line.", error=True)
+            return None
+        where = dialogs.prompt(self.stdscr, title,
+                               "Directory (blank: the active pane's when "
+                               "started):", default=item.directory)
+        if where is None:
+            return None
+        return saved_commands.SavedCommand(name.strip(), line.strip(),
+                                           where.strip())
+
+    def _store_command(self, item: saved_commands.SavedCommand,
+                       old_name: str | None = None) -> bool:
+        """Write ``item`` to the list, in place of ``old_name`` if given.
+
+        A name already taken by another entry is asked about first.
+        """
+        items = saved_commands.load()
+        if item.name != old_name and any(i.name == item.name for i in items):
+            if not dialogs.confirm(self.stdscr, "Background commands",
+                                   f"'{item.name}' already exists.\n"
+                                   f"Replace it?"):
+                return False
+        try:
+            saved_commands.save(saved_commands.replace(
+                old_name or item.name, item, items))
+        except OSError as exc:
+            dialogs.message(self.stdscr, "Background commands",
+                            f"Could not write commands:\n{exc}", error=True)
+            return False
+        return True
+
+    def _add_command(self) -> None:
+        item = self._command_form("Add command",
+                                  saved_commands.SavedCommand("", ""))
+        if item is not None and self._store_command(item):
+            self._set_message(f"Command '{item.name}' saved -- & then its "
+                              f"letter starts it")
+
+    def _pick_command(self, title: str,
+                      items: list[saved_commands.SavedCommand]
+                      ) -> saved_commands.SavedCommand | None:
+        if not items:
+            dialogs.message(self.stdscr, "Background commands",
+                            "No commands saved yet.")
+            return None
+        labels = [f"{item.name}  --  {item.label()}"[:60] for item in items]
+        keys = dialogs.accelerators([item.name for item in items],
+                                    reserved="c")
+        choice = dialogs.menu(self.stdscr, title, labels + ["Cancel"],
+                              keys=keys + ["c"])
+        if choice is None or choice == len(items):
+            return None
+        return items[choice]
+
+    def _edit_command(self, items: list[saved_commands.SavedCommand]) -> None:
+        old = self._pick_command("Edit command", items)
+        if old is None:
+            return
+        item = self._command_form("Edit command", old)
+        if item is not None and self._store_command(item, old_name=old.name):
+            self._set_message(f"Command '{item.name}' saved")
+
+    def _delete_command(self, items: list[saved_commands.SavedCommand]
+                        ) -> None:
+        victim = self._pick_command("Delete command", items)
+        if victim is None or not dialogs.confirm(
+                self.stdscr, "Delete command",
+                f"Delete '{victim.name}'?\n{victim.label()}"):
+            return
+        try:
+            saved_commands.save(saved_commands.remove(victim.name, items))
+        except OSError as exc:
+            dialogs.message(self.stdscr, "Delete command",
+                            f"Could not write commands:\n{exc}", error=True)
+            return
+        self._set_message(f"Command '{victim.name}' deleted")
+
+    def _hide_command(self, command: Command) -> None:
+        """Give back the pane showing ``command``, if one is."""
+        for panel in (self.left, self.right):
+            if panel.plugin is not None and panel.plugin is command.viewer:
+                self._close_plugin(panel)
+                panel.refresh()
+
+    def _show_command(self, command: Command) -> None:
+        """Show a command's terminal in the active pane.
+
+        One pane at a time, since the screen has one size: a command shown
+        in the other pane moves here.
+        """
+        from .plugin_api import PluginContext
+
+        self._hide_command(command)
+        panel = self.active
+        if not self._may_close(panel):
+            return
+        self._close_plugin(panel)
+        ctx = PluginContext(app=self, own_panel=panel, other_panel=self.other)
+        panel.plugin = CommandPane(ctx, command)
+        self._set_message(f"Command &{command.number} -- Ctrl-] then q hides "
+                          f"it (it keeps running), k stops it")
+
+    def _stop_command(self, command: Command) -> None:
+        """Stop a command and everything it started, after asking."""
+        if command.ended:
+            self._set_message(f"Command &{command.number} has already ended")
+            return
+        if not dialogs.confirm(self.stdscr, "Stop command",
+                               f"Stop &{command.number} '{command.name}'?\n"
+                               f"{command.line}"):
+            return
+        command.stop()
+        self._set_message(f"Command &{command.number} '{command.name}' "
+                          f"stopped")
+
+    def _remove_command(self, command: Command) -> None:
+        """Take an ended command off the list, with its last screen."""
+        if command.running():
+            self._set_message(f"Command &{command.number} is still running "
+                              f"-- k stops it")
+            return
+        self._hide_command(command)
+        self.commands.remove(command)
+        self._set_message(f"Command &{command.number} '{command.name}' "
+                          f"removed")
+
     def _view(self) -> None:
         panel = self.active
         target = panel.current_path()
@@ -3900,7 +4237,17 @@ class App:
             "  w              open with the system's application (a copy,\n"
             "                 if remote or in an archive)\n"
             "  F5/F6 Ctrl-B   in the prompt: run it in the background\n"
-            "  J              background jobs: p pause, c cancel, Enter errors\n"
+            "  J              background jobs: p pause, c cancel, Enter errors;\n"
+            "                 and the background commands: Enter shows one in\n"
+            "                 this pane, k stops it, d removes an ended one\n"
+            "  &              background commands: a saved one by its letter,\n"
+            "                 Type a command, or Add/Edit/Delete the list\n"
+            "                 (commands.ini).  It runs with your shell in its\n"
+            "                 own directory, or this pane's (local panes only),\n"
+            "                 and keeps running whatever the panes do.  Shown\n"
+            "                 in a pane, every key goes to it (Ctrl-C too);\n"
+            "                 Ctrl-] then q hides it, k stops it, Tab, z and\n"
+            "                 PgUp as in the terminal.  Quitting stops them\n"
             "  F8             on a local pane: to the trash, or delete for good;\n"
             "                 in the trash itself, for good only\n"
             "  Ctrl-U         swap panes   Ctrl-R  reload panes\n"
@@ -4062,6 +4409,7 @@ class App:
         for panel in (self.left, self.right):
             self._close_plugin(panel)
         self.opener.cleanup()
+        self.commands.stop_all()
         self.jobs.cancel_all()
         self.jobs.wait(self.JOBS_GRACE)
         for fs in self._backends:
