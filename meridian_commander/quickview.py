@@ -78,7 +78,7 @@ class QuickViewPane(PanePlugin):
         entry = self.ctx.other_panel.current()
         if entry is None or entry.name == "..":
             return None
-        return entry, self.ctx.other_fs.join(self.ctx.other_path, entry.name)
+        return entry, self.ctx.other_panel.path_of(entry)
 
     def remote(self) -> bool:
         return getattr(self.ctx.other_fs, "scheme", "") != "local"

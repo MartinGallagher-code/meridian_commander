@@ -98,6 +98,9 @@ class RuleConflicts:
 class Job:
     """One background copy or move, and everything the screen shows of it.
 
+    ``names`` are the items in ``src_dir`` -- or, from a list of find
+    results, their paths below it, with ``/`` between the parts, which they
+    keep under ``dest`` as a copy in the foreground does (MC-026).
     ``src_fs``/``dst_fs`` are the connections the job uses (its own, for a
     remote side); ``src_pane_fs``/``dst_pane_fs`` are the panes' own, which
     the application compares when the job ends to know which listings to
@@ -230,8 +233,7 @@ class Job:
             total = 0
             for name in self.names:
                 try:
-                    total += count_tree(self.src_fs,
-                                        self.src_fs.join(self.src_dir, name))[1]
+                    total += count_tree(self.src_fs, self._source(name))[1]
                 except Exception:
                     pass
             with self._lock:
@@ -242,8 +244,8 @@ class Job:
                         if self.cancelled():
                             cancelled = True
                             break
-                        src = self.src_fs.join(self.src_dir, name)
-                        target = self.dst_fs.join(self.dest, name)
+                        src = self._source(name)
+                        target = self.dst_fs.join(self.dest, *name.split("/"))
                         try:
                             if self.move:
                                 move_path(self.src_fs, src, self.dst_fs, target,
@@ -284,6 +286,9 @@ class Job:
                     self.state = DONE
                 self.finished = time.monotonic()
                 self.current = ""
+
+    def _source(self, name: str) -> str:
+        return self.src_fs.join(self.src_dir, *name.split("/"))
 
     def _error(self, text: str) -> None:
         with self._lock:

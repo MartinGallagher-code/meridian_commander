@@ -140,6 +140,30 @@ def test_browser_returns_the_path_to_jump_to(monkeypatch, fs, haystack):
     assert result == "a/config.ini"
 
 
+@pytest.mark.parametrize("key", [ord("p"), ord("P")])
+def test_p_closes_the_browser_asking_for_the_hits_in_the_pane(
+        monkeypatch, fs, haystack, key):
+    """MC-026: no jump, and every hit -- not just the cursor's -- is wanted."""
+    browser = _browser(fs, haystack, "conf")
+    result, _ = _run_browser(monkeypatch, browser, [curses.KEY_DOWN, key])
+    assert result is None
+    assert browser.to_pane is True
+
+
+def test_closing_the_browser_otherwise_asks_for_nothing(monkeypatch, fs,
+                                                         haystack):
+    browser = _browser(fs, haystack)
+    _run_browser(monkeypatch, browser, [ord("q")])
+    assert browser.to_pane is False
+
+
+def test_the_footer_offers_the_pane(monkeypatch, fs, haystack):
+    browser = _browser(fs, haystack)
+    _, window = _run_browser(monkeypatch, browser, [ord("q")], cols=80)
+    assert "p to pane" in window.text
+    assert "Enter/g goto dir" in window.text
+
+
 def test_browser_enter_with_no_matches_stays_open(monkeypatch, fs, haystack):
     browser = FindBrowser(fs, str(haystack), "nope", [], False)
     # Enter does nothing with an empty list, then q closes it.

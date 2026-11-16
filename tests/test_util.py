@@ -84,6 +84,21 @@ def test_truncate(text, width, expected):
     assert util.truncate(text, width) == expected
 
 
+@pytest.mark.parametrize("text, width, expected", [
+    ("run_07/out/results.tsv", 30, "run_07/out/results.tsv"),
+    ("run_07/out/results.tsv", 22, "run_07/out/results.tsv"),
+    ("run_07/out/results.tsv", 16, "run_07/~ults.tsv"),
+    ("run_07/out/results.tsv", 3, "r~v"),
+    ("run_07/out/results.tsv", 2, "r~"),
+    ("run_07/out/results.tsv", 0, ""),
+])
+def test_truncate_middle_keeps_both_ends(text, width, expected):
+    """A find result's first part says which tree, its last which file."""
+    cut = util.truncate_middle(text, width)
+    assert cut == expected
+    assert len(cut) == min(len(text), max(width, 0))
+
+
 def test_ljust_and_rjust_always_fill_the_width():
     assert util.ljust("ab", 5) == "ab   "
     assert util.rjust("ab", 5) == "   ab"

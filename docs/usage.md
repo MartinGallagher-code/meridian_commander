@@ -1303,6 +1303,89 @@ prints reaches the screen. The built-in viewers stay on `F3`.
   as over SSH, or no opener installed — nothing is run, and the status line
   says why.
 
+## Finding files, and working on what was found
+
+**`f`** (or **File ▸ Find files…**) asks for a name and searches the pane's
+whole tree for it, on any backend — local, SFTP, SSH, FTP or inside an
+archive. Plain text matches anywhere in a name; `*`, `?` or `[` make a glob.
+The search can be cancelled, and it stops at 2,000 hits and says so. The hits
+open in a list where `F3` (or `v`) views one, `F4` (or `e`) edits one, and
+`Enter` (or `g`) takes the pane to the directory a hit is in, with the cursor
+on it.
+
+### Sending the hits to the pane
+
+**`p`** in that list — or **Command ▸ Find files to pane…**, which skips the
+list — puts every hit in the pane, as Midnight Commander's *panelize* does.
+Each is listed by its path below the directory searched, and the caption says
+what was looked for, how many were found and where:
+
+```
+╔═══╡ Find '*.tsv': 3 found under local:/data/runs ╞══════════════╗
+║ Name                                             Size  Modify time║
+║ ..                                              <DIR>      ?      ║
+║ notes.tsv                                         512 Nov 16 10:02║
+║ run_07/out/results.tsv                            40K Nov 15 18:40║
+║ run_08/out/results.tsv                            41K Nov 15 19:12║
+```
+
+`(truncated)` follows the count when the search stopped at its 2,000. A path
+too long for the pane loses its middle, so the run it is in and the file's
+own name both stay in view: `run_07/o~sults.tsv`.
+
+Everything the pane does with a name then works on the file itself, wherever
+in the tree it is:
+
+- **Tags, the filter and the search match the whole path.** `+` with
+  `run_07*` tags everything found under `run_07`, and `*.tsv` every `.tsv`
+  (a `*` matches across `/`). `\`, `-`, `*`, `Insert`/`Space`, `F` and `/`
+  are as in a directory, and a tag a filter hides is still copied.
+- **`F3`, `F4`, `Ctrl-Q`, `h`, `w`, `a`, `x` and `Enter`** — view, edit, quick
+  view, head + tail, open with, attributes, extract, and run, open the archive
+  or go into the directory — act on the hit, not on a file of the same name
+  in the directory searched.
+- **`F5` and `F6` keep each hit's path below the directory searched.**
+  `run_07/out/results.tsv` copied to `/backup` lands at
+  `/backup/run_07/out/results.tsv`, and the directories it needs are made, so
+  run trees whose every run has the same file names stay apart. The question
+  before replacing a file, kept permissions and links copied as links are as
+  they are anywhere else, and **Background** works too.
+- **`l`** makes links the same way: at each hit's path under the target.
+- **`r`** renames a hit where it is: the prompt offers its own name, and a new
+  name with a `/` in it is refused rather than moving the file.
+- **`n` and `F7`** are offered the directory of the hit under the cursor, so
+  what they make lands beside it, and it joins the list. A name is taken from
+  the directory searched, as anywhere else.
+- **A hit inside a tagged directory goes with that directory** rather than
+  being copied, moved or deleted again on its own.
+- **What `F6` and `F8` remove leaves the list** — to the trash or for good —
+  and the cursor holds its place, as it does in a directory.
+
+**The list is a snapshot, and `Ctrl-R` checks it.** Every hit is asked about
+again and those no longer there leave it; the rest show their new size, time
+and mode. It is one listing for each directory that holds hits, not a round
+trip for each hit, so 2,000 hits on a server cost as many requests as the
+directories they are in. It does not search again — what has appeared since is
+not added; `f` again does that. A change made from the other pane, or outside
+Meridian, shows at the next `Ctrl-R`.
+
+**Leaving it.** `<`, `Backspace`, or `Enter` on `..` bring back the directory
+searched, with the cursor on the way to the hit it was on: `run_07` for
+`run_07/out/results.tsv`. Anything else that moves the pane — `Enter` on a
+directory, `~`, `T`, `Ctrl-G`, `F2`, a preset, or `=` in the other pane —
+leaves it too.
+
+**Back and forward skip the list.** It is a view of the directory it was found
+under, not a place of its own, so it is never recorded in the pane's history:
+`<` from where the list took you returns to the directory searched, not to the
+list, and making the list records nothing. `f` and then `p` make it again.
+
+**What refuses it**, with a message rather than misreading it: `F9`, which
+walks two directories and promises never to delete; `D`; `u`, the directory
+sizes (a setting that was on waits for the directory to come back); and a
+plug-in that works on the other pane, while that pane holds a list — the Grep
+and table tools would take a hit's path for a name in a directory.
+
 ## Key bindings
 
 Keys are read decoded, so anywhere text is typed — the editor, a rename or
@@ -1340,7 +1423,7 @@ where it should.)
 | `.` | show/hide hidden files | `t` | terminal inside this pane (see above) |
 | `u` | directory sizes in this pane | `z` | single pane: this one at full width, the other kept |
 | `p` / F11 | plug-in mode (this pane) | `!` | full-screen shell |
-| `f` | find files (browsable results) | | |
+| `f` | find files (browsable results) | `p` in the results | the hits in this pane, to tag, copy, move and delete (see above) |
 | `C` | configuration menu | `Ctrl-]` | in the terminal: its menu — `Tab` other pane, `z` zoom, `q` close, `PgUp` scroll back |
 | `Options ▸ Editor` | F4 opens your editor | `Options ▸ Viewer` | F3 opens your pager |
 | `Options ▸ Single pane` | the same as `z`, ticked while on | `Options ▸ View and edit in a pane` | F3 and F4 open in a pane (see above) |
