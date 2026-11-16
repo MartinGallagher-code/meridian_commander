@@ -24,7 +24,6 @@ import types
 
 import pytest
 
-from meridian_commander import dialogs
 from meridian_commander.dialogs import accelerators
 from meridian_commander.plugin_api import PluginContext
 from meridian_commander.plugins import containers as containers_mod
@@ -1444,7 +1443,6 @@ def test_the_plugin_menu_letters_are_the_documented_ones():
 
 def test_the_menu_offers_it_on_its_letter(engines, app, monkeypatch):
     engines.install("docker")
-    monkeypatch.setattr(dialogs, "menu", dialogs.menu)
     scripted = _ScriptedDialogs(monkeypatch, menu=["Containers"])
     app._plugin_mode()
     title, options = scripted.menus[0]
