@@ -216,7 +216,7 @@ class Panel:
             # nothing measured through one describes the other.
             self.sizes.clear()
             self._sized_fs = self.fs
-        wanted = [self.fs.join(self.path, e.name) for e in self.entries
+        wanted = [self.path_of(e) for e in self.entries
                   if e.is_dir and e.name != self.PARENT and not e.is_symlink]
         pending = [path for path in wanted if path not in self.sizes]
         if pending:
@@ -228,8 +228,7 @@ class Panel:
         top = 0
         for entry in self.entries:
             if entry.is_dir:
-                top = max(top, self.sizes.get(
-                    self.fs.join(self.path, entry.name), 0))
+                top = max(top, self.sizes.get(self.path_of(entry), 0))
             else:
                 top = max(top, entry.size or 0)
         self._scale = top
@@ -266,7 +265,7 @@ class Panel:
             return entry.size or 0
         if entry.name == self.PARENT or not self.show_sizes:
             return None
-        path = self.fs.join(self.path, entry.name)
+        path = self.path_of(entry)
         if path in self.sizes:
             return self.sizes[path]
         sizer = self.sizer
@@ -278,7 +277,7 @@ class Panel:
         """Whether ``entry``'s total is still being counted."""
         if not entry.is_dir or self.sizer is None:
             return False
-        path = self.fs.join(self.path, entry.name)
+        path = self.path_of(entry)
         return path in self.sizer.totals and path not in self.sizes
 
     def biggest(self) -> int:
@@ -350,7 +349,20 @@ class Panel:
         entry = self.current()
         if entry is None or entry.name == self.PARENT:
             return None
-        return self.fs.join(self.path, entry.name)
+        return self.path_of(entry)
+
+    def path_of(self, entry: DirEntry | str) -> str:
+        """The full path of ``entry``, or of a listed name, in this pane.
+
+        The one place a pane turns what it lists into a path, so that every
+        action reaches the real file.  A name may be a path below
+        :attr:`path`, with ``/`` between its parts as find reports one; it is
+        split and joined in the backend's own terms rather than handed to
+        ``join`` whole.  For a plain name in a directory this is the
+        directory joined to the name, as it always was.
+        """
+        name = entry if isinstance(entry, str) else entry.name
+        return self.fs.join(self.path, *name.split("/"))
 
     def selected_entries(self) -> list[DirEntry]:
         """Tagged entries, or the entry under the cursor if none are tagged."""
@@ -371,8 +383,7 @@ class Panel:
         if entry.name == self.PARENT:
             return self.go_parent()
         if entry.is_dir:
-            child = self.fs.join(self.path, entry.name)
-            return self.chdir(child)
+            return self.chdir(self.path_of(entry))
         return False
 
     def go_parent(self) -> bool:

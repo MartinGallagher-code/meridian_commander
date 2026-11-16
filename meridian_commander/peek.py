@@ -136,7 +136,7 @@ class PeekPane(PanePlugin):
         entry = self.ctx.other_panel.current()
         if entry is None or entry.is_dir or entry.name == "..":
             return None
-        return self.ctx.other_fs.join(self.ctx.other_path, entry.name)
+        return self.ctx.other_panel.path_of(entry)
 
     def follow(self) -> None:
         """Re-read when the other pane's cursor has moved on to another file.

@@ -1395,7 +1395,7 @@ class App:
             owner=choice.owner if choice.owner != owner else "",
             group=choice.group if choice.group != group else "",
             recursive=choice.recursive)
-        paths = [(fs.join(panel.path, t.name), t) for t in targets]
+        paths = [(panel.path_of(t), t) for t in targets]
         dlg = dialogs.ProgressDialog(self.stdscr, "Attributes")
         try:
             done, failures = apply_change(
@@ -1428,7 +1428,7 @@ class App:
         if entry is None or entry.name == "..":
             self._set_message("Nothing to open")
             return
-        path = panel.fs.join(panel.path, entry.name)
+        path = panel.path_of(entry)
         self._set_message(self.opener.open(panel.fs, path, entry.is_dir))
 
     def _jobs_pane(self) -> None:
@@ -1562,7 +1562,7 @@ class App:
         where = fs.normpath(other.resolve(where))
         made, errors = 0, []
         for entry in targets:
-            source = panel.fs.join(panel.path, entry.name)
+            source = panel.path_of(entry)
             link = where if len(targets) == 1 else fs.join(where, entry.name)
             target = source
             if relative.on:
@@ -1603,7 +1603,7 @@ class App:
     def _edit_link(self, panel: Panel, name: str) -> None:
         """Point the link ``name`` somewhere else, keeping its name."""
         fs = panel.fs
-        path = fs.join(panel.path, name)
+        path = panel.path_of(name)
         if not fs.can_symlink:
             dialogs.message(self.stdscr, "Link",
                             f"{fs.label()}: links are not supported here.",
@@ -1884,7 +1884,7 @@ class App:
         if not isinstance(panel.fs,
                           (LocalFileSystem, SFTPFileSystem, SSHFileSystem)):
             return None
-        path = panel.fs.join(panel.path, entry.name)
+        path = panel.path_of(entry)
         return runner.run_argv(panel.fs, path, entry.mode)
 
     def _run_current(self) -> None:
@@ -2589,8 +2589,8 @@ class App:
                                   default=entry.name)
         if not new_name or new_name == entry.name:
             return
-        src = panel.fs.join(panel.path, entry.name)
-        dst = panel.fs.join(panel.path, new_name)
+        src = panel.path_of(entry)
+        dst = panel.resolve(new_name)
         if self._refuse_unsaved(panel.fs, [src, dst]):
             return
         if self._rename_would_replace(panel.fs, src, dst) and not dialogs.confirm(
@@ -2662,7 +2662,7 @@ class App:
         curses.curs_set(0)
         if rel:
             parts = [p for p in rel.split("/") if p]
-            parent = panel.fs.join(panel.path, *parts[:-1]) if len(parts) > 1 \
+            parent = panel.path_of("/".join(parts[:-1])) if len(parts) > 1 \
                 else panel.path
             if panel.chdir(parent, keep_name=parts[-1]):
                 self._set_message(f"Jumped to {parts[-1]}")
@@ -3032,7 +3032,7 @@ class App:
         entry = entries[0]
         if entry.is_dir:
             return None, f"{entry.name} is a directory"
-        return panel.fs.join(panel.path, entry.name), ""
+        return panel.path_of(entry), ""
 
     def _compare(self) -> None:
         """Each pane's file, side by side, the two scrolled as one.
@@ -3119,7 +3119,7 @@ class App:
             name = dialogs.prompt(self.stdscr, "Edit new file", "File name:")
             if not name:
                 return
-            target = panel.fs.join(panel.path, name)
+            target = panel.resolve(name)
         if not self._edit_externally(panel.fs, target):
             try:
                 editor = Editor(panel.fs, target)
@@ -3143,8 +3143,7 @@ class App:
         if not sources:
             return
         if move and self._refuse_unsaved(
-                src_panel.fs, [src_panel.fs.join(src_panel.path, s.name)
-                               for s in sources]):
+                src_panel.fs, [src_panel.path_of(s) for s in sources]):
             return
         verb = "Move" if move else "Copy"
 
@@ -3186,7 +3185,7 @@ class App:
             grand_total = 0
             file_total = 0
             for s in sources:
-                fc, bc = count_tree(src_panel.fs, src_panel.fs.join(src_panel.path, s.name))
+                fc, bc = count_tree(src_panel.fs, src_panel.path_of(s))
                 file_total += fc
                 grand_total += bc
         except Exception:
@@ -3215,7 +3214,7 @@ class App:
                         if dlg.cancelled():
                             cancelled = True
                             break
-                        src = src_panel.fs.join(src_panel.path, entry.name)
+                        src = src_panel.path_of(entry)
                         target = dst_fs.join(dest, entry.name)
                         dlg.set_overall(
                             f"{verb} {i + 1}/{len(sources)}: {entry.name}")
@@ -3366,8 +3365,7 @@ class App:
                         f"Extract {i + 1}/{len(archives)}: {entry.name}")
                     try:
                         target, problems = self._extract_one(
-                            src_panel.fs,
-                            src_panel.fs.join(src_panel.path, entry.name),
+                            src_panel.fs, src_panel.path_of(entry),
                             dst_fs, dest, dlg)
                     except OperationCancelled:
                         cancelled = True
@@ -3432,7 +3430,7 @@ class App:
         name = dialogs.prompt(self.stdscr, "Make directory", "Directory name:")
         if not name:
             return
-        target = panel.fs.join(panel.path, name)
+        target = panel.resolve(name)
         try:
             panel.fs.makedirs(target)
             self._reload_after_change(
@@ -3453,7 +3451,7 @@ class App:
         name = dialogs.prompt(self.stdscr, "New file", "File name:")
         if not name:
             return
-        target = panel.fs.join(panel.path, name)
+        target = panel.resolve(name)
         existed = panel.fs.exists(target)
         try:
             panel.fs.touch(target)
@@ -3468,8 +3466,7 @@ class App:
         targets = panel.selected_entries()
         if not targets:
             return
-        if self._refuse_unsaved(panel.fs, [panel.fs.join(panel.path, t.name)
-                                           for t in targets]):
+        if self._refuse_unsaved(panel.fs, [panel.path_of(t) for t in targets]):
             return
         if len(targets) == 1:
             text = f"Delete '{targets[0].name}'{self._not_shown(panel)}?"
@@ -3528,7 +3525,7 @@ class App:
                     dlg.set_overall(
                         f"Deleting {i + 1}/{len(targets)}: {entry.name}")
                     dlg.update(i, len(targets), entry.name)
-                    target = panel.fs.join(panel.path, entry.name)
+                    target = panel.path_of(entry)
                     try:
                         if to_trash:
                             move_to_trash(target)
