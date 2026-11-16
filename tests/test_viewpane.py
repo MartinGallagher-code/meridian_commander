@@ -37,6 +37,7 @@ from meridian_commander.viewpane import ProgramPane, ViewPane
 
 from dc_examples import EXAMPLES
 from support import (
+    TAKE_DEFAULT,
     _ScriptedDialogs,
     _StubScreen,
     docx_p,
@@ -1120,3 +1121,38 @@ def test_the_session_tidies_up_a_copy_it_never_ran(tmp_path):
     assert isinstance(started, tuple)
     session.close()
     assert not os.path.exists(session.copy)
+
+
+
+# -- saving a table's view from a pane (MC-029) -------------------------------------
+
+@pytest.mark.parametrize("key", [curses.KEY_F2, 19])          # 19 = Ctrl-S
+def test_a_tables_view_saved_in_a_pane_is_listed_beside_it_at_once(
+        app, files, monkeypatch, key):
+    write(str(files / "left" / "runs.tsv"), "run\tms\n2\t30\n1\t20\n")
+    app.left.refresh()
+    seen = _ScriptedDialogs(monkeypatch, prompt=[TAKE_DEFAULT])
+    pane = _view(app, "runs.tsv")
+    # The pane opposite the file's is the one the table offers when its
+    # own directory cannot be written.
+    assert pane.view.elsewhere is app.right
+    app.handle_key(ord("s"))                      # sorted by run
+    app.handle_key(key)
+    assert seen.prompt_defaults == ["runs.view.tsv"]
+    assert read(str(files / "left" / "runs.view.tsv")) == \
+        "run\tms\n1\t20\n2\t30\n"
+    assert "runs.view.tsv" in [e.name for e in app.left.entries]
+    assert app.right.plugin is pane               # the table is still open
+    assert "wrote 2 rows" in pane.view.notice
+
+
+def test_a_save_cancelled_in_a_pane_lists_nothing_new(app, files,
+                                                      monkeypatch):
+    write(str(files / "left" / "runs.tsv"), "run\tms\n2\t30\n")
+    app.left.refresh()
+    _ScriptedDialogs(monkeypatch, prompt=[None])
+    pane = _view(app, "runs.tsv")
+    write(str(files / "left" / "late.txt"), "late")
+    app.handle_key(curses.KEY_F2)
+    assert pane.view.notice == " not saved "
+    assert "late.txt" not in [e.name for e in app.left.entries]

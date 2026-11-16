@@ -186,7 +186,12 @@ class QuickViewPane(PanePlugin):
                 found = self.target()
                 assert found is not None
                 full = viewer_for(self.ctx.other_fs, found[1])
-                full.run(self.ctx.app.stdscr)
+                # As F3 opens it: a table saved from there (F2) may go to
+                # this pane's directory, and shows in the listings after.
+                app = self.ctx.app
+                app._offer_elsewhere(full, self.ctx.other_panel)
+                full.run(app.stdscr)
+                app._list_saved(full)
                 curses.curs_set(0)
             return True
         view = self.view

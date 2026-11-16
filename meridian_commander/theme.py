@@ -257,7 +257,7 @@ UNICODE_GLYPHS = {
     "lcap": "╡", "rcap": "╞",
     "close": "[■]", "shade": "░", "block": "█",
     "up": "▲", "down": "▼", "submenu": "►", "check": "√", "bullet": "•",
-    "tag": "*", "link": "@",
+    "tag": "*", "link": "@", "times": "×",
 }
 
 ASCII_GLYPHS = {
@@ -267,7 +267,7 @@ ASCII_GLYPHS = {
     "lcap": "[", "rcap": "]",
     "close": "[x]", "shade": ".", "block": "#",
     "up": "^", "down": "v", "submenu": ">", "check": "x", "bullet": "*",
-    "tag": "*", "link": "@",
+    "tag": "*", "link": "@", "times": "x",
 }
 
 

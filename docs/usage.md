@@ -475,7 +475,7 @@ instead of the text viewer:
   4 East      88123.5      91002 2020-01-01 Alan
   5 West           42        7.5 2019-06-30 Katherine new territory this year
 
- B3  -98  Tab sheet  [/]find  n/N  [w]idth  [q]uit
+ B3  -98  Tab sheet  F2 save  [/]find  n/N  [w]idth  [q]uit
 ```
 
 It is full-screen rather than in-pane on purpose: half of an 80-column terminal
@@ -501,6 +501,15 @@ whole file has to be read before anything can be shown — a zip's index lives a
 its end, so a partial read parses as nothing — which is why an oversized
 workbook is refused outright rather than shown in part.
 
+**Saving a sheet.** `F2` (or `Ctrl-S`) saves the sheet on the screen — not the
+others — as a tab-separated file, offering `quarterly.Sales.tsv` for the sheet
+Sales of `quarterly.xlsx`. Name it `.csv` for a quoted CSV instead (or `.psv`
+for pipes). The values are written as the grid shows them, every row as wide
+as the widest, since a spreadsheet's short row is only empty cells. The rest —
+the name offered, the checks, where the file goes, a cell a `.tsv` cannot hold
+(named by its reference, `B7`), a sheet past the caps — is as for
+[a table's view](#saving-the-view).
+
 ## Tables (TSV and CSV)
 
 `F3` on a file whose name ends `.tsv`, `.csv`, `.tab` or `.psv` (in any letter
@@ -517,7 +526,7 @@ is shorter than four characters; the table sizes each column from its values:
   4!Lima   Peru        10092000   2672.3
   5 Porto  Portugal      231800     41.42 bridges
 
- city: Lisbon  Enter row  [f]ilter  =/! this value  Bksp/0 unfilter  [s]ort
+ city: Lisbon  Enter row  [f]ilter  =/! value  Bksp/0 unfilter  [s]ort  F2 save
 ```
 
 - **The file's own header** is the column names, and stays put while the rows
@@ -633,6 +642,64 @@ on SFTP, SSH and FTP panes and inside archives too.
 
 `/`, `n`/`N`, `w`, `g`/`G`, the arrows and `hjkl` mean what they mean in the
 spreadsheet grid; `/` searches the rows the filters keep, in the order shown.
+
+### Saving the view
+
+`F2` (or `Ctrl-S`, the editor's save keys) saves what the table shows as a file
+of its own:
+
+- the rows the filters keep, in the order the sort put them;
+- the columns not hidden, in their order;
+- the header row while it is shown (with `H` off, there is none to save).
+
+Frozen columns only change how the grid scrolls, so they are saved where they
+are, and the `#` comment lines above the table are left out. Cells are written
+as the file has them, not as they are drawn: a number keeps all its digits, a
+control character stays itself, and a short row stays short. With no filter,
+sort or hidden column, the file comes back cell for cell.
+
+It asks for the name with one already filled in: `results.view.tsv` beside
+`results.tsv`, or `results.view2.tsv` when that is taken, so `Enter` alone
+never replaces anything. `Esc` cancels and writes nothing. A name without a
+directory goes beside the file; one with a directory goes there. The name's
+extension sets the format, so typing `results.view.csv` also converts:
+
+- **`.tsv` and `.tab`** are tab-separated, and **`.psv`** pipe-separated,
+  without quoting, as the table reads them: a `"` in a cell stays a `"`. A
+  cell holding the delimiter or a line break — which a quoted CSV cell can —
+  cannot be written that way, so the save is refused, naming the first such
+  cell (`row 12, column note, holds a line break`) and suggesting `.csv`.
+- **`.csv`** goes through Python's `csv` module, so a comma, a quote or a line
+  break stays in its cell. A `.csv` saved from a `.csv` keeps that file's
+  delimiter, so a semicolon CSV stays one; from anything else it is
+  comma-separated.
+- **Any other name** keeps the format of the file being browsed.
+
+An existing file is replaced only after a yes, and the file being browsed is
+never written over, by any name — a link to it, or another spelling of it on a
+disk that ignores case. Afterwards the footer says what was written,
+`wrote 1,204 rows × 7 columns to results.view.tsv`, and the pane listing that
+directory shows the new file: at once when the table is in a pane
+([Viewing and editing in a pane](#viewing-and-editing-in-a-pane)), or as soon
+as it closes. `F2` in the full view that `Enter` opens from
+[Quick view](#quick-view) works the same way.
+
+**Where it goes.** The file is written through the pane's own backend, so a
+view saves on an SFTP, SSH or FTP pane as on a local one, and a write that
+fails — a remote close that fails included, which is where SFTP and FTP really
+send — says why in the footer and leaves the table as it was. Inside an
+archive, where a new file would mean rewriting the whole archive, or in a local
+directory you cannot write to, the other pane's directory is offered instead:
+the prompt has the whole path, and a line saying why. When that cannot be
+written either, nothing is offered and the footer says so. A remote
+directory's permissions cannot be known without writing to it, so there the
+write is tried, and refused if the server refuses it.
+
+**A table read only in part.** A table marked `[truncated]` — past 50,000 rows
+or 16 MB — can still be saved, but only the rows that were read: the prompt
+says so, and how many, and the footer says it again after the save
+(`wrote 812 rows × 7 columns to results.view.tsv, from the first 50,000 rows
+only: the file goes on`).
 
 ## Datacenter floor plans (`.dc`)
 

@@ -11,13 +11,18 @@ and this follows them -- ``F3`` on a workbook opens the grid exactly the way
 Reading is delegated to :mod:`meridian_commander.xlsx`, so the grid works on
 remote panes too: the file arrives through the backend's ``open_read`` like
 any other.
+
+``F2`` (or ``Ctrl-S``) saves the sheet on the screen as a ``.tsv`` -- or a
+``.csv``, or a ``.psv``, as the name chosen ends -- with the values as the
+grid shows them, through :mod:`meridian_commander.saveview` as the table
+browser saves its view.  The other sheets are left out.
 """
 
 from __future__ import annotations
 
 import curses
 
-from . import theme
+from . import saveview, theme
 from .filesystems import FileSystem
 from .util import ljust, rjust, run_full_screen, truncate
 from .xlsx import Sheet, Workbook, column_name, read_workbook
@@ -63,6 +68,11 @@ class SheetView:
         self.notice = ""
         self.max_width = WIDTH_CHOICES[1]
         self._widths_cache: dict[tuple[int, int], list[int]] = {}
+        #: Where F2 offers to save when the workbook's own directory cannot
+        #: be written: the other pane, which the application sets.
+        self.elsewhere: saveview.Place | None = None
+        #: Every file F2 has written, so the application can list them.
+        self.saved: list[saveview.Written] = []
         self.workbook = self._load()
 
     def _load(self) -> Workbook:
@@ -261,7 +271,7 @@ class SheetView:
                 parts.append(value)
             if self.search:
                 parts.append(f"/{self.search}")
-            parts.append("Tab sheet  [/]find  n/N  [w]idth  [q]uit")
+            parts.append("Tab sheet  F2 save  [/]find  n/N  [w]idth  [q]uit")
             hint = "  ".join(parts)
         theme.paint(win, height - 1, 0, f" {hint} ", "keybar", width)
 
@@ -277,6 +287,64 @@ class SheetView:
     def cycle_width(self) -> None:
         position = WIDTH_CHOICES.index(self.max_width)
         self.max_width = WIDTH_CHOICES[(position + 1) % len(WIDTH_CHOICES)]
+
+    def save_sheet(self, stdscr) -> None:
+        """Save the sheet on the screen as a file of its own (``F2``).
+
+        Every row, each as wide as the widest -- a spreadsheet has no short
+        rows, only empty cells, and the grid shows them -- with the values
+        as shown.  ``book.Sales.tsv`` is offered for the sheet Sales of
+        ``book.xlsx``.
+        """
+        sheet = self.sheet
+        if self.error:
+            self.notice = " nothing to save: the workbook could not be read "
+            return
+        if not sheet.rows:
+            self.notice = " nothing to save: this sheet is empty "
+            return
+        width = sheet.ncols
+        rows = [row + [""] * (width - len(row)) for row in sheet.rows]
+        what = saveview.shape(len(rows), width)
+        notes: list[str] = []
+        caveat = ""
+        if sheet.truncated:
+            notes.append(f"Only the {what} read can be saved: the sheet goes "
+                         f"on past them.")
+            caveat = ", all that was read: the sheet goes on"
+        stem = self.name.rpartition(".")[0] or self.name
+        # A sheet's name becomes part of a file's, so a separator in it -- no
+        # spreadsheet allows one, but a file can still hold one -- would
+        # make it a directory instead.
+        tag = "".join("_" if char in "/\\" or ord(char) < 32 else char
+                      for char in sheet.name) or f"sheet{self.sheet_index + 1}"
+        self.notice, written = saveview.save_as(
+            stdscr, self.fs, self.path, title="Save sheet", what=what,
+            base=f"{stem}.tsv", tag=tag,
+            render=lambda name: self._render(rows, name),
+            elsewhere=self.elsewhere, notes=notes, caveat=caveat)
+        if written is not None:
+            self.saved.append(written)
+
+    @staticmethod
+    def _render(rows: list[list[str]], name: str) -> bytes:
+        """The sheet saved as ``name``; tab-separated unless it says otherwise.
+
+        Raises :class:`ValueError` naming the first cell the format cannot
+        hold, by its reference.
+        """
+        # Here rather than at the top: table imports this module, for
+        # looks_numeric, so a top-level import would go round in a circle.
+        from .table import DELIMITER_NAMES, CellError, format_for, serialise
+
+        delimiter, quoted = format_for(name, "\t", False)
+        try:
+            return serialise(rows, delimiter, quoted).encode("utf-8")
+        except CellError as exc:
+            raise ValueError(
+                f"{column_name(exc.column)}{exc.row + 1} holds {exc.holds}, "
+                f"which a {DELIMITER_NAMES[delimiter]}-separated file cannot "
+                f"hold; save it as .csv to keep it") from None
 
     def run(self, stdscr) -> None:
         run_full_screen(self, stdscr)
@@ -330,5 +398,7 @@ class SheetView:
                 self.notice = " no match "
         elif key in (ord("w"), ord("W")):
             self.cycle_width()
+        elif key in saveview.SAVE_KEYS:
+            self.save_sheet(stdscr)
         self._clamp()
         return True

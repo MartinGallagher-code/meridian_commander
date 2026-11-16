@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Martin J. Gallagher
-"""The table model: reading TSV and CSV, display widths, filters, sorting
-and column summaries.
+"""The table model: reading TSV and CSV, display widths, filters, sorting,
+column summaries, and the text a view is saved as.
 
 Fixtures stay neutral -- fruit, cities and numbers -- rather than copies of
 real results files.
@@ -16,6 +16,7 @@ import pytest
 from meridian_commander import table
 from meridian_commander.filesystems import LocalFileSystem
 from meridian_commander.table import (
+    CellError,
     Filter,
     SortKey,
     Statistics,
@@ -28,6 +29,7 @@ from meridian_commander.table import (
     display_width,
     find_column,
     fit,
+    format_for,
     format_number,
     is_numeric,
     is_table,
@@ -37,11 +39,13 @@ from meridian_commander.table import (
     quick_filter,
     read_bytes,
     read_table,
+    serialise,
     shown_value,
     sniff_delimiter,
     sort_rows,
     split_preamble,
     summarise,
+    view_records,
     wrap,
 )
 
@@ -713,3 +717,113 @@ def test_a_value_with_spaces_around_it_is_shown_quoted():
     assert shown_value("Paris") == "Paris"
     assert shown_value(" fig ") == '" fig "'
     assert shown_value("") == '""'
+
+
+# -- writing a view ------------------------------------------------------------
+@pytest.mark.parametrize("name, wanted", [
+    ("out.tsv", ("\t", False)), ("out.TAB", ("\t", False)),
+    ("out.psv", ("|", False)), ("Out.Csv", (",", True)),
+])
+def test_the_name_chosen_sets_the_format(name, wanted):
+    assert format_for(name, "|", False) == wanted
+
+
+@pytest.mark.parametrize("name", ["out.txt", "out", "out.tsv.bak"])
+def test_any_other_name_keeps_the_sources_format(name):
+    assert format_for(name, "\t", False) == ("\t", False)
+    assert format_for(name, ";", True) == (";", True)
+
+
+def test_a_csv_saved_from_a_csv_keeps_its_delimiter():
+    # A semicolon CSV stays one; anything else saved as .csv gets commas.
+    assert format_for("out.csv", ";", True) == (";", True)
+    assert format_for("out.csv", "\t", False) == (",", True)
+
+
+UNEVEN = [["fruit", "price", "city"],
+           ["apple", "3", "Paris"],
+           ["pear", "10.5"],                   # short: no city
+           ["fig", "0.25", "Paris", "extra"]]  # long: a fourth field
+
+
+def test_with_nothing_changed_the_records_come_back_as_they_are():
+    out = view_records(UNEVEN, [1, 2, 3], [0, 1, 2, 3], header=True)
+    # The short row is not padded and the long one keeps its extra field.
+    assert out == UNEVEN
+
+
+def test_the_order_and_the_columns_shown_are_what_is_written():
+    out = view_records(UNEVEN, [3, 1], [2, 0], header=True)
+    assert out == [["city", "fruit"], ["Paris", "fig"], ["Paris", "apple"]]
+
+
+def test_without_the_header_only_the_rows_shown_are_written():
+    assert view_records(UNEVEN, [2, 0], [0], header=False) == \
+        [["pear"], ["fruit"]]
+
+
+def test_a_short_row_stays_short_when_a_column_it_lacks_is_shown():
+    assert view_records(UNEVEN, [2], [1, 2], header=False) == [["10.5"]]
+
+
+def test_an_unquoted_format_writes_cells_as_they_are():
+    text = serialise([["a\"b", "caf\u00e9"], ["\u4eac\u90fd", "\U0001f600"]],
+                     "\t", False)
+    # A quote is a character in a TSV, not quoting: csv.writer would have
+    # written "a""b", which the browser would then show as that.
+    assert text == 'a"b\tcaf\u00e9\n\u4eac\u90fd\t\U0001f600\n'
+
+
+@pytest.mark.parametrize("value, delimiter, holds", [
+    ("a\tb", "\t", "a tab"),
+    ("a|b", "|", "a pipe"),
+    ("two\nlines", "\t", "a line break"),
+    ("two\rlines", "|", "a line break"),
+])
+def test_a_cell_an_unquoted_format_cannot_hold_is_refused(value, delimiter,
+                                                          holds):
+    records = [["ok", "fine"], ["fine", value], [value, "later"]]
+    with pytest.raises(CellError) as raised:
+        serialise(records, delimiter, False)
+    # The first such cell, in reading order.
+    assert (raised.value.row, raised.value.column) == (1, 1)
+    assert raised.value.holds == holds
+    assert str(raised.value) == f"record 2, field 2 holds {holds}"
+
+
+def test_a_quoted_format_keeps_delimiters_quotes_and_line_breaks():
+    records = [["name", "note"], ["fig, ripe", 'say "hi"'],
+               ["two\nlines", "lone\rreturn"], ["", "crlf\r\nin a cell"]]
+    text = serialise(records, ",", True)
+    assert text.endswith("\n") and not text.endswith("\r\n")
+    assert '"fig, ripe","say ""hi"""\n' in text
+    # A lone carriage return is quoted on every Python: 3.9 leaves it bare
+    # when told the line ends "\n", and the reader then ends the row there.
+    assert '"lone\rreturn"' in text
+    assert parse(text, ",", True) == records
+
+
+def test_an_empty_record_is_written_and_read_as_one_empty_field():
+    assert serialise([[""], []], ",", True) == '""\n\n'
+    assert serialise([[""], []], "\t", False) == "\n\n"
+
+
+@pytest.mark.parametrize("suffix", [".tsv", ".tab", ".psv", ".csv"])
+def test_every_format_reads_back_as_it_was_written(tmp_path, suffix):
+    fs = LocalFileSystem()
+    records = [["fruit", "note", "city"], ["apple", 'a "quoted" word', "Paris"],
+               ["\u4eac\u90fd", "\U0001f600 caf\u00e9", ""],
+               ["", "", "Lima"]]
+    delimiter, quoted = format_for(f"x{suffix}", "\t", False)
+    path = write_bytes(tmp_path / f"out{suffix}",
+                       serialise(records, delimiter, quoted).encode("utf-8"))
+    assert read_table(fs, path).records == records
+
+
+def test_a_csv_cell_with_a_comma_or_a_line_break_reads_back_from_a_csv(
+        tmp_path):
+    fs = LocalFileSystem()
+    records = [["fruit", "note"], ["fig, ripe", "line one\nline two"]]
+    path = write_bytes(tmp_path / "out.csv",
+                       serialise(records, ",", True).encode("utf-8"))
+    assert read_table(fs, path).records == records

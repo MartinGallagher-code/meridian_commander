@@ -189,8 +189,9 @@ accelerator letters, green buttons and drop shadows under every dialog — the
 - **Spreadsheet browser** (`F3` on an `.xlsx`/`.xlsm`) — a full-screen grid
   with row numbers, column letters, right-aligned numbers, dates rendered
   through the workbook's own number formats, `Tab` between sheets and the same
-  `/` search. It reads the format with the **standard library alone**, so
-  spreadsheets open with nothing installed — on remote panes too.
+  `/` search. `F2` saves the sheet on the screen as a `.tsv` (or a `.csv`). It
+  reads the format with the **standard library alone**, so spreadsheets open
+  with nothing installed — on remote panes too.
 - **Table browser** (`F3` on a `.tsv`, `.csv`, `.tab` or `.psv`) — the file's
   own header pinned over columns that really line up (measured in terminal
   cells, so CJK and emoji too), numbers right-aligned on their decimal points,
@@ -208,7 +209,14 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   (the run notes the suite's tools write) are set aside rather than read as
   the header, and `#` shows them. Rows with the wrong number of fields are
   marked rather than padded, and the read stops at 50,000 rows or 16 MB with
-  `[truncated]` in the title.
+  `[truncated]` in the title. **`F2` (or `Ctrl-S`) saves the view** — the rows
+  the filters keep, in the sort's order, the columns not hidden, and the
+  header while it is shown — as a new file, offering `results.view.tsv`
+  beside the table; the name's extension sets the format (`.tsv`, `.tab`,
+  `.psv`, or `.csv` with quoting). It asks before replacing a file, never
+  writes over the one being browsed, works on remote panes, and offers the
+  other pane's directory when the table's own cannot be written (inside an
+  archive, say).
 - **Floor plan browser** (`F3` on a `.dc` layout) — a
   [datacenter_visualization](https://pypi.org/project/datacenter-layout-viewer/)
   layout drawn as the floor it describes, not as its text: eight lines of

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Martin J. Gallagher
-"""The full-screen table browser: choosing it, drawing, keys, filters, records.
+"""The full-screen table browser: choosing it, drawing, keys, filters,
+records, and saving the view (F2).
 
 Fixtures stay neutral -- fruit, cities and numbers -- rather than copies of
 real results files.
@@ -9,23 +10,29 @@ real results files.
 from __future__ import annotations
 
 import curses
+import os
+import types
+from pathlib import Path
 
 import pytest
 
-from meridian_commander import dialogs, theme
+from meridian_commander import dialogs, saveview, table, theme
 from meridian_commander import tableview as mod
 from meridian_commander.archive import ArchiveFileSystem
 from meridian_commander.browsers import has_own_browser, viewer_for
 from meridian_commander.filesystems import LocalFileSystem
 from meridian_commander.sheetview import WIDTH_CHOICES, SheetView
-from meridian_commander.table import display_width
+from meridian_commander.table import display_width, read_table
 from meridian_commander.tableview import TableView, displayed
 from meridian_commander.viewer import Viewer
 
 from support import (
+    TAKE_DEFAULT,
     _FakeRemoteBackend,
     _KeyScript,
     _NoLocalPath,
+    _ScriptedDialogs,
+    read,
     script_newwin,
     with_curses_screen,
     write,
@@ -1202,3 +1209,537 @@ def test_the_summary_survives_a_tiny_screen(fruit, rows, cols):
 def test_the_footer_names_the_new_keys(fruit):
     text = _text(fruit, cols=200)
     assert "[i] summary  [F]reeze  -/+ hide/show" in text
+
+
+# -- saving the view (F2) --------------------------------------------------------
+TIMES = theme.glyph("times")
+
+
+def _save(monkeypatch, view, answer=TAKE_DEFAULT, confirm=(),
+          key=curses.KEY_F2):
+    """Press the save key with the prompt answered; what the dialogs saw.
+
+    The key goes straight to ``handle_key``, as the full-screen loop and a
+    pane hand it on, so no screen is needed and the browser must stay open.
+    """
+    seen = _ScriptedDialogs(monkeypatch, prompt=[answer],
+                            confirm=list(confirm))
+    assert view.handle_key(key, None, 24, 80) is True
+    return seen
+
+
+def _records(path):
+    return read_table(LocalFileSystem(), str(path)).records
+
+
+@pytest.mark.parametrize("key", [curses.KEY_F2, 19])          # 19 = Ctrl-S
+def test_f2_or_ctrl_s_offers_a_name_beside_the_file_and_saves(
+        monkeypatch, fruit, tmp_path, key):
+    seen = _save(monkeypatch, fruit, key=key)
+    assert seen.prompts == [f"Save 4 rows {TIMES} 3 columns as:"]
+    assert seen.prompt_defaults == ["fruit.view.tsv"]
+    assert seen.prompt_notes == [[]]
+    assert read(str(tmp_path / "fruit.view.tsv")) == FRUIT
+    assert fruit.notice == f" wrote 4 rows {TIMES} 3 columns to fruit.view.tsv "
+    assert fruit.saved == [(fruit.fs, str(tmp_path / "fruit.view.tsv"))]
+
+
+def test_the_footer_says_what_was_written(monkeypatch, fruit):
+    _ScriptedDialogs(monkeypatch, prompt=[TAKE_DEFAULT])
+    window = _run(monkeypatch, fruit, [curses.KEY_F2, ord("q")], cols=80)
+    assert f"wrote 4 rows {TIMES} 3 columns to fruit.view.tsv" in window.text
+
+
+def test_the_footer_names_the_key_on_an_80_column_screen(fruit):
+    assert "F2 save" in _text(fruit, cols=80)
+
+
+def test_with_no_filter_or_sort_the_file_is_written_back_cell_for_cell(
+        monkeypatch, fs, tmp_path):
+    # A short row, a long row and a row of blanks all come back as they were.
+    text = "a\tb\tc\n1\t2\n3\t4\t5\t6\n\t\t\n"
+    view = make(fs, tmp_path, text, "uneven.tsv")
+    _save(monkeypatch, view)
+    assert read(str(tmp_path / "uneven.view.tsv")) == text
+
+
+HEADER = ["fruit", "price", "city"]
+APPLE, PEAR = ["apple", "3", "Paris"], ["pear", "10.5", "Oslo"]
+FIG, PLUM = ["fig", "0.25", "Paris"], ["plum", "", "Lima"]
+
+
+def _keep(view, column, keep):
+    view.col = column
+    view.quick_filter(keep)
+
+
+def _sort(view, column, times):
+    view.col = column
+    for _ in range(times):
+        view.sort_by_cursor()
+
+
+def _hide(view, column):
+    view.col = column
+    view.hide_column()
+
+
+def _freeze_and_hide(view):
+    view.col = 1
+    view.toggle_freeze()
+    _hide(view, 2)
+
+
+@pytest.mark.parametrize("change, expected", [
+    (lambda v: v.add_filter("city = paris"), [HEADER, APPLE, FIG]),
+    (lambda v: (v.add_filter("paris"), v.add_filter("price < 1")),
+     [HEADER, FIG]),
+    (lambda v: _keep(v, 2, True), [HEADER, APPLE, FIG]),            # =
+    (lambda v: _keep(v, 2, False), [HEADER, PEAR, PLUM]),           # !
+    (lambda v: _sort(v, 1, 1), [HEADER, FIG, APPLE, PEAR, PLUM]),   # s
+    (lambda v: _sort(v, 1, 2), [HEADER, PEAR, APPLE, FIG, PLUM]),   # s s
+    (lambda v: _hide(v, 1), [[r[0], r[2]] for r in
+                             (HEADER, APPLE, PEAR, FIG, PLUM)]),    # -
+    # Frozen columns only stay put while the rest pan: saved where they are.
+    (_freeze_and_hide, [r[:2] for r in (HEADER, APPLE, PEAR, FIG, PLUM)]),
+], ids=["filter", "stacked", "keep", "hide-value", "ascending", "descending",
+        "hidden-column", "frozen"])
+def test_what_is_saved_is_what_the_screen_shows(monkeypatch, fruit, tmp_path,
+                                                change, expected):
+    change(fruit)
+    _save(monkeypatch, fruit)
+    assert _records(tmp_path / "fruit.view.tsv") == expected
+
+
+def test_with_the_header_off_no_header_is_written(monkeypatch, fruit,
+                                                  tmp_path):
+    fruit.toggle_header()
+    _sort(fruit, 0, 1)
+    seen = _save(monkeypatch, fruit)
+    # The first line is a row like the others now, sorted in among them.
+    assert _records(tmp_path / "fruit.view.tsv") == [
+        APPLE, FIG, HEADER, PEAR, PLUM]
+    assert seen.prompts == [f"Save 5 rows {TIMES} 3 columns as:"]
+
+
+def test_comment_lines_above_the_table_are_left_out(monkeypatch, fs, tmp_path):
+    view = make(fs, tmp_path, "# run 7\n\n# host web01\n" + FRUIT)
+    _save(monkeypatch, view)
+    assert read(str(tmp_path / "fruit.view.tsv")) == FRUIT
+
+
+@pytest.mark.parametrize("text, setup, notice", [
+    (FRUIT, lambda v: v.add_filter("zebra"), " no rows to save "),
+    ("fruit\tprice\n", lambda v: None, " no rows to save "),
+])
+def test_with_no_rows_shown_nothing_is_asked_or_saved(monkeypatch, fs,
+                                                      tmp_path, text, setup,
+                                                      notice):
+    view = make(fs, tmp_path, text)
+    setup(view)
+    seen = _save(monkeypatch, view)
+    assert seen.prompts == [] and view.notice == notice
+    assert not (tmp_path / "fruit.view.tsv").exists()
+
+
+def test_a_file_that_could_not_be_read_has_nothing_to_save(monkeypatch, fs,
+                                                           tmp_path):
+    view = TableView(fs, str(tmp_path / "missing.tsv"))
+    seen = _save(monkeypatch, view)
+    assert seen.prompts == []
+    assert view.notice == " nothing to save: the file could not be read "
+
+
+def test_f2_does_nothing_in_a_record_or_a_summary(monkeypatch, fruit,
+                                                  tmp_path):
+    for opened in (lambda: setattr(fruit, "record", True), fruit.open_summary):
+        opened()
+        seen = _save(monkeypatch, fruit)
+        assert seen.prompts == []
+        fruit.record, fruit.summary = False, None
+    assert not (tmp_path / "fruit.view.tsv").exists()
+
+
+# -- the format the name chooses ---------------------------------------------------
+@pytest.mark.parametrize("name, first_line", [
+    ("fruit.view.csv", "fruit,price,city\n"),
+    ("fruit.view.psv", "fruit|price|city\n"),
+    ("fruit.view.tab", "fruit\tprice\tcity\n"),
+    ("FRUIT.VIEW.TSV", "fruit\tprice\tcity\n"),
+    ("fruit.view.txt", "fruit\tprice\tcity\n"),     # unknown: the source's
+])
+def test_the_name_chosen_sets_the_format_and_reads_back_the_same(
+        monkeypatch, fruit, tmp_path, name, first_line):
+    _save(monkeypatch, fruit, name)
+    written = read(str(tmp_path / name))
+    assert written.startswith(first_line)
+    if name.lower().endswith((".csv", ".psv", ".tab", ".tsv")):
+        assert _records(tmp_path / name) == fruit.records
+    assert fruit.notice == f" wrote 4 rows {TIMES} 3 columns to {name} "
+
+
+CSV = ('fruit,note\n'
+       'apple,"crisp, sweet"\n'
+       'fig,"two\nlines"\n'
+       'pear,"say ""ripe"""\n')
+
+
+def test_a_quoted_comma_a_quote_and_a_line_break_survive_to_a_csv(
+        monkeypatch, fs, tmp_path):
+    view = make(fs, tmp_path, CSV, "fruit.csv")
+    _save(monkeypatch, view)
+    assert _records(tmp_path / "fruit.view.csv") == view.records
+    assert read(str(tmp_path / "fruit.view.csv")) == CSV
+
+
+def test_a_semicolon_csv_saved_as_a_csv_keeps_its_semicolons(monkeypatch, fs,
+                                                             tmp_path):
+    view = make(fs, tmp_path, "fruit;price\nfig;0,25\n", "fruit.csv")
+    _save(monkeypatch, view)
+    assert read(str(tmp_path / "fruit.view.csv")) == "fruit;price\nfig;0,25\n"
+
+
+def test_a_cell_a_tsv_cannot_hold_is_named_and_nothing_is_written(
+        monkeypatch, fs, tmp_path):
+    view = make(fs, tmp_path, CSV, "fruit.csv")
+    _sort(view, 0, 2)               # pear, fig, apple: the row keeps its number
+    _save(monkeypatch, view, "fruit.view.tsv")
+    assert view.notice == (" not saved: row 2, column note, holds a line "
+                           "break, which a tab-separated file cannot hold; "
+                           "save it as .csv to keep it ")
+    assert not (tmp_path / "fruit.view.tsv").exists()
+
+
+def test_a_header_cell_a_psv_cannot_hold_is_named_too(monkeypatch, fs,
+                                                      tmp_path):
+    view = make(fs, tmp_path, 'fruit,"a|b"\nfig,1\n', "fruit.csv")
+    _save(monkeypatch, view, "fruit.view.psv")
+    assert view.notice.startswith(" not saved: the header, column a|b, holds "
+                                  "a pipe, which a pipe-separated file")
+    assert not (tmp_path / "fruit.view.psv").exists()
+
+
+def test_a_tab_in_a_csv_cell_is_refused_for_a_tsv(monkeypatch, fs, tmp_path):
+    view = make(fs, tmp_path, 'fruit,note\nfig,"a\tb"\n', "fruit.csv")
+    _save(monkeypatch, view, "out.tab")
+    assert "row 1, column note, holds a tab" in view.notice
+
+
+def test_a_quote_in_a_tsv_cell_stays_a_quote(monkeypatch, fs, tmp_path):
+    text = 'fruit\tnote\nfig\tsay "ripe"\n'
+    view = make(fs, tmp_path, text)
+    _save(monkeypatch, view)
+    # Not "say ""ripe""", which csv.writer would make of it.
+    assert read(str(tmp_path / "fruit.view.tsv")) == text
+
+
+def test_wide_and_accented_characters_survive(monkeypatch, fs, tmp_path):
+    text = "city\tnote\n京都\tcafé \U0001f600\n"
+    view = make(fs, tmp_path, text, "cities.tsv")
+    _save(monkeypatch, view, "cities.view.csv")
+    assert _records(tmp_path / "cities.view.csv") == view.records
+
+
+def test_an_unknown_name_keeps_a_csvs_quoting(monkeypatch, fs, tmp_path):
+    view = make(fs, tmp_path, CSV, "fruit.csv")
+    _save(monkeypatch, view, "fruit.out")
+    assert read(str(tmp_path / "fruit.out")) == CSV
+
+
+# -- the name ------------------------------------------------------------------------
+def test_a_name_that_is_taken_is_not_offered(monkeypatch, fruit, tmp_path):
+    write(str(tmp_path / "fruit.view.tsv"), "keep me\n")
+    seen = _save(monkeypatch, fruit)
+    assert seen.prompt_defaults == ["fruit.view2.tsv"]
+    assert read(str(tmp_path / "fruit.view.tsv")) == "keep me\n"
+    assert read(str(tmp_path / "fruit.view2.tsv")) == FRUIT
+
+
+@pytest.mark.parametrize("answer", [None, "", "   "])
+def test_esc_or_no_name_writes_nothing(monkeypatch, fruit, tmp_path, answer):
+    _save(monkeypatch, fruit, answer)
+    assert fruit.notice == " not saved " and fruit.saved == []
+    assert sorted(os.listdir(tmp_path)) == ["fruit.tsv"]
+
+
+def test_an_existing_file_is_replaced_only_after_a_yes(monkeypatch, fruit,
+                                                       tmp_path):
+    write(str(tmp_path / "keep.tsv"), "keep me\n")
+    seen = _save(monkeypatch, fruit, "keep.tsv", confirm=[False])
+    assert seen.messages == [("Save view", "keep.tsv already exists.\n"
+                              "Replace it?", False)]
+    assert read(str(tmp_path / "keep.tsv")) == "keep me\n"
+    assert fruit.notice == " not saved: keep.tsv is left as it was "
+    _save(monkeypatch, fruit, "keep.tsv", confirm=[True])
+    assert read(str(tmp_path / "keep.tsv")) == FRUIT
+
+
+@pytest.mark.parametrize("answer", ["fruit.tsv", "./fruit.tsv", "link.tsv",
+                                    "ABSOLUTE"])
+def test_the_file_being_browsed_is_never_written_over(monkeypatch, fruit,
+                                                      tmp_path, answer):
+    os.symlink(str(tmp_path / "fruit.tsv"), str(tmp_path / "link.tsv"))
+    if answer == "ABSOLUTE":
+        answer = str(tmp_path / "fruit.tsv")
+    seen = _save(monkeypatch, fruit, answer, confirm=[True])
+    assert seen.messages == []                 # refused before any question
+    assert "is the file being browsed" in fruit.notice
+    assert read(str(tmp_path / "fruit.tsv")) == FRUIT
+
+
+def test_a_directory_is_not_a_name_to_save_as(monkeypatch, fruit, tmp_path):
+    (tmp_path / "sub").mkdir()
+    _save(monkeypatch, fruit, "sub")
+    assert fruit.notice == " not saved: sub is a directory "
+
+
+def test_a_name_with_a_directory_in_it_goes_there(monkeypatch, fruit,
+                                                  tmp_path):
+    (tmp_path / "sub").mkdir()
+    _save(monkeypatch, fruit, "sub/picked.tsv")
+    assert read(str(tmp_path / "sub" / "picked.tsv")) == FRUIT
+    assert fruit.saved == [(fruit.fs, str(tmp_path / "sub" / "picked.tsv"))]
+
+
+def test_a_file_deleted_while_browsed_can_still_be_saved_over_another(
+        monkeypatch, fruit, tmp_path):
+    write(str(tmp_path / "old.tsv"), "old\n")
+    os.remove(str(tmp_path / "fruit.tsv"))
+    _save(monkeypatch, fruit, "old.tsv", confirm=[True])
+    assert read(str(tmp_path / "old.tsv")) == FRUIT
+
+
+# -- backends --------------------------------------------------------------------------
+class _Upload:
+    """A remote file being written: what paramiko and FTP send on close."""
+
+    def __init__(self, sent: dict, path: str, fails: Exception | None) -> None:
+        self.sent, self.path, self.fails = sent, path, fails
+        self.data = b""
+
+    def write(self, data: bytes) -> int:
+        self.data += data
+        return len(data)
+
+    def close(self) -> None:
+        if self.fails is not None:
+            raise self.fails
+        self.sent[self.path] = self.data
+
+
+class _Remote(_FakeRemoteBackend):
+    """A remote pane that keeps what is sent to it, or fails as told."""
+
+    def __init__(self, close_fails=None, open_fails=None) -> None:
+        super().__init__()
+        self.sent: dict = {}
+        self.close_fails, self.open_fails = close_fails, open_fails
+
+    def open_write(self, path):
+        if self.open_fails is not None:
+            raise self.open_fails
+        return _Upload(self.sent, path, self.close_fails)
+
+
+def test_a_remote_pane_is_sent_the_bytes_through_its_backend(monkeypatch,
+                                                             tmp_path):
+    write(str(tmp_path / "fruit.tsv"), FRUIT)
+    remote = _Remote()
+    view = TableView(remote, str(tmp_path / "fruit.tsv"))
+    view.add_filter("paris")
+    _save(monkeypatch, view)
+    target = str(tmp_path / "fruit.view.tsv")
+    assert remote.sent == {target: b"fruit\tprice\tcity\napple\t3\tParis\n"
+                                   b"fig\t0.25\tParis\n"}
+    assert not os.path.exists(target)          # sent, not written here
+    assert view.saved == [(remote, target)]
+
+
+@pytest.mark.parametrize("backend, reason", [
+    (_Remote(close_fails=OSError("connection lost")), "connection lost"),
+    (_Remote(open_fails=PermissionError("Permission denied")),
+     "Permission denied"),
+    (_Remote(close_fails=EOFError()), "EOFError"),
+], ids=["close", "open", "no-message"])
+def test_a_write_that_fails_says_why_and_keeps_the_view(monkeypatch, tmp_path,
+                                                        backend, reason):
+    write(str(tmp_path / "fruit.tsv"), FRUIT)
+    view = TableView(backend, str(tmp_path / "fruit.tsv"))
+    view.add_filter("paris")
+    _save(monkeypatch, view)
+    assert view.notice == (f" not saved: cannot write fruit.view.tsv: "
+                           f"{reason} ")
+    assert view.saved == [] and len(view.order) == 2
+    assert [f.text for f in view.view.filters] == ["paris"]
+
+
+def _archived(tmp_path):
+    archive = write_zip(str(tmp_path / "bundle.zip"),
+                        {"data/fruit.tsv": FRUIT})
+    with open(archive, "rb") as handle:
+        before = handle.read()
+    view = TableView(ArchiveFileSystem(LocalFileSystem(), archive),
+                     "/data/fruit.tsv")
+    return view, archive, before
+
+
+def _pane(fs, path):
+    """The other pane, as far as a save needs it."""
+    return types.SimpleNamespace(fs=fs, path=str(path))
+
+
+def test_in_an_archive_the_other_panes_directory_is_offered(monkeypatch, fs,
+                                                            tmp_path):
+    view, archive, before = _archived(tmp_path)
+    (tmp_path / "other").mkdir()
+    view.elsewhere = _pane(fs, tmp_path / "other")
+    seen = _save(monkeypatch, view)
+    # The whole path, so it is plain where it will go.
+    assert seen.prompt_defaults == [str(tmp_path / "other" / "fruit.view.tsv")]
+    assert seen.prompt_notes == [["fruit.tsv's directory is inside the archive "
+                                  "bundle.zip, so this saves in the other "
+                                  "pane's."]]
+    assert read(str(tmp_path / "other" / "fruit.view.tsv")) == FRUIT
+    with open(archive, "rb") as handle:
+        assert handle.read() == before          # not rewritten
+    assert view.saved == [(fs, str(tmp_path / "other" / "fruit.view.tsv"))]
+
+
+def test_a_bare_name_goes_in_the_directory_offered(monkeypatch, fs, tmp_path):
+    view, _archive, _before = _archived(tmp_path)
+    (tmp_path / "other").mkdir()
+    view.elsewhere = _pane(fs, tmp_path / "other")
+    _save(monkeypatch, view, "picked.tsv")
+    assert read(str(tmp_path / "other" / "picked.tsv")) == FRUIT
+
+
+def test_in_an_archive_with_nowhere_else_it_says_so(monkeypatch, fs, tmp_path):
+    view, _archive, _before = _archived(tmp_path)
+    seen = _save(monkeypatch, view)
+    assert seen.prompts == []
+    assert view.notice == (" nowhere to save: fruit.tsv's directory is inside "
+                           "the archive bundle.zip ")
+    other, _archive, _before = _archived(tmp_path)
+    view.elsewhere = _pane(other.fs, "/data")
+    _save(monkeypatch, view)
+    assert view.notice == (" nowhere to save: fruit.tsv's directory is inside "
+                           "the archive bundle.zip, and the other pane's is "
+                           "inside the archive bundle.zip ")
+
+
+def test_a_read_only_directory_offers_the_other_pane(monkeypatch, fruit, fs,
+                                                     tmp_path):
+    # Asked of the system rather than made with chmod, which root ignores.
+    (tmp_path / "other").mkdir()
+    monkeypatch.setattr(saveview, "_may_write",
+                        lambda directory: directory != str(tmp_path))
+    fruit.elsewhere = _pane(fs, tmp_path / "other")
+    seen = _save(monkeypatch, fruit)
+    assert seen.prompt_notes == [["fruit.tsv's directory cannot be written "
+                                  "to, so this saves in the other pane's."]]
+    assert read(str(tmp_path / "other" / "fruit.view.tsv")) == FRUIT
+    monkeypatch.setattr(saveview, "_may_write", lambda directory: False)
+    _save(monkeypatch, fruit)
+    assert fruit.notice == (" nowhere to save: fruit.tsv's directory cannot be "
+                            "written to, and the other pane's cannot be "
+                            "written to ")
+
+
+# -- a table read only in part ---------------------------------------------------------
+def test_a_truncated_table_says_only_the_rows_read_are_saved(monkeypatch, fs,
+                                                             tmp_path):
+    monkeypatch.setattr(table, "MAX_ROWS", 2)
+    view = make(fs, tmp_path)
+    assert view.table.truncated
+    seen = _save(monkeypatch, view)
+    assert seen.prompt_notes == [["Only the 2 rows read can be saved: the "
+                                  "file goes on past them."]]
+    assert view.notice == (f" wrote 2 rows {TIMES} 3 columns to fruit.view.tsv"
+                           f", from the first 2 rows only: the file goes on ")
+    assert _records(tmp_path / "fruit.view.tsv") == [HEADER, APPLE, PEAR]
+
+
+# -- from the application, full-screen ----------------------------------------------------
+@pytest.fixture
+def table_app(app, tmp_path, monkeypatch):
+    """The application, with fruit.tsv under the cursor in the left pane and
+    F3 opening full-screen; the table's own loop presses F2 and closes."""
+    write(str(tmp_path / "left" / "fruit.tsv"), FRUIT)
+    app.left.refresh()
+    app.left.move_to([e.name for e in app.left.entries].index("fruit.tsv"))
+    monkeypatch.setattr(curses, "curs_set", lambda visibility: 0)
+    opened = []
+
+    def run(view, stdscr):
+        opened.append(view)
+        view.handle_key(curses.KEY_F2, stdscr, 24, 80)
+
+    monkeypatch.setattr(TableView, "run", run)
+    app.opened = opened
+    return app
+
+
+def _names(panel):
+    return [entry.name for entry in panel.entries]
+
+
+def test_a_view_saved_full_screen_is_listed_when_the_table_closes(
+        table_app, monkeypatch, tmp_path):
+    _ScriptedDialogs(monkeypatch, prompt=[TAKE_DEFAULT])
+    table_app.handle_key(curses.KEY_F3)
+    assert table_app.opened[0].elsewhere is table_app.right
+    assert read(str(tmp_path / "left" / "fruit.view.tsv")) == FRUIT
+    assert "fruit.view.tsv" in _names(table_app.left)
+
+
+def test_a_view_saved_in_the_other_panes_directory_is_listed_there(
+        table_app, monkeypatch, tmp_path):
+    monkeypatch.setattr(saveview, "_may_write",
+                        lambda directory: directory != str(tmp_path / "left"))
+    _ScriptedDialogs(monkeypatch, prompt=[TAKE_DEFAULT])
+    table_app.handle_key(curses.KEY_F3)
+    assert read(str(tmp_path / "right" / "fruit.view.tsv")) == FRUIT
+    assert "fruit.view.tsv" in _names(table_app.right)
+    assert "fruit.view.tsv" not in _names(table_app.left)
+
+
+def test_a_view_saved_where_no_pane_is_looking_changes_no_listing(
+        table_app, monkeypatch, tmp_path):
+    (tmp_path / "left" / "sub" / "deeper").mkdir()
+    # Made behind the listings' backs: only a refresh would show them.
+    write(str(tmp_path / "left" / "late.txt"), "late")
+    write(str(tmp_path / "right" / "late.txt"), "late")
+    _ScriptedDialogs(monkeypatch, prompt=["sub/deeper/out.tsv"])
+    table_app.handle_key(curses.KEY_F3)
+    assert read(str(tmp_path / "left" / "sub" / "deeper" / "out.tsv")) == FRUIT
+    assert "late.txt" not in _names(table_app.left)
+    assert "late.txt" not in _names(table_app.right)
+
+
+
+# -- what the help and the manual say ------------------------------------------------------
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_the_help_the_readme_and_the_manual_give_the_save_key(app,
+                                                             monkeypatch):
+    seen = _ScriptedDialogs(monkeypatch)
+    app._help()
+    assert "F2/Ctrl-S save the rows and columns shown" in seen.last_message
+    assert "F2/Ctrl-S save the sheet" in seen.last_message
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "**`F2` (or `Ctrl-S`) saves the view**" in readme
+    assert "`F2` saves the sheet on the screen" in readme
+    manual = ROOT / "docs" / "usage.md"
+    if not manual.exists():
+        pytest.skip("the manual is not shipped in the source distribution")
+    text = manual.read_text(encoding="utf-8")
+    tables = text.split("## Tables (TSV and CSV)")[1].split("\n## ")[0]
+    sheets = text.split("## Spreadsheets")[1].split("\n## ")[0]
+    assert "`F2` (or `Ctrl-S`" in tables and "`F2` (or `Ctrl-S`)" in sheets
+    # The footers the manual draws are the ones the browsers draw.
+    assert mod.FOOTER_KEYS.startswith(
+        "Enter row  [f]ilter  =/! value  Bksp/0 unfilter  [s]ort  F2 save")
+    assert "city: Lisbon  Enter row  [f]ilter  =/! value  Bksp/0 unfilter  " \
+        "[s]ort  F2 save" in tables
+    assert "Tab sheet  F2 save  [/]find" in sheets

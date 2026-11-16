@@ -21,6 +21,10 @@ import json
 import re
 from dataclasses import dataclass
 
+# The name.tag.ext sibling, numbered if taken, is the core's now: the table
+# browser offers its saved view under the same rule (results.view.tsv).
+from ..saveview import derive_output_path as derive_output_path
+
 # Streaming reads happen in 64 KiB chunks; a single logical read is capped so a
 # huge file cannot exhaust memory or hang the TUI.
 CHUNK = 64 * 1024
@@ -180,26 +184,6 @@ def write_table(fs, path, header, rows, *, delimiter: str = ",",
     writer.writerows(rows)
     write_bytes(fs, path, buf.getvalue().encode(encoding))
     return len(rows)
-
-
-def derive_output_path(fs, path: str, suffix: str) -> str:
-    """A sibling path like ``sales.cleaned.csv``, numbered if it already exists."""
-    directory = fs.dirname(path)
-    base = fs.basename(path)
-    stem, dot, ext = base.rpartition(".")
-    if not dot:
-        stem, ext = base, ""
-
-    def build(tag: str) -> str:
-        name = f"{stem}.{tag}.{ext}" if ext else f"{stem}.{tag}"
-        return fs.join(directory, name)
-
-    candidate = build(suffix)
-    n = 2
-    while fs.exists(candidate):
-        candidate = build(f"{suffix}{n}")
-        n += 1
-    return candidate
 
 
 # -- value helpers ----------------------------------------------------------

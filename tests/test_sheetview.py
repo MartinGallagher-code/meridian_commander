@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Martin J. Gallagher
-"""The full-screen spreadsheet grid: layout, movement, search and drawing."""
+"""The full-screen spreadsheet grid: layout, movement, search, drawing, and
+saving the sheet on the screen (F2)."""
 
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ import curses
 
 import pytest
 
-from meridian_commander import dialogs
+from meridian_commander import dialogs, theme
 from meridian_commander.sheetview import (
     WIDTH_CHOICES,
     SheetView,
@@ -18,7 +19,10 @@ from meridian_commander.browsers import viewer_for
 from meridian_commander.viewer import Viewer
 
 from support import (
+    TAKE_DEFAULT,
     _KeyScript,
+    _ScriptedDialogs,
+    read,
     script_newwin,
     with_curses_screen,
     write,
@@ -518,3 +522,102 @@ def test_the_width_key_redraws_at_the_new_width(monkeypatch, fs, tmp_path):
     assert view._widths() == [WIDTH_CHOICES[2]]
     _run(monkeypatch, view, [ord("W"), ord("q")])
     assert view._widths() == [WIDTH_CHOICES[0]]
+
+
+
+# -- saving the sheet (F2) ----------------------------------------------------------
+TIMES = theme.glyph("times")
+
+
+def _save(monkeypatch, view, answer=TAKE_DEFAULT, key=curses.KEY_F2):
+    seen = _ScriptedDialogs(monkeypatch, prompt=[answer])
+    assert view.handle_key(key, None, 24, 80) is True
+    return seen
+
+
+@pytest.mark.parametrize("key", [curses.KEY_F2, 19])          # 19 = Ctrl-S
+def test_f2_saves_the_sheet_on_the_screen_and_no_other(monkeypatch, book,
+                                                       tmp_path, key):
+    seen = _save(monkeypatch, book, key=key)
+    assert seen.prompts == [f"Save 4 rows {TIMES} 3 columns as:"]
+    assert seen.prompt_defaults == ["book.Sales.tsv"]
+    assert read(str(tmp_path / "book.Sales.tsv")) == "".join(
+        "\t".join(row) + "\n" for row in SAMPLE["Sales"])
+    assert book.notice == f" wrote 4 rows {TIMES} 3 columns to book.Sales.tsv "
+    assert book.saved == [(book.fs, str(tmp_path / "book.Sales.tsv"))]
+    assert not (tmp_path / "book.Notes.tsv").exists()
+
+
+def test_the_next_sheet_is_saved_under_its_own_name(monkeypatch, book,
+                                                    tmp_path):
+    book.switch_sheet(1)
+    _save(monkeypatch, book)
+    assert read(str(tmp_path / "book.Notes.tsv")) == "only\ta note\n"
+    assert not (tmp_path / "book.Sales.tsv").exists()
+
+
+def test_every_row_is_as_wide_as_the_widest(monkeypatch, fs, tmp_path):
+    view = SheetView(fs, write_xlsx(str(tmp_path / "gaps.xlsx"),
+                                    {"S": [["a", "", "c"], ["d"], ["", "e"]]}))
+    _save(monkeypatch, view)
+    assert read(str(tmp_path / "gaps.S.tsv")) == "a\t\tc\nd\t\t\n\te\t\n"
+
+
+def test_a_csv_name_writes_a_quoted_csv(monkeypatch, fs, tmp_path):
+    view = SheetView(fs, write_xlsx(str(tmp_path / "notes.xlsx"),
+                                    {"S": [["name", "note"],
+                                           ["fig", "ripe, sweet\nand soft"]]}))
+    _save(monkeypatch, view, "notes.csv")
+    assert read(str(tmp_path / "notes.csv")) == \
+        'name,note\nfig,"ripe, sweet\nand soft"\n'
+
+
+def test_a_cell_a_tsv_cannot_hold_is_named_by_its_reference(monkeypatch, fs,
+                                                            tmp_path):
+    view = SheetView(fs, write_xlsx(str(tmp_path / "notes.xlsx"),
+                                    {"S": [["name", "note"],
+                                           ["fig", "two\nlines"]]}))
+    _save(monkeypatch, view)
+    assert view.notice == (" not saved: B2 holds a line break, which a "
+                           "tab-separated file cannot hold; save it as .csv "
+                           "to keep it ")
+    assert not (tmp_path / "notes.S.tsv").exists()
+
+
+def test_a_sheet_name_is_made_safe_for_a_file_name(monkeypatch, book,
+                                                   tmp_path):
+    book.workbook.sheets[0].name = "Q1/Q2\\sales"
+    seen = _save(monkeypatch, book)
+    assert seen.prompt_defaults == ["book.Q1_Q2_sales.tsv"]
+    book.workbook.sheets[0].name = ""
+    seen = _save(monkeypatch, book)
+    assert seen.prompt_defaults == ["book.sheet1.tsv"]
+
+
+def test_an_empty_sheet_or_an_unreadable_book_has_nothing_to_save(
+        monkeypatch, fs, tmp_path):
+    view = SheetView(fs, write_xlsx(str(tmp_path / "e.xlsx"), {"S": []}))
+    seen = _save(monkeypatch, view)
+    assert seen.prompts == []
+    assert view.notice == " nothing to save: this sheet is empty "
+    broken = SheetView(fs, str(tmp_path / "missing.xlsx"))
+    _save(monkeypatch, broken)
+    assert broken.notice == " nothing to save: the workbook could not be read "
+
+
+def test_a_truncated_sheet_says_only_what_was_read_is_saved(monkeypatch, fs,
+                                                            tmp_path):
+    from meridian_commander import xlsx
+    monkeypatch.setattr(xlsx, "MAX_ROWS", 2)
+    view = SheetView(fs, write_xlsx(str(tmp_path / "big.xlsx"),
+                                    {"S": [["a"], ["b"], ["c"]]}))
+    seen = _save(monkeypatch, view)
+    assert seen.prompt_notes == [[f"Only the 2 rows {TIMES} 1 column read can "
+                                  f"be saved: the sheet goes on past them."]]
+    assert view.notice == (f" wrote 2 rows {TIMES} 1 column to big.S.tsv, all "
+                           f"that was read: the sheet goes on ")
+    assert read(str(tmp_path / "big.S.tsv")) == "a\nb\n"
+
+
+def test_the_footer_names_the_save_key(book):
+    assert "F2 save" in " ".join(_texts(_draw(book)))
