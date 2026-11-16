@@ -149,3 +149,32 @@ in the file, so each keeps its letter; a hand-edited file is re-sorted the
 next time the app writes it. Since a command line can carry a token, the
 file is created readable only by you. It runs what it says with the same
 trust as `config.ini`, and nothing in it runs until you pick it.
+
+A `%` in a value is an ordinary character, here and in `presets.ini`: a pager
+of `less -Ps%f`, an editor of `vim -c "set titlestring=%f"` and a saved
+location under `/srv/reports/100%complete` all mean what they say. Both files
+are read with INI interpolation switched off, since every value in them is a
+literal rather than a template.
+
+## `[plugin:containers]` — Podman or Docker
+
+The [Containers](usage.md#containers-podman-and-docker) plug-in reads four
+settings, shown here with their defaults:
+
+```ini
+[plugin:containers]
+# auto: Podman if it is installed, otherwise Docker; or podman, or docker
+engine = auto
+# seconds between automatic refreshes of the lists
+refresh = 3
+# seconds a listing or a registry search may take
+timeout = 10
+# how many results a registry search asks for
+search_limit = 25
+```
+
+Comments go on lines of their own: a `;` after a value is part of the value.
+An `engine` that is not installed stops the plug-in from opening, with a
+message naming it. Starting, stopping, restarting and removing are not bound
+by `timeout`: they run in the background and may take up to two minutes,
+since stopping waits out the container's grace period.

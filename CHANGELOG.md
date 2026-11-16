@@ -12,7 +12,7 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
-## [1.23.0] — 2026-11-16
+## [1.24.0] — 2026-11-16
 
 ### Added
 
@@ -74,6 +74,46 @@ own section here, so not every version below is published to PyPI.
   size set by `plugins.terminal.set_size()`. No change in behaviour.
 - `App.run()` closes the backends however its loop ends, an exception
   included.
+
+## [1.23.0] — 2026-11-16
+
+### Added
+
+- **Containers**, a built-in plug-in for Podman and Docker (`p`, then `l`).
+  In a local pane it lists the downloaded images (repository, tag, short ID,
+  age, size) and the containers (name, status, image, ports) — the running
+  ones, and the stopped ones too on `a` — one key apart (`i` and `c`),
+  refreshing by itself and keeping the cursor on the same item by its ID.
+  `Enter` on a running container opens a shell inside it (`exec -it ID sh`)
+  in the pane's own terminal, with the terminal's `Ctrl-]` menu, zoom and
+  scrollback, and leaving the shell brings the list back. `p` pulls an image
+  by name in that terminal, with the engine's progress, and puts the new
+  image under the cursor; `f` searches the registries and `Enter` pulls a
+  result. `s` starts or stops a container, `R` restarts it, and `F8`/`Del`
+  removes a container or an image, each asking first with the item's name
+  and ID; they run in the background, so a ten-second stop does not freeze
+  the screen. Nothing is forced and nothing deletes in bulk: a running
+  container is refused with "stop it first", an image with several names
+  loses only the one under the cursor, and an engine's refusal is shown as
+  it gave it. `/` filters, `o` and `O` sort, `?` lists the keys. Podman is
+  used when both are installed; `[plugin:containers] engine = auto | podman
+  | docker` chooses, and `refresh`, `timeout` and `search_limit` are read
+  too. With neither installed it does not open and says why; an engine that
+  cannot be reached shows its own message and that `r` retries, and every
+  listing has a time limit. Commands are argument lists, never shell lines,
+  and act on IDs; a typed name is pulled only if it is an image name, and a
+  search term goes after `--`. SFTP, SSH, FTP and archive panes are refused.
+  Standard library only, as before. (MC-028)
+
+### Changed
+
+- **Seven plug-ins answer to a different letter in the `p` menu**, because
+  Containers takes `l` (each plug-in gets its own initial when it is free,
+  then the next spare letter in order): Find in other pane `l` → `o`, Grep in
+  other pane `o` → `q`, JSON push `q` → `u`, Multi-rename `u` → `v`, Profile
+  table `v` → `w`, Provost data `w` → `x`, and Terminal `x` → `y` (`t` still
+  opens the terminal directly). A test now pins every letter, so the next
+  change to them has to say so here too.
 
 ## [1.22.0] — 2026-11-16
 
@@ -1257,6 +1297,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.24.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.23.0...v1.24.0
 [1.23.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.22.0...v1.23.0
 [1.22.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.21.0...v1.22.0
 [1.21.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.20.0...v1.21.0
