@@ -739,11 +739,23 @@ def test_the_shell_is_told_the_terminal_it_has(local, monkeypatch):
     assert _wait_for(local, lambda: "term=xterm-256color" in _shown(local))
 
 
-def test_the_shell_is_not_given_lines_or_columns(local_ctx, monkeypatch):
+def test_the_shell_is_not_given_lines_or_columns(local_ctx, monkeypatch,
+                                                tmp_path):
     """Not even ones only the C library holds: GNU readline exports both
-    when it starts, and ``os.environ`` never hears of them."""
-    monkeypatch.setenv("SHELL", "/bin/sh")
-    os.putenv("LINES", "24")
+    when anything in the process imports it, and ``os.environ`` never hears
+    of them.  What the program is handed is recorded as it starts, before
+    any shell runs -- an interactive bash (macOS's ``/bin/sh``) sets both
+    for itself from the terminal's size, which is the shell's doing."""
+    record = tmp_path / "env.txt"
+    shell = tmp_path / "record-env"
+    shell.write_text('#!/bin/sh\n'
+                     'env > "$RECORD_TO.part"\n'
+                     'mv "$RECORD_TO.part" "$RECORD_TO"\n'
+                     'exec /bin/sh\n')
+    shell.chmod(0o755)
+    monkeypatch.setenv("SHELL", str(shell))
+    monkeypatch.setenv("RECORD_TO", str(record))
+    os.putenv("LINES", "24")                 # behind os.environ's back
     os.putenv("COLUMNS", "80")
     try:
         plugin = TerminalPlugin(local_ctx)
@@ -751,11 +763,13 @@ def test_the_shell_is_not_given_lines_or_columns(local_ctx, monkeypatch):
         os.unsetenv("LINES")
         os.unsetenv("COLUMNS")
     try:
-        _type(plugin, 'echo "lines=${LINES-unset} columns=${COLUMNS-unset}"')
-        assert _wait_for(plugin, lambda: "lines=unset columns=unset"
-                         in _shown(plugin))
+        assert _wait_for(plugin, record.exists)
+        handed = record.read_text().splitlines()
     finally:
         plugin.on_exit()
+    assert "TERM=xterm-256color" in handed
+    assert not [line for line in handed
+                if line.startswith(("LINES=", "COLUMNS="))]
 
 
 def test_escape_sequences_from_a_real_shell_reach_the_grid(local):
