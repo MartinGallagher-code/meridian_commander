@@ -1684,3 +1684,519 @@ def test_closing_the_backends(app, monkeypatch):
     app._close_backends()
     assert "plugin" in closed
     assert app.left.plugin is None and app.right.plugin is None
+
+
+# -- background commands (MC-027): running, showing, stopping, quitting ---------
+
+import time  # noqa: E402
+
+from meridian_commander import background  # noqa: E402
+from meridian_commander import commands as saved_commands  # noqa: E402
+from meridian_commander.app import App  # noqa: E402
+from meridian_commander.archive import open_archive  # noqa: E402
+from meridian_commander.commandpane import CommandPane  # noqa: E402
+from meridian_commander.commands import SavedCommand  # noqa: E402
+from meridian_commander.jobs import RUNNING, Job, JobQueue  # noqa: E402
+from meridian_commander.jobspane import JobsPane  # noqa: E402
+from meridian_commander.operations import OVERWRITE  # noqa: E402
+from meridian_commander.peek import PeekPane  # noqa: E402
+from meridian_commander.plugin_api import PluginContext  # noqa: E402
+from meridian_commander.plugins.terminal import (  # noqa: E402
+    MENU_KEY,
+    TerminalPlugin,
+)
+from meridian_commander.viewpane import ViewPane  # noqa: E402
+
+from command_stubs import process_gone, wait_until  # noqa: E402
+from support import (  # noqa: E402
+    _FakeRemoteBackend,
+    terminal_text,
+    with_curses_screen,
+)
+from test_app_draw import _LoopScreen  # noqa: E402
+
+
+@pytest.fixture
+def running(app, stubs, tmp_path):
+    """``start(line)``: a command running from the left pane, as & starts
+    one.  Every command is stopped at the end."""
+    def start(line, name="cmd"):
+        return app._start_command(name, line, app.left.path)
+
+    yield start
+    app.commands.stop_all(0.5)
+
+
+def _shown(command) -> str:
+    with command.lock:
+        return terminal_text(command.screen)
+
+
+def _show(app, command, panel=None):
+    app.active = panel or app.left
+    app._show_command(command)
+    return app.active.plugin
+
+
+def _untouched(command) -> bool:
+    """Running, and never sent a signal (fake-signals says when it is)."""
+    time.sleep(0.2)
+    return command.running() and "SIGNALLED" not in _shown(command)
+
+
+# -- where a command may run ---------------------------------------------------------
+
+class _FtpLike(_FakeRemoteBackend):
+    scheme = "ftp"
+
+    def label(self) -> str:
+        return "ftp://files"
+
+
+@pytest.mark.parametrize("backend, label", [
+    (_FakeRemoteBackend, "sftp://deploy@web1"), (_FtpLike, "ftp://files"),
+])
+@pytest.mark.parametrize("entry", ["Type a command...", "here"])
+def test_a_remote_pane_is_refused(app, stubs, tmp_path, monkeypatch, backend,
+                                  label, entry):
+    saved_commands.save([SavedCommand("here", "fake-server")])
+    app.left.set_location(backend(), str(tmp_path / "left"))
+    scripted = _ScriptedDialogs(monkeypatch, menu=[entry])
+    app.handle_key(ord("&"))
+    assert scripted.messages[-1] == (
+        "Background commands",
+        f"This pane is {label}.\n"
+        "A background command runs on this computer, so it\n"
+        "starts from a local pane, or from a saved command\n"
+        "that names a directory of its own.", True)
+    assert scripted.prompts == [] and app.commands.commands == []
+    assert scripted.menu_texts[0] == (
+        "This pane is not on this computer: only a saved\n"
+        "command with a directory of its own runs from it.")
+
+
+def test_an_archive_pane_is_refused(app, stubs, tmp_path, monkeypatch):
+    path = str(tmp_path / "left" / "bundle.zip")
+    write_zip(path, {"a.txt": "a"})
+    archive = open_archive(app.left.fs, path)
+    app.left.set_location(archive, "/")
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Type a command..."])
+    app.handle_key(ord("&"))
+    assert scripted.last_message.startswith(f"This pane is {archive.label()}.")
+    assert app.commands.commands == []
+    archive.close()
+
+
+def test_a_saved_command_with_a_directory_of_its_own_runs_from_anywhere(
+        app, stubs, tmp_path, monkeypatch):
+    saved_commands.save([SavedCommand("site", "fake-server",
+                                      str(tmp_path / "right"))])
+    app.left.set_location(_FakeRemoteBackend(), str(tmp_path / "left"))
+    _ScriptedDialogs(monkeypatch, menu=["site"])
+    app.handle_key(ord("&"))
+    [command] = app.commands.commands
+    assert command.directory == str(tmp_path / "right")
+    app.commands.stop_all(0.5)
+
+
+def test_a_command_that_cannot_start_says_why(app, stubs, monkeypatch):
+    def no_pty(directory, argv):
+        raise OSError("out of pseudo-terminals")
+
+    monkeypatch.setattr(background, "spawn", no_pty)
+    scripted = _ScriptedDialogs(monkeypatch)
+    assert app._start_command("web", "fake-server", app.left.path) is None
+    assert scripted.messages[-1] == (
+        "Background commands",
+        "Could not start fake-server:\nout of pseudo-terminals", True)
+    assert app.commands.commands == []
+
+
+# -- the jobs list -----------------------------------------------------------------------
+
+def _job(tmp_path):
+    return Job(1, False, LocalFileSystem(), str(tmp_path / "left"),
+               ["file.txt"], LocalFileSystem(), str(tmp_path / "right"),
+               OVERWRITE)
+
+
+def test_the_jobs_list_shows_commands_and_their_state(app, running, tmp_path,
+                                                      monkeypatch):
+    web = running("fake-server", name="web")
+    once = running("exit 2", name="once")
+    assert wait_until(once.poll)
+    monkeypatch.setattr(web, "age", lambda: "3m07s")
+    assert JobsPane.lines_for_command(web) == (
+        "&1. running   web: fake-server",
+        f"    in {app.left.path}  up 3m07s")
+    once.finished = once.started + 2
+    assert JobsPane.lines_for_command(once) == (
+        "&2. exited (status 2) once: exit 2",
+        f"    in {app.left.path}  ran 2s")
+    web.viewer = object()
+    assert JobsPane.lines_for_command(web)[1].endswith("  (shown)")
+    web.viewer = None
+
+    def draw(stdscr):
+        real = App(stdscr, str(tmp_path / "left"), str(tmp_path / "right"))
+        real.jobs = JobQueue(spawn=lambda work: None)
+        real.jobs.submit(_job(tmp_path))
+        real.jobs.jobs[0].state = RUNNING
+        real.commands = app.commands
+        real._jobs_pane()
+        real.left.plugin.row = 1                     # on the command
+        real.draw()
+        return [stdscr.instr(row, 0).decode(errors="replace")
+                for row in range(24)]
+
+    rows = "\n".join(with_curses_screen(24, 100, draw))
+    assert " 1. running   Copy file.txt" in rows
+    assert "&1. running   web: fake-server" in rows
+    assert "&2. exited (status 2) once: exit 2" in rows
+    assert "Enter: show  k: stop  d: remove  J: close" in rows
+    assert "Jobs: 1 running" in rows and "Commands: 1 running" in rows
+
+
+def test_an_empty_jobs_list_mentions_commands(app, tmp_path):
+    def draw(stdscr):
+        real = App(stdscr, str(tmp_path / "left"), str(tmp_path / "right"))
+        real._jobs_pane()
+        real.draw()
+        return "\n".join(stdscr.instr(row, 0).decode(errors="replace")
+                         for row in range(24))
+
+    text = with_curses_screen(24, 160, draw)
+    assert ("No jobs. F5 or F6 with Background on starts one; & runs a "
+            "command.") in text
+
+
+def test_the_jobs_list_keys_on_a_command(app, running, tmp_path, monkeypatch):
+    app.jobs = JobQueue(spawn=lambda work: None)
+    app.jobs.submit(_job(tmp_path))
+    web = running("fake-signals", name="web")
+    assert wait_until(lambda: "ready" in _shown(web))
+    app._jobs_pane()
+    pane = app.left.plugin
+    pane.handle_key(ord("j"))
+    assert pane.selected() is web
+    scripted = _ScriptedDialogs(monkeypatch, confirm=[False, False, True])
+    for key in (ord("p"), ord("k"), curses.KEY_DC):  # nothing, then no twice
+        assert pane.handle_key(key) is True
+    assert scripted.messages[0] == ("Stop command",
+                                    "Stop &1 'web'?\nfake-signals", False)
+    assert web.running() and pane.selected() is web   # k did not move up
+    pane.handle_key(ord("d"))
+    assert app.message == "Command &1 is still running -- k stops it"
+    pane.handle_key(ord("c"))                          # yes
+    assert web.ended and app.message == "Command &1 'web' stopped"
+    pane.handle_key(ord("k"))                          # ended: nothing asked
+    assert app.message == "Command &1 has already ended"
+    assert len(scripted.messages) == 3
+    pane.handle_key(10)                                # shows it in the pane
+    view = app.left.plugin
+    assert isinstance(view, CommandPane) and view.command is web
+    assert view.done and "SIGNALLED" in _shown(web)
+    assert app.message.startswith("Command &1 -- Ctrl-] then q hides it")
+    app.handle_key(MENU_KEY)                           # Ctrl-] q, then J
+    app.handle_key(ord("q"))
+    app._jobs_pane()
+    pane = app.left.plugin
+    assert isinstance(pane, JobsPane) and web.viewer is None
+    pane.row = 1
+    pane.handle_key(ord("d"))                          # ended: removed
+    assert app.commands.commands == []
+    assert app.message == "Command &1 'web' removed"
+    pane.handle_key(ord("k"))                          # on the job: moves up
+    assert pane.row == 0
+
+
+def test_removing_a_command_gives_back_the_pane_showing_it(app, running):
+    command = running("true")
+    assert wait_until(command.poll)
+    _show(app, command, app.right)
+    app._remove_command(command)
+    assert app.right.plugin is None and app.commands.commands == []
+
+
+# -- the status line and the poll loop ------------------------------------------------
+
+def test_the_end_of_a_command_is_on_the_status_line(app, running):
+    command = running("exit 3", name="once")
+    assert wait_until(command.poll)
+    app._tick_plugins()
+    assert app.message == ("Command &1 'once' exited (status 3) -- J shows "
+                           "its screen")
+    app._set_message("later")
+    app._tick_plugins()
+    assert app.message == "later"                    # said once
+
+
+def test_the_loop_polls_while_commands_run_and_blocks_when_none_do(app,
+                                                                   running):
+    assert app._tick_plugins() is None
+    command = running("fake-server")
+    assert app._tick_plugins() == app.COMMANDS_POLL_MS
+    command.stop()
+    assert app._tick_plugins() is None
+
+
+def test_the_status_line_counts_the_commands(app, running, tmp_path):
+    running("fake-server")
+    running("fake-server 8001")
+
+    def draw(stdscr):
+        real = App(stdscr, str(tmp_path / "left"), str(tmp_path / "right"))
+        real.commands = app.commands
+        real.draw()
+        return stdscr.instr(22, 0).decode(errors="replace")
+
+    assert "Commands: 2 running" in with_curses_screen(24, 100, draw)
+
+
+# -- showing one in a pane ---------------------------------------------------------------
+
+def test_showing_a_command_in_the_pane(app, running):
+    command = running("fake-repl")
+    view = _show(app, command)
+    assert isinstance(view, CommandPane) and command.viewer is view
+    assert app.left.plugin is view and app.active is app.left
+    assert app.message == ("Command &1 -- Ctrl-] then q hides it (it keeps "
+                           "running), k stops it")
+    app.handle_key(ord("x"))                         # keys go to it
+    assert wait_until(lambda: "x" in _shown(command))
+
+
+def test_one_pane_at_a_time_it_moves_to_the_other(app, running):
+    command = running("fake-signals")
+    left = _show(app, command, app.left)
+    right = _show(app, command, app.right)
+    assert app.left.plugin is None and app.right.plugin is right
+    assert command.viewer is right and left is not right
+    assert _untouched(command)
+
+
+def test_a_pane_that_will_not_close_keeps_it_out(app, running, monkeypatch):
+    command = running("fake-server")
+    app.left.plugin = PeekPane(PluginContext(app, app.left, app.right))
+    monkeypatch.setattr(app.left.plugin, "may_close", lambda: False)
+    app._show_command(command)
+    assert isinstance(app.left.plugin, PeekPane) and command.viewer is None
+    app._close_plugin(app.left)
+
+
+def test_ctrl_bracket_q_hides_it_and_it_runs_on(app, running):
+    command = running("fake-signals")
+    assert wait_until(lambda: "ready" in _shown(command))
+    _show(app, command)
+    app.handle_key(MENU_KEY)
+    app.handle_key(ord("q"))
+    assert app.left.plugin is None and command.viewer is None
+    assert app.message == "Command &1 'cmd' still running -- J shows it"
+    assert _untouched(command)
+
+
+def test_ctrl_bracket_k_stops_it_after_asking(app, running, monkeypatch):
+    command = running("fake-server")
+    view = _show(app, command)
+    scripted = _ScriptedDialogs(monkeypatch, confirm=[False, True])
+    app.handle_key(MENU_KEY)
+    app.handle_key(ord("k"))
+    assert command.running()
+    app.handle_key(MENU_KEY)
+    app.handle_key(ord("k"))
+    assert command.ended and command.state_text() == "stopped"
+    assert len(scripted.messages) == 2
+    app._tick_plugins()
+    assert view.done and view.status.startswith("[stopped -- ")
+    app.handle_key(ord("x"))                         # any key: the listing
+    assert app.left.plugin is None
+    assert app.message.startswith("Command &1 'cmd' ")
+
+
+@pytest.mark.parametrize("opener", ["terminal", "peek", "plugin"])
+def test_opening_something_else_over_it_leaves_it_running(app, running,
+                                                          monkeypatch, opener):
+    command = running("fake-signals")
+    assert wait_until(lambda: "ready" in _shown(command))
+    _show(app, command)
+    if opener == "terminal":
+        monkeypatch.setenv("SHELL", "/bin/sh")
+        app._open_terminal_pane()
+        assert isinstance(app.left.plugin, TerminalPlugin)
+        assert not isinstance(app.left.plugin, CommandPane)
+    elif opener == "peek":
+        app._peek()
+        assert isinstance(app.left.plugin, PeekPane)
+    else:
+        _ScriptedDialogs(monkeypatch, menu=[0])
+        app._plugin_mode()
+        assert not isinstance(app.left.plugin, CommandPane)
+    assert command.viewer is None
+    assert _untouched(command)
+    app._close_plugin(app.left)
+
+
+def test_swapping_and_single_pane_leave_it_running(app, running):
+    command = running("fake-signals")
+    assert wait_until(lambda: "ready" in _shown(command))
+    view = _show(app, command)
+    app._swap_panes()
+    assert app.right.plugin is view
+    app._toggle_single()
+    app.active = app.left
+    assert app._hidden(app.right)
+    app._tick_plugins()                               # ticked out of sight
+    assert command.viewer is view and _untouched(command)
+
+
+def test_f3_in_a_pane_and_quick_view_do_not_take_its_pane(app, running,
+                                                         monkeypatch):
+    command = running("fake-signals")
+    assert wait_until(lambda: "ready" in _shown(command))
+    view = _show(app, command, app.left)
+    app.active = app.right
+    app.open_in_pane = True
+    app.right.move_to(next(i for i, e in enumerate(app.right.entries)
+                           if e.name == "file.txt"))
+    app._view()
+    assert app.left.plugin is view                    # F3 used its own pane
+    assert isinstance(app.right.plugin, ViewPane)
+    app._close_plugin(app.right)
+    app.active = app.right
+    app._quick_view()
+    assert app.left.plugin is view
+    assert app.message == "The other pane is busy -- close it first"
+    assert _untouched(command)
+
+
+def test_the_program_sees_the_panes_size_and_the_keys(tmp_path, stubs):
+    """On a real screen: shown in half of it, then zoomed with Ctrl-] z."""
+    def script(stdscr):
+        real = App(stdscr, str(tmp_path / "left"), str(tmp_path / "right"))
+        command = real._start_command("repl", "fake-repl", real.left.path)
+        try:
+            assert wait_until(lambda: "ready" in _shown(command))
+            real._show_command(command)
+            sizes = []
+            for zoom in (False, True):
+                if zoom:
+                    real.handle_key(MENU_KEY)
+                    real.handle_key(ord("z"))
+                real.draw()
+                for ch in "stty size":
+                    real.handle_key(ord(ch))
+                real.handle_key(10)
+                wanted = "19 80" if zoom else "19 40"
+                sizes.append(wait_until(
+                    lambda wanted=wanted: wanted in _shown(command)))
+            real.handle_key(3)                        # Ctrl-C reaches it
+            assert wait_until(command.poll)
+            real._tick_plugins()
+            real.draw()
+            footer = stdscr.instr(21, 0).decode(errors="replace")
+            return sizes, command.state_text(), footer
+        finally:
+            real._close_backends()
+
+    sizes, state, footer = with_curses_screen(24, 80, script)
+    assert sizes == [True, True]
+    assert state == "killed (SIGINT)"
+    assert "[killed (SIGINT) -- PgUp history, any key closes]" in footer
+
+
+# -- quitting ------------------------------------------------------------------------------
+
+def test_quitting_asks_when_commands_run(app, running, monkeypatch):
+    command = running("fake-server", name="web")
+    scripted = _ScriptedDialogs(monkeypatch, confirm=[False, True])
+    app._quit()
+    assert scripted.messages[0] == (
+        "Quit", "1 background command still running:\n'web'\n\n"
+                "Quitting stops it.  Quit?", False)
+    assert app.running is True and command.running()     # no: nothing done
+    app._quit()
+    assert app.running is False and len(scripted.messages) == 2
+    app._close_backends()
+    assert command.ended and process_gone(command.pid)
+
+
+def test_quitting_names_a_few_and_stops_them_all(app, running, monkeypatch):
+    started = [running("fake-server", name=f"s{n}") for n in range(5)]
+    scripted = _ScriptedDialogs(monkeypatch, confirm=[True])
+    app._quit()
+    assert scripted.messages[0][1] == (
+        "5 background commands still running:\n's0', 's1', 's2', 's3', ...\n\n"
+        "Quitting stops them.  Quit?")
+    app._close_backends()
+    assert all(command.ended for command in started)
+    assert all(process_gone(command.pid) for command in started)
+
+
+def test_quitting_with_commands_and_jobs_asks_about_both(app, running,
+                                                         tmp_path,
+                                                         monkeypatch):
+    app.jobs = JobQueue(spawn=lambda work: None)
+    app.jobs.submit(_job(tmp_path))
+    running("fake-server")
+    scripted = _ScriptedDialogs(monkeypatch, confirm=[True], menu=["Back"])
+    app._quit()
+    assert scripted.menus[0][0] == "Quit"            # then the jobs' question
+    assert app.running is True
+
+
+def test_quitting_with_nothing_running_asks_as_before(app, monkeypatch):
+    scripted = _ScriptedDialogs(monkeypatch, confirm=[True])
+    app._quit()
+    assert scripted.messages[0][:2] == ("Quit", "Exit Meridian Commander?")
+    assert app.running is False
+
+
+def _loop_app(tmp_path, keys, monkeypatch):
+    monkeypatch.setattr(curses, "curs_set", lambda visibility: 0)
+    return App(_LoopScreen(keys), str(tmp_path / "left"),
+               str(tmp_path / "right"))
+
+
+def test_ctrl_c_with_commands_running(tmp_path, stubs, monkeypatch):
+    loop = _loop_app(tmp_path, [KeyboardInterrupt(), KeyboardInterrupt()],
+                     monkeypatch)
+    command = loop._start_command("web", "fake-server", loop.left.path)
+    scripted = _ScriptedDialogs(monkeypatch, confirm=[False, True])
+    loop.run()
+    assert len(scripted.messages) == 2               # no, then yes: no more
+    assert "Quitting stops it." in scripted.messages[1][1]
+    assert command.ended and process_gone(command.pid)
+
+
+def test_ctrl_c_with_commands_and_jobs(tmp_path, stubs, monkeypatch):
+    loop = _loop_app(tmp_path, [KeyboardInterrupt(), KeyboardInterrupt()],
+                     monkeypatch)
+    loop.jobs = JobQueue(spawn=lambda work: None)
+    loop.jobs.submit(_job(tmp_path))
+    command = loop._start_command("web", "fake-server", loop.left.path)
+    _ScriptedDialogs(monkeypatch, confirm=[True, True],
+                     menu=["Back", "Cancel them and quit"])
+    loop.run()
+    assert command.ended
+
+
+def test_an_error_in_the_loop_still_stops_the_commands(tmp_path, stubs,
+                                                        monkeypatch):
+    loop = _loop_app(tmp_path, [RuntimeError("boom")], monkeypatch)
+    command = loop._start_command("web", "fake-server", loop.left.path)
+    with pytest.raises(RuntimeError):
+        loop.run()
+    assert command.ended and process_gone(command.pid)
+
+
+def test_closing_the_app_stops_what_is_left_and_its_children(app, running,
+                                                             tmp_path):
+    pidfile = tmp_path / "worker.pid"
+    command = running(f"fake-workers {pidfile}")
+    assert wait_until(lambda: "workers-up" in _shown(command))
+    worker = int(pidfile.read_text())
+    _show(app, command)
+    app._close_backends()
+    assert command.ended and command.state_text() == "stopped"
+    assert wait_until(lambda: process_gone(worker))
+    assert not background._LIVE

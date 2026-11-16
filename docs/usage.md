@@ -1090,6 +1090,97 @@ A pane is half the screen, and a few programs assume 80 columns. `!` hands a
 program the whole real terminal instead: full width, true colour and the
 outer terminal's own mouse handling.
 
+## Running commands in the background
+
+`&` runs a command in the background: `python3 -m http.server` serving the
+directory you are browsing, a dev server, `tail -f`, a watcher. It runs in a
+directory you choose and goes on running while both panes keep working, and
+its terminal keeps collecting what it writes, so you can look at it in a pane
+whenever you want and leave it again without stopping it. (A command in a `t`
+pane holds that pane for as long as it runs, and closing the pane ends it;
+`!` holds the whole screen.)
+
+`&` (or **Command ▸ Background commands…**) opens the commands menu:
+
+```
+┌──────────────── Background commands ────────────────┐
+│ Blank directory: /home/me/site                      │
+│                                                     │
+│ b  docs  --  make livehtml  (in /home/me/docs)      │
+│ h  http  --  python3 -m http.server 8000            │
+│ t  Type a command...                                │
+│ a  Add...                                           │
+│ e  Edit...                                          │
+│ d  Delete...                                        │
+│ c  Cancel                                           │
+└─────────────────────────────────────────────────────┘
+```
+
+- **A saved command** starts at once, by its letter, as a preset opens with
+  `b`. It runs in its own directory if it names one, and otherwise in the
+  active pane's directory — the menu shows which that is. If it is running
+  already you are asked whether to show it, start another, or cancel.
+- **Type a command…** asks for a command line and runs it in the active
+  pane's directory. Then it offers to save it to the list (`Esc` says no),
+  under a name and with a directory — the one it ran in, which you can clear
+  so that it runs wherever the active pane is.
+- **Add…**, **Edit…** and **Delete…** keep the list: a name, a command line
+  and an optional directory, one prompt each. Edit changes an entry in
+  place, renaming included, and Delete asks first. A name cannot be empty,
+  contain `[` or `]`, or be `DEFAULT`, as with presets.
+
+The command line is run by your shell (`$SHELL -c`, or `/bin/sh -c`), so
+pipes, `&&` and `$VARS` work as they do at a prompt. Each command gets a
+terminal of its own — a pty, `TERM=xterm-256color`, the emulator the `t`
+terminal uses — in a process group of its own. Its output is read on a thread
+of its own, so a command that writes a lot (a server logging every request)
+never stops on a full terminal, whether or not anything shows it, and even
+while a dialog, the editor or the full-screen shell has the screen. The
+terminal keeps its screen and the last 2,000 lines of history.
+
+**Commands run on this computer.** From an SFTP, SSH, FTP or archive pane,
+Type a command… and a saved command without a directory of its own are
+refused, with a message saying so; a saved command that names a directory
+runs from any pane.
+
+**Seeing one.** Running commands are listed in the jobs list (`J`), after the
+copies and moves, numbered `&1`, `&2`… with their state — running, stopped,
+`exited (status N)` — and where they run. `Enter` on one shows its terminal
+in the pane, at the pane's size (the program is told, and redraws to fit).
+There it is the `t` terminal: every key goes to the program, `Ctrl-C`
+included, and **`Ctrl-]`** opens the menu in the footer:
+
+| After `Ctrl-]` | |
+|---|---|
+| `q` | hide the terminal: the pane gets its listing back, and the command keeps running |
+| `k` | stop the command, after asking |
+| `Tab`, `z`, `PgUp` | the other pane, zoom, scroll back, as in the `t` terminal |
+
+A command is shown in one pane at a time; asking for it in the other pane
+moves it there. Nothing that closes a pane stops it: `Ctrl-]` `q`, opening a
+terminal, a plug-in or head + tail over it, swapping the panes, single pane.
+
+**Stopping one** — `k` in the jobs list or `Ctrl-]` then `k` in its terminal,
+after a confirmation — ends its whole process group: `SIGTERM`, then
+`SIGKILL` for anything still there two seconds later. So the children it
+started, a server's workers or the steps of `make serve`, go with it.
+
+**When one ends**, by itself or stopped, the status line says so with its
+exit status, and it stays in the jobs list, `exited (status N)` or `stopped`,
+with its last screen and its history still there to read (`Enter`, then
+`PgUp` or the wheel). `d` in the jobs list removes it; starting it again
+replaces it. One that fails at once — the port is taken, the program is not
+there — shows why on its screen. The status line counts the commands
+running, beside the jobs.
+
+**Quitting** with commands still running asks first, naming them; yes stops
+every one, as above, and nothing Meridian started is left running after it
+exits. Commands do not outlive Meridian, and are not started again when it
+starts.
+
+The list lives in `~/.config/meridian-commander/commands.ini` — see
+[Configuration](configuration.md#commandsini--saved-background-commands).
+
 ## Searching a pane by name
 
 In a pane almost every key is a hotkey — `d` deletes, `q` quits, `8` is `F8` —
@@ -1335,13 +1426,13 @@ where it should.)
 | `Esc` | the menu bar | `Alt+F`/`C`/`O`/`H` | a menu by name |
 | `~` | home directory (this pane) | `=` | other pane: same location |
 | `T` | the trash, in this pane (see above) | | |
-| `<` / `>` | back / forward through this pane's history | `J` | background jobs: pause, resume, cancel (see [In the background](transfers.md#in-the-background)) |
-| `b` | presets: saved locations | | |
+| `<` / `>` | back / forward through this pane's history | `J` | background jobs: pause, resume, cancel (see [In the background](transfers.md#in-the-background)); on a command, `Enter` shows it, `k` stops it, `d` removes an ended one |
+| `b` | presets: saved locations | `&` | background commands: start a saved one, type one, add, edit, delete (see [above](#running-commands-in-the-background)) |
 | `.` | show/hide hidden files | `t` | terminal inside this pane (see above) |
 | `u` | directory sizes in this pane | `z` | single pane: this one at full width, the other kept |
 | `p` / F11 | plug-in mode (this pane) | `!` | full-screen shell |
 | `f` | find files (browsable results) | | |
-| `C` | configuration menu | `Ctrl-]` | in the terminal: its menu — `Tab` other pane, `z` zoom, `q` close, `PgUp` scroll back |
+| `C` | configuration menu | `Ctrl-]` | in the terminal: its menu — `Tab` other pane, `z` zoom, `q` close, `PgUp` scroll back; in a background command's terminal `q` hides it and `k` stops it |
 | `Options ▸ Editor` | F4 opens your editor | `Options ▸ Viewer` | F3 opens your pager |
 | `Options ▸ Single pane` | the same as `z`, ticked while on | `Options ▸ View and edit in a pane` | F3 and F4 open in a pane (see above) |
 
@@ -1401,6 +1492,9 @@ back, `q` closes the terminal, `PgUp` (or `[`)
 scrolls back — then `PgUp`/`PgDn`/arrows/`Home` move through the history and
 any other key returns — and `Ctrl-]` sends a `Ctrl-]` to the program. The
 mouse wheel scrolls back too.
+In a **background command's terminal** (`&`, then `Enter` in `J`): the same,
+except that `Ctrl-]` then `q` hides it and leaves it running, and `Ctrl-]`
+then `k` stops it.
 In the **editor**: `F2` / `Ctrl-S` / `Ctrl-O` save, `F10` / `Ctrl-Q` quit,
 `Ctrl-Y` / `Ctrl-K` delete a line, `Ctrl-L` toggles line numbers. Esc does
 not quit — only `q`-style keys and `F10` leave the app, so a stray Esc never

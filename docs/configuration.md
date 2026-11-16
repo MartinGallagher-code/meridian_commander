@@ -19,7 +19,9 @@ Press **`C`** for the configuration menu:
 Saved locations are kept separately, in
 `~/.config/meridian-commander/presets.ini` — see
 [Presets](usage.md#presets--saved-locations). They are written by the app (`b`) rather
-than by hand, which is why they are not part of `config.ini`.
+than by hand, which is why they are not part of `config.ini`. The saved
+background commands (`&`) have a file of their own for the same reason,
+`commands.ini` ([below](#commandsini--saved-background-commands)).
 
 ## `[ui] panes` — starting with one pane
 
@@ -107,8 +109,43 @@ the command you chose is not on your `PATH`. See
 [Editing with your own editor](usage.md#editing-with-your-own-editor) for what
 happens on a remote pane.
 
-A `%` in a value is an ordinary character, here and in `presets.ini`: a pager
-of `less -Ps%f`, an editor of `vim -c "set titlestring=%f"` and a saved
-location under `/srv/reports/100%complete` all mean what they say. Both files
-are read with INI interpolation switched off, since every value in them is a
-literal rather than a template.
+A `%` in a value is an ordinary character, here, in `presets.ini` and in
+`commands.ini`: a pager of `less -Ps%f`, an editor of
+`vim -c "set titlestring=%f"`, a saved location under
+`/srv/reports/100%complete` and a command `printf '%s\n' *` all mean what they
+say. The files are read with INI interpolation switched off, since every value
+in them is a literal rather than a template.
+
+## `commands.ini` — saved background commands
+
+The commands `&` offers ([Running commands in the
+background](usage.md#running-commands-in-the-background)) live in
+`~/.config/meridian-commander/commands.ini`, `$XDG_CONFIG_HOME` honoured. The
+app writes it (**Add…**, **Edit…**, **Delete…**, and saving a typed command),
+and it is plain text, safe to edit by hand — one section per command:
+
+```ini
+[http]
+command = python3 -m http.server 8000
+directory =
+
+[docs]
+command = make -C docs livehtml
+directory = ~/src/project
+```
+
+- `command` is a command line, run by your shell (`$SHELL -c`), so pipes,
+  `&&` and `$VARS` work.
+- `directory` is where it runs; `~` is your home. Blank (or left out) means
+  the active pane's directory when it is started, which must then be a local
+  pane. A directory that is not there is reported when the command is
+  started, rather than the command running somewhere else.
+- The section name is what the menu shows, and what its letter comes from.
+  It cannot contain `[` or `]`, or be `DEFAULT`.
+
+The file starts empty, with `python3 -m http.server 8000` as an example in
+its comment header. Commands are kept in alphabetical order, in the menu and
+in the file, so each keeps its letter; a hand-edited file is re-sorted the
+next time the app writes it. Since a command line can carry a token, the
+file is created readable only by you. It runs what it says with the same
+trust as `config.ini`, and nothing in it runs until you pick it.

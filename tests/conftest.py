@@ -6,10 +6,33 @@ from __future__ import annotations
 
 import pytest
 
+from meridian_commander import background
 from meridian_commander.app import App
 from meridian_commander.filesystems import LocalFileSystem
 
+import command_stubs
 from support import _StubScreen, write
+
+
+@pytest.fixture(autouse=True)
+def no_background_command_left():
+    """Every test stops the background commands it starts.
+
+    A command left running would outlive the test, and the run: the check
+    fails the test that left it, after stopping it, so nothing it started is
+    left behind either way.
+    """
+    yield
+    left = list(background._LIVE)
+    background.stop_all(left, 0.5)
+    assert not left, f"background commands left running: " \
+                     f"{[command.line for command in left]}"
+
+
+@pytest.fixture
+def stubs(tmp_path, monkeypatch):
+    """The stand-in programs, first on the PATH, and sh as the shell."""
+    return command_stubs.install(str(tmp_path / "stub-bin"), monkeypatch)
 
 
 @pytest.fixture

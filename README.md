@@ -120,6 +120,15 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   cancel, or read a job's errors. Jobs between the same two places run one at
   a time, and a remote one uses a connection of its own. Quitting with jobs
   left asks whether to wait or cancel them.
+- **Commands in the background** (`&`, Command ▸ Background commands…) —
+  start `python3 -m http.server`, a dev server or `tail -f` in a directory
+  and keep both panes: from a saved list, each a letter away and kept like the
+  presets (Add, Edit, Delete, or `commands.ini` by hand), or typed and then
+  saved. Each has a terminal of its own that keeps collecting its output;
+  `Enter` on it in the jobs list (`J`) shows it in the pane, where `Ctrl-]`
+  `q` hides it again without stopping it and `Ctrl-]` `k` stops it, with
+  everything it started. The status line counts them and says when one ends;
+  quitting asks first, and stops them all. Local panes only.
 - **Bidirectional directory sync** (`F9`) — compares the two panes and copies
   the newest version of each file in whichever direction is needed, so both
   sides end up holding the latest of everything. Nothing is deleted; you get a

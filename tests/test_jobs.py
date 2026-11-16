@@ -684,7 +684,7 @@ def test_the_pane_and_the_status_line_draw(app, tmp_path, monkeypatch):
 
 def test_an_empty_jobs_pane_and_a_tiny_one(app, tmp_path):
     text = _draw(tmp_path, lambda app: app._jobs_pane())
-    assert "No jobs. F5 or F6 with Background on starts one." in text
+    assert "No jobs. F5 or F6 with Background on starts one;" in text
     app._jobs_pane()
     app.left.plugin.draw(None, 0, 0, 3, 40)    # too small: nothing touched
     app.left.plugin.draw(None, 0, 0, 20, 11)
