@@ -2074,6 +2074,9 @@ def test_swapping_and_single_pane_leave_it_running(app, running):
 
 def test_f3_in_a_pane_and_quick_view_do_not_take_its_pane(app, running,
                                                          monkeypatch):
+    # F3 hides the cursor when it is done; no curses screen has been set up
+    # here (none ever is on macOS, where the screen tests skip).
+    monkeypatch.setattr(curses, "curs_set", lambda visibility: 0)
     command = running("fake-signals")
     assert wait_until(lambda: "ready" in _shown(command))
     view = _show(app, command, app.left)

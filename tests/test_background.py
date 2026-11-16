@@ -62,6 +62,14 @@ def _ended(command, seconds=10.0) -> bool:
     return wait_until(command.poll, seconds)
 
 
+def _why(command) -> str:
+    """Everything worth knowing when an assertion about a command fails."""
+    return (f"state={command.state_text()} status={command.exit_status} "
+            f"eof={command._eof} reads={command.output} "
+            f"reader_alive={command._thread.is_alive()}\n"
+            f"--- screen ---\n{_text(command)}")
+
+
 # -- small parts -----------------------------------------------------------------
 
 @pytest.mark.parametrize("seconds, text", [
@@ -308,13 +316,21 @@ def test_the_line_runs_as_at_a_prompt(started):
 
 
 def test_the_programs_terminal_is_xterm_with_its_own_size(started):
-    # A moment's sleep first: the size is set just after the fork, and the
-    # program must not be asked before then.
-    command = started('sleep 0.3; echo "term=$TERM lines=${LINES-unset}"; '
-                      'stty size')
-    assert _ended(command)
-    assert _shows(command, "term=xterm-256color lines=unset")
-    assert _shows(command, "24 80")
+    # Asked once the program is up: the size is set just after the fork,
+    # and a program asking at once could be answered before it.
+    command = started("fake-repl")
+    assert _shows(command, "ready"), _why(command)
+    command.send(b'echo "term=$TERM lines=${LINES-unset}"; stty size\r')
+    assert _shows(command, "term=xterm-256color lines=unset"), _why(command)
+    assert _shows(command, "24 80"), _why(command)
+
+
+def test_the_last_words_before_the_end_are_kept(started):
+    """Written after a while, just before the program ends: still read."""
+    command = started("sleep 0.3; echo last-words-here")
+    assert _ended(command), _why(command)
+    assert _shows(command, "last-words-here"), _why(command)
+    assert command.exit_status == 0, _why(command)
 
 
 def test_the_exit_status_is_collected(started):
@@ -420,15 +436,34 @@ def test_stopping_lets_a_program_have_its_last_word(started):
 
 
 def test_a_program_that_ignores_sigterm_is_killed(started, tmp_path):
+    """The whole group refuses SIGTERM, the shell that leads it included:
+    only the SIGKILL after the grace ends it.  (With a leader that did die
+    of SIGTERM, the kernel would hang the rest of the group up as the
+    leader went, and the grace would never be reached.)"""
     pidfile = tmp_path / "stubborn.pid"
-    command = started(f"fake-stubborn {pidfile}")
-    assert _shows(command, "ready")
+    command = started(f"trap '' TERM; fake-stubborn {pidfile}; :")
+    assert _shows(command, "ready"), _why(command)
     stubborn = int(pidfile.read_text())
     began = time.monotonic()
     command.stop(grace=0.3)
-    assert 0.3 <= time.monotonic() - began < 3      # the grace, then SIGKILL
+    assert 0.3 <= time.monotonic() - began < 3, _why(command)
+    assert command.exit_status == -signal.SIGKILL, _why(command)
     assert wait_until(lambda: process_gone(stubborn))
     assert command.ended and command.state_text() == "stopped"
+
+
+def test_a_leader_that_dies_of_sigterm_takes_its_group_with_it(started,
+                                                               tmp_path):
+    """The shell leading the group ends on SIGTERM; the kernel hangs up the
+    rest as it goes, so a child that ignores SIGTERM goes too, at once."""
+    pidfile = tmp_path / "stubborn.pid"
+    command = started(f"fake-stubborn {pidfile}; :")
+    assert _shows(command, "ready"), _why(command)
+    stubborn = int(pidfile.read_text())
+    command.stop(grace=1.0)
+    assert command.ended and command.exit_status == -signal.SIGTERM, \
+        _why(command)
+    assert wait_until(lambda: process_gone(stubborn))
 
 
 def test_a_stopped_program_is_continued_to_hear_it(started):
