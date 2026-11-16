@@ -646,7 +646,9 @@ def frame(win, y: int, x: int, height: int, width: int, role: str,
         if length:
             paint(win, y, x + 1 + at, text[at:at + length], title_role or role)
     if footer:
-        text = f"{glyph('lcap')} {footer} {glyph('rcap')}"[:inner]
+        # From two columns in, so one cell short of the inner width: the
+        # corner is the frame's, however long the footer.
+        text = f"{glyph('lcap')} {footer} {glyph('rcap')}"[:inner - 1]
         paint(win, y + height - 1, x + 2, text, footer_role or role)
 
 

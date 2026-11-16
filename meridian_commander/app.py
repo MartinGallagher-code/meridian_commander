@@ -30,6 +30,7 @@ Key bindings (also shown in the F1 help screen)::
     Ctrl-G         go to path                  Esc  the menu bar
     Ctrl-T         change sort order           Alt+F/C/O/H  a menu by name
     x              extract archive -> other pane
+    f              find files; p in the results lists them in this pane
     < / >          back / forward through this pane's history
     ~              home directory (this pane)
     T              the trash (this pane)
@@ -103,7 +104,16 @@ from .sync import (
     execute_sync_plan,
     survey_directory,
 )
-from .util import human_size, human_time, ljust, read_key, rjust, typed_char
+from .util import (
+    human_size,
+    human_time,
+    ljust,
+    read_key,
+    rjust,
+    truncate,
+    truncate_middle,
+    typed_char,
+)
 from .viewpane import ProgramPane, ViewPane
 
 #: How long curses waits after Esc for the rest of a key's sequence, in ms.
@@ -182,6 +192,7 @@ MENUS: list[dict] = [
             {"label": "~F~orward", "name": "forward", "key": ">"},
             {"label": "Search by ~n~ame", "name": "search", "key": "/"},
             {"label": "Filt~e~r...", "name": "filter", "key": "F"},
+            {"label": "Find files to pane...", "name": "find_to_pane"},
             {"sep": True},
             {"label": "~S~wap panes", "name": "swap", "key": "Ctrl+U"},
             {"label": "~R~eload panes", "name": "reload", "key": "Ctrl+R"},
@@ -435,7 +446,8 @@ class App:
         self.message = text
 
     def _reload_after_change(self, panel: Panel, keep_name: str | None = None,
-                             gone: tuple[str, ...] = ()) -> None:
+                             gone: tuple[str, ...] = (),
+                             names: list[str] | None = None) -> None:
         """Reload ``panel``, and the other pane when the change reached it too.
 
         Both panes on one directory is not a corner case: it is what ``=``
@@ -451,8 +463,12 @@ class App:
         somewhere else, or on another backend, is not touched -- the check is
         the same one a transfer uses to refuse copying into itself, so a remote
         pane costs no round trip for a change on this machine.
+
+        ``names`` are the entries the change touched: in a list of find
+        results those hits are asked about again (:meth:`Panel.reload`), so
+        one deleted leaves the list and one changed shows how.
         """
-        panel.refresh(keep_name=keep_name)
+        panel.reload(names or [], keep_name=keep_name)
         other = self.right if panel is self.left else self.left
         for path in (panel.path, *gone):
             if overlapping(panel.fs, path, other.fs, other.path):
@@ -692,11 +708,14 @@ class App:
         # Caption: filesystem label + current path.  Long paths keep their
         # tail visible (the deepest directories matter most), and are trimmed
         # before the frame sees them so the frame can still centre them.
-        header = f"{panel.fs.label()}:{panel.path}"
         note = self._filter_note(panel)
         room = max(8, inner_w - 8 - len(note))
-        if len(header) > room:
-            header = "~" + header[-(room - 1):]
+        if panel.results is not None:
+            header = self._results_caption(panel, room)
+        else:
+            header = f"{panel.fs.label()}:{panel.path}"
+            if len(header) > room:
+                header = "~" + header[-(room - 1):]
         header += note
 
         search = self.search
@@ -723,12 +742,14 @@ class App:
         # With sizes on, the Modify column gives its room to a bar: hunting
         # for space is the one job where a file's age is the least useful
         # thing on the row and its share of the directory is the most.
-        last_col = "Share" if panel.show_sizes else "Modify time"
+        # Not in a list of find results, which is not measured (u refuses).
+        sizes = panel.show_sizes and panel.results is None
+        last_col = "Share" if sizes else "Modify time"
         title = (f" {'Name'.ljust(name_w)}{'Size':>6}"
                  + (f" {'Mode':<10} {'Owner':<8}" if long else "")
                  + (f" {last_col:>12}" if show_last else ""))
         theme.paint(stdscr, y + 1, x + 1, title, "panelhead", inner_w)
-        biggest = panel.biggest() if panel.show_sizes else 0
+        biggest = panel.biggest() if sizes else 0
 
         for row in range(body_h):
             idx = panel.top + row
@@ -747,6 +768,10 @@ class App:
                 display = name + "/"
             else:
                 display = name
+            if panel.results is not None:
+                # A path below the directory searched: its first part says
+                # which tree, its last which file, so the middle gives way.
+                display = truncate_middle(display, name_w)
             marker = " "
             if entry.is_symlink:
                 marker = theme.glyph("link")
@@ -758,7 +783,7 @@ class App:
                 size_s = " <DIR>"
             else:
                 size_s = human_size(size)
-            if panel.show_sizes:
+            if sizes:
                 tail = usage.bar(size or 0, biggest, 12,
                                  theme.glyph("block"), theme.glyph("shade"))
             else:
@@ -789,6 +814,25 @@ class App:
         theme.scrollbar(stdscr, y + 2, x + w - 1, body_h, panel.top, body_h,
                         len(panel.entries),
                         role="scroll" if active else "framenc")
+
+    @staticmethod
+    def _results_caption(panel: Panel, room: int) -> str:
+        """A list of find results' caption: what, how many, and from where.
+
+        The count comes first, so a narrow pane keeps it; the place gives way
+        from its start, as a directory's caption does.  In a pane too narrow
+        even for that, the end of the count goes as well.
+        """
+        found = (f"Find '{panel.results_pattern}': "
+                 f"{len(panel.results or ())} found"
+                 + (" (truncated)" if panel.results_truncated else ""))
+        where = f"{panel.fs.label()}:{panel.path}"
+        if len(found) + 7 + len(where) <= room:
+            return f"{found} under {where}"
+        keep = room - len(found) - 8              # " under ~"
+        if keep >= 8:
+            return f"{found} under ~{where[-keep:]}"
+        return truncate(found, room)
 
     @staticmethod
     def _mode_text(entry) -> str:
@@ -934,7 +978,8 @@ class App:
         for job in self.jobs.tick():
             for panel in (self.left, self.right):
                 if panel.fs is job.src_pane_fs or panel.fs is job.dst_pane_fs:
-                    panel.refresh()
+                    # A hit a move took away leaves a list of find results.
+                    panel.reload(job.names)
             text = f"Job {job.number} {job.state}: {job.title()}"
             if job.errors:
                 count = len(job.errors)
@@ -1068,6 +1113,7 @@ class App:
             "trash": self._toggle_trash,
             "open_in_pane": self._toggle_open_in_pane,
             "find": self._find_files,
+            "find_to_pane": self._find_to_pane,
             "connect": self._open_location,
             "presets": self._presets_menu,
             "goto": self._go_to_path,
@@ -1432,7 +1478,7 @@ class App:
             owner=choice.owner if choice.owner != owner else "",
             group=choice.group if choice.group != group else "",
             recursive=choice.recursive)
-        paths = [(fs.join(panel.path, t.name), t) for t in targets]
+        paths = [(panel.path_of(t), t) for t in targets]
         dlg = dialogs.ProgressDialog(self.stdscr, "Attributes")
         try:
             done, failures = apply_change(
@@ -1443,7 +1489,7 @@ class App:
             done, failures = -1, []
         finally:
             dlg.close()
-        panel.refresh()
+        panel.reload(None if choice.recursive else [t.name for t in targets])
         if failures:
             more = len(failures) - 8
             dialogs.message(self.stdscr, "Attributes: not changed",
@@ -1465,7 +1511,7 @@ class App:
         if entry is None or entry.name == "..":
             self._set_message("Nothing to open")
             return
-        path = panel.fs.join(panel.path, entry.name)
+        path = panel.path_of(entry)
         self._set_message(self.opener.open(panel.fs, path, entry.is_dir))
 
     def _jobs_pane(self) -> None:
@@ -1588,7 +1634,7 @@ class App:
         if len(targets) == 1:
             where = dialogs.prompt(
                 self.stdscr, "Link", f"Link to '{targets[0].name}' at:",
-                default=fs.join(other.path, targets[0].name),
+                default=fs.join(other.path, *targets[0].name.split("/")),
                 toggles=[relative])
         else:
             where = dialogs.prompt(
@@ -1599,13 +1645,18 @@ class App:
         where = fs.normpath(other.resolve(where))
         made, errors = 0, []
         for entry in targets:
-            source = panel.fs.join(panel.path, entry.name)
-            link = where if len(targets) == 1 else fs.join(where, entry.name)
+            source = panel.path_of(entry)
+            # A find result keeps its path below the directory searched, as a
+            # copy of it does, so run_07's results.tsv and run_08's both fit.
+            link = where if len(targets) == 1 \
+                else fs.join(where, *entry.name.split("/"))
             target = source
             if relative.on:
                 rel = (os.path.relpath if fs.sep == os.sep else posixpath.relpath)
                 target = rel(source, fs.dirname(link))
             try:
+                if panel.results is not None:
+                    fs.makedirs(fs.dirname(link))
                 if self._make_link(fs, target, link):
                     made += 1
             except Exception as exc:
@@ -1640,7 +1691,7 @@ class App:
     def _edit_link(self, panel: Panel, name: str) -> None:
         """Point the link ``name`` somewhere else, keeping its name."""
         fs = panel.fs
-        path = fs.join(panel.path, name)
+        path = panel.path_of(name)
         if not fs.can_symlink:
             dialogs.message(self.stdscr, "Link",
                             f"{fs.label()}: links are not supported here.",
@@ -1661,7 +1712,7 @@ class App:
         except Exception as exc:
             dialogs.message(self.stdscr, "Link error", str(exc), error=True)
             return
-        panel.refresh(keep_name=name)
+        panel.reload([name], keep_name=name)
         self._set_message(f"{name} -> {target}")
 
     def _toggle_trash(self) -> None:
@@ -1809,11 +1860,18 @@ class App:
         return panel.path
 
     def _reload(self) -> None:
+        """Ctrl-R: list both panes again.
+
+        A list of find results is checked rather than searched again: every
+        hit is asked about, and those no longer there leave it (MC-026).
+        """
+        gone = 0
         for panel in (self.left, self.right):
-            panel.refresh()
+            gone += panel.reload()
             if panel.show_sizes:
                 panel.forget_sizes()   # a reload is "measure it again", too
-        self._set_message("Reloaded")
+        self._set_message("Reloaded" + (f" -- {gone} find result(s) no longer "
+                                        "there" if gone else ""))
 
     def _toggle_hidden(self) -> None:
         panel = self.active
@@ -1830,6 +1888,10 @@ class App:
         always was.
         """
         panel = self.active
+        if panel.results is not None:
+            self._set_message("Directory sizes: this pane lists find results "
+                              "-- < goes back to the directory")
+            return
         if panel.toggle_sizes():
             self._set_message("Directory sizes on -- follow the big ones down")
         else:
@@ -1947,7 +2009,7 @@ class App:
         if not isinstance(panel.fs,
                           (LocalFileSystem, SFTPFileSystem, SSHFileSystem)):
             return None
-        path = panel.fs.join(panel.path, entry.name)
+        path = panel.path_of(entry)
         return runner.run_argv(panel.fs, path, entry.mode)
 
     def _run_current(self) -> None:
@@ -1990,16 +2052,19 @@ class App:
             return
 
         full = argv + args
+        # The file's own directory: the pane's, or -- a find result -- the
+        # one it was found in below that.
+        here = fs.dirname(panel.path_of(entry))
         if isinstance(fs, LocalFileSystem):
-            cmd, cwd = full, panel.path
+            cmd, cwd = full, here
         else:   # SFTP/SSH -- _run_argv_for allowed nothing else
             remote = "cd {} && {}".format(
-                shlex.quote(panel.path),
+                shlex.quote(here),
                 " ".join(shlex.quote(a) for a in full))
             cmd, cwd = self._ssh_argv(fs, remote), None
 
         banner = (f"\n[Meridian Commander] Running {entry.name} in "
-                  f"{fs.label()}:{panel.path}\n\n")
+                  f"{fs.label()}:{here}\n\n")
         status = self._suspend_and_run(cmd, cwd, banner, pause_after=True,
                                        fail_label=f"Could not run {entry.name}")
         panel.refresh()
@@ -2202,6 +2267,12 @@ class App:
         if choice is None or choice == len(classes):
             return
         cls = classes[choice]
+        if self.other.results is not None and getattr(cls, "uses_other_pane",
+                                                      True):
+            # It would take the hits' names for names in a directory.
+            self._set_message(f"{cls.name} works on the other pane's "
+                              "directory, and it lists find results")
+            return
 
         if not self._may_close(panel):
             return
@@ -2644,16 +2715,33 @@ class App:
             self._open_terminal()
 
     def _rename(self) -> None:
+        """Rename the entry under the cursor.
+
+        A find result is renamed in the directory it is in, so the prompt
+        offers its own name, and a new name with a directory in it -- which
+        would move it -- is refused there rather than taken from the
+        directory searched.
+        """
         panel = self.active
         entry = panel.current()
         if entry is None or entry.name == Panel.PARENT:
             return
+        old = entry.name.rpartition("/")[2]
         new_name = dialogs.prompt(self.stdscr, "Rename", "New name:",
-                                  default=entry.name)
-        if not new_name or new_name == entry.name:
+                                  default=old)
+        if not new_name or new_name == old:
             return
-        src = panel.fs.join(panel.path, entry.name)
-        dst = panel.fs.join(panel.path, new_name)
+        src = panel.path_of(entry)
+        keep = new_name
+        if panel.results is None:
+            dst = panel.resolve(new_name)
+        elif "/" in new_name or panel.fs.sep in new_name:
+            self._set_message("A find result is renamed where it is -- "
+                              "a name without a / please")
+            return
+        else:
+            dst = panel.fs.join(panel.fs.dirname(src), new_name)
+            keep = entry.name[:len(entry.name) - len(old)] + new_name
         if self._refuse_unsaved(panel.fs, [src, dst]):
             return
         if self._rename_would_replace(panel.fs, src, dst) and not dialogs.confirm(
@@ -2662,7 +2750,9 @@ class App:
             return
         try:
             panel.fs.rename(src, dst)
-            self._reload_after_change(panel, keep_name=new_name)
+            if panel.results is not None:
+                panel.rename_result(entry.name, keep)
+            self._reload_after_change(panel, keep_name=keep)
             self._set_message(f"Renamed to {new_name}")
         except Exception as exc:
             dialogs.message(self.stdscr, "Rename error", str(exc), error=True)
@@ -2690,8 +2780,18 @@ class App:
                 return True
         return True
 
-    def _find_files(self) -> None:
-        """Search the active pane's tree; browse results, jump/view/edit."""
+    def _find_to_pane(self) -> None:
+        """Command > Find files to pane: find, and list the hits in the pane."""
+        self._find_files(to_pane=True)
+
+    def _find_files(self, to_pane: bool = False) -> None:
+        """Search the active pane's tree; browse results, jump/view/edit.
+
+        ``p`` in the results -- or ``to_pane``, which skips them -- lists
+        every hit in the pane instead (MC-026), by its path below the
+        directory searched, for the pane's own keys to tag, copy, move and
+        delete.  ``<`` brings the directory back.
+        """
         from .findfiles import FindBrowser, collect_matches
 
         panel = self.active
@@ -2719,19 +2819,28 @@ class App:
                             f"No matches for '{pattern}'.")
             return
 
-        browser = FindBrowser(panel.fs, panel.path, pattern, matches,
-                              truncated)
-        rel = browser.run(self.stdscr)
-        curses.curs_set(0)
-        if rel:
-            parts = [p for p in rel.split("/") if p]
-            parent = panel.fs.join(panel.path, *parts[:-1]) if len(parts) > 1 \
-                else panel.path
-            if panel.chdir(parent, keep_name=parts[-1]):
-                self._set_message(f"Jumped to {parts[-1]}")
-            else:
-                dialogs.message(self.stdscr, "Find files",
-                                f"Cannot open:\n{parent}", error=True)
+        if not to_pane:
+            browser = FindBrowser(panel.fs, panel.path, pattern, matches,
+                                  truncated)
+            rel = browser.run(self.stdscr)
+            curses.curs_set(0)
+            if rel:
+                parts = [p for p in rel.split("/") if p]
+                parent = panel.path_of("/".join(parts[:-1])) \
+                    if len(parts) > 1 else panel.path
+                if panel.chdir(parent, keep_name=parts[-1]):
+                    self._set_message(f"Jumped to {parts[-1]}")
+                else:
+                    dialogs.message(self.stdscr, "Find files",
+                                    f"Cannot open:\n{parent}", error=True)
+                return
+            if not browser.to_pane:
+                return
+        panel.show_results(pattern, matches, truncated)
+        self._set_message(f"{len(matches)} found"
+                          + (" (truncated)" if truncated else "")
+                          + " -- tag, copy, move or delete them here; "
+                          "< goes back")
 
     def _go_to_path(self) -> None:
         panel = self.active
@@ -2847,7 +2956,8 @@ class App:
             self._set_message("Other pane is busy -- close its plug-in "
                               "or terminal first")
             return
-        if other.fs is panel.fs and other.path == panel.path:
+        if (other.fs is panel.fs and other.path == panel.path
+                and other.results is None):
             self._set_message("Both panes already show this location")
             return
         if not other.set_location(panel.fs, panel.path):
@@ -3361,6 +3471,10 @@ class App:
         ambiguity rather than a choice, and are refused instead of silently
         taking the first one.
         """
+        if panel.results is not None:
+            # Two files side by side is a question about two places, and a
+            # list of find results is not one -- < goes back to where it is.
+            return None, "it lists find results; < goes back to the directory"
         entries = panel.selected_entries()
         if not entries:
             return None, "nothing is selected"
@@ -3369,7 +3483,7 @@ class App:
         entry = entries[0]
         if entry.is_dir:
             return None, f"{entry.name} is a directory"
-        return panel.fs.join(panel.path, entry.name), ""
+        return panel.path_of(entry), ""
 
     def _compare(self) -> None:
         """Each pane's file, side by side, the two scrolled as one.
@@ -3456,7 +3570,7 @@ class App:
             name = dialogs.prompt(self.stdscr, "Edit new file", "File name:")
             if not name:
                 return
-            target = panel.fs.join(panel.path, name)
+            target = panel.resolve(name)
         if not self._edit_externally(panel.fs, target):
             try:
                 editor = Editor(panel.fs, target)
@@ -3465,7 +3579,8 @@ class App:
             except Exception as exc:
                 dialogs.message(self.stdscr, "Edit error", str(exc), error=True)
             curses.curs_set(0)
-        panel.refresh()
+        # A find result edited shows its new size; in a directory, a refresh.
+        panel.reload([entry.name] if entry is not None else [])
 
     def _copy(self) -> None:
         self._transfer(move=False)
@@ -3474,14 +3589,21 @@ class App:
         self._transfer(move=True)
 
     def _transfer(self, move: bool) -> None:
+        """Copy or move what is tagged, or the cursor's entry, to the other pane.
+
+        A find result lands under its path below the directory searched --
+        ``run_07/out/results.tsv`` at ``dest/run_07/out/results.tsv`` -- the
+        directories it needs made on the way, so run trees whose every run
+        has the same file names stay apart (MC-026).  One inside a tagged
+        directory goes with it rather than again on its own.
+        """
         src_panel = self.active
         dst_panel = self.other
-        sources = src_panel.selected_entries()
+        sources = Panel.outermost(src_panel.selected_entries())
         if not sources:
             return
         if move and self._refuse_unsaved(
-                src_panel.fs, [src_panel.fs.join(src_panel.path, s.name)
-                               for s in sources]):
+                src_panel.fs, [src_panel.path_of(s) for s in sources]):
             return
         verb = "Move" if move else "Copy"
 
@@ -3510,7 +3632,7 @@ class App:
         # wherever the shell that started the application happened to be,
         # where the pane would never show it.
         dest = dst_fs.normpath(dst_panel.resolve(dest))
-        if self._refuse_unsaved(dst_fs, [dst_fs.join(dest, s.name)
+        if self._refuse_unsaved(dst_fs, [dst_fs.join(dest, *s.name.split("/"))
                                          for s in sources]):
             return
         if background.on:
@@ -3523,7 +3645,7 @@ class App:
             grand_total = 0
             file_total = 0
             for s in sources:
-                fc, bc = count_tree(src_panel.fs, src_panel.fs.join(src_panel.path, s.name))
+                fc, bc = count_tree(src_panel.fs, src_panel.path_of(s))
                 file_total += fc
                 grand_total += bc
         except Exception:
@@ -3552,8 +3674,8 @@ class App:
                         if dlg.cancelled():
                             cancelled = True
                             break
-                        src = src_panel.fs.join(src_panel.path, entry.name)
-                        target = dst_fs.join(dest, entry.name)
+                        src = src_panel.path_of(entry)
+                        target = dst_fs.join(dest, *entry.name.split("/"))
                         dlg.set_overall(
                             f"{verb} {i + 1}/{len(sources)}: {entry.name}")
 
@@ -3587,9 +3709,12 @@ class App:
         finally:
             dlg.close()
 
+        names = [s.name for s in sources]
         src_panel.clear_selection()
-        src_panel.refresh()
-        dst_panel.refresh()
+        # Only a move takes a hit away from a list of find results; a copy
+        # into one may have changed the hits it landed on.
+        src_panel.reload(names if move else [])
+        dst_panel.reload(names)
 
         if errors:
             dialogs.message(self.stdscr, f"{verb} errors",
@@ -3703,8 +3828,7 @@ class App:
                         f"Extract {i + 1}/{len(archives)}: {entry.name}")
                     try:
                         target, problems = self._extract_one(
-                            src_panel.fs,
-                            src_panel.fs.join(src_panel.path, entry.name),
+                            src_panel.fs, src_panel.path_of(entry),
                             dst_fs, dest, dlg)
                     except OperationCancelled:
                         cancelled = True
@@ -3764,16 +3888,39 @@ class App:
             source.close()
         return target, problems
 
+    def _made(self, panel: Panel, name: str) -> str | None:
+        """Where the cursor goes once F7 or n has made ``name``.
+
+        In a directory, the entry on the way to it.  In a list of find results
+        the new file or directory joins the list, under its path below the
+        directory searched, and the cursor goes to it -- unless it was made
+        outside that directory, where the list has no name for it.
+        """
+        if panel.results is None:
+            return name.split(panel.fs.sep)[0].split("/")[0]
+        listed = panel.result_name(name)
+        if listed is not None and panel.add_result(listed):
+            return listed
+        return None
+
+    @staticmethod
+    def _beside_cursor(panel: Panel) -> str:
+        """What F7 and n offer in a list of find results: the cursor hit's
+        directory, so what they make lands beside it.  Nothing in a directory.
+        """
+        head = (panel.current_name() or "").rpartition("/")[0]
+        return head + "/" if head and panel.results is not None else ""
+
     def _mkdir(self) -> None:
         panel = self.active
-        name = dialogs.prompt(self.stdscr, "Make directory", "Directory name:")
+        name = dialogs.prompt(self.stdscr, "Make directory", "Directory name:",
+                              default=self._beside_cursor(panel))
         if not name:
             return
-        target = panel.fs.join(panel.path, name)
+        target = panel.resolve(name)
         try:
             panel.fs.makedirs(target)
-            self._reload_after_change(
-                panel, keep_name=name.split(panel.fs.sep)[0].split("/")[0])
+            self._reload_after_change(panel, keep_name=self._made(panel, name))
             self._set_message(f"Created {name}")
         except Exception as exc:
             dialogs.message(self.stdscr, "Mkdir error", str(exc), error=True)
@@ -3787,26 +3934,27 @@ class App:
         way ``touch a/b`` is at a shell, rather than a silent ``mkdir -p``.
         """
         panel = self.active
-        name = dialogs.prompt(self.stdscr, "New file", "File name:")
+        name = dialogs.prompt(self.stdscr, "New file", "File name:",
+                              default=self._beside_cursor(panel))
         if not name:
             return
-        target = panel.fs.join(panel.path, name)
+        target = panel.resolve(name)
         existed = panel.fs.exists(target)
         try:
             panel.fs.touch(target)
-            self._reload_after_change(
-                panel, keep_name=name.split(panel.fs.sep)[0].split("/")[0])
+            self._reload_after_change(panel, keep_name=self._made(panel, name))
             self._set_message(("Touched " if existed else "Created ") + name)
         except Exception as exc:
             dialogs.message(self.stdscr, "New file error", str(exc), error=True)
 
     def _delete(self) -> None:
         panel = self.active
-        targets = panel.selected_entries()
+        # In a list of find results, what is inside a tagged directory goes
+        # with it, and is not asked for again once it has gone.
+        targets = Panel.outermost(panel.selected_entries())
         if not targets:
             return
-        if self._refuse_unsaved(panel.fs, [panel.fs.join(panel.path, t.name)
-                                           for t in targets]):
+        if self._refuse_unsaved(panel.fs, [panel.path_of(t) for t in targets]):
             return
         if len(targets) == 1:
             text = f"Delete '{targets[0].name}'{self._not_shown(panel)}?"
@@ -3822,7 +3970,11 @@ class App:
         # In the trash already, "to the trash" would only rename the item
         # inside it and leave its .trashinfo describing nothing, so for good
         # is the one way out offered, and the record goes with the item.
-        in_trash = local and trash_root(panel.path) is not None
+        # Asked of each directory the items are in: find results come from
+        # anywhere under the pane's, the trash included.
+        in_trash = local and any(
+            trash_root(where) is not None
+            for where in {panel.fs.dirname(panel.path_of(t)) for t in targets})
         to_trash = self.use_trash and local and not in_trash
         if in_trash:
             if dialogs.menu(self.stdscr, "Delete from the trash",
@@ -3865,7 +4017,7 @@ class App:
                     dlg.set_overall(
                         f"Deleting {i + 1}/{len(targets)}: {entry.name}")
                     dlg.update(i, len(targets), entry.name)
-                    target = panel.fs.join(panel.path, entry.name)
+                    target = panel.path_of(entry)
                     try:
                         if to_trash:
                             move_to_trash(target)
@@ -3906,7 +4058,8 @@ class App:
                 removed.append(target)
 
         panel.clear_selection()
-        self._reload_after_change(panel, keep_name=keep, gone=tuple(removed))
+        self._reload_after_change(panel, keep_name=keep, gone=tuple(removed),
+                                  names=[t.name for t in targets])
         if errors:
             dialogs.message(self.stdscr, "Delete errors",
                             "\n".join(errors[:8]), error=True)
@@ -3972,6 +4125,13 @@ class App:
 
     def _sync(self) -> None:
         left, right = self.left, self.right
+        for panel, side in ((left, "left"), (right, "right")):
+            if panel.results is not None:
+                # Sync walks two directories; a list of find results is not
+                # one, and its promise never to delete is not one to test.
+                self._set_message(f"Sync: the {side} pane lists find results "
+                                  "-- < goes back to the directory")
+                return
         warning = self._sync_scope_warning()
         if warning and not dialogs.confirm(self.stdscr, "Synchronize panes",
                                            warning):
@@ -4125,7 +4285,15 @@ class App:
             "                 back (or the mouse wheel)\n"
             "  !              full-screen shell: the whole real terminal\n"
             "  p / F11        plug-in mode: run a plug-in in this pane\n"
-            "  f              find files: browsable results (view/edit/goto)\n"
+            "  f              find files: browsable results (view/edit/goto);\n"
+            "                 p there, or Command>Find files to pane, lists\n"
+            "                 every hit in this pane by its path below the\n"
+            "                 directory searched: tag, F3/F4, a, l, w, r, F8\n"
+            "                 work on the real files, F5/F6 keep that path\n"
+            "                 under the target.  Ctrl-R drops hits gone since\n"
+            "                 (no new search); <, .. or any move goes back to\n"
+            "                 a directory, and < > history skips the list.\n"
+            "                 F9, D, u and plug-ins on it are refused\n"
             "  r              rename the file under the cursor\n"
             "  x              extract the archive under the cursor (or the\n"
             "                 tagged ones) into the other pane, each in a\n"

@@ -5,7 +5,9 @@
 Works on any pane backend (local, SFTP, SSH, FTP): the scan walks the
 filesystem through the same abstraction the panes use.  The results open in a
 full-screen, scrollable browser from which a file can be viewed or edited in
-place, or the pane can jump straight to the directory that contains it.
+place, the pane can jump straight to the directory that contains it, or ``p``
+sends every hit to the pane as a listing of its own, where it can be tagged,
+copied, moved and deleted like any other (MC-026).
 """
 
 from __future__ import annotations
@@ -78,8 +80,10 @@ class FindBrowser:
     """Full-screen, scrollable browser over find results.
 
     Returns from :meth:`run` with the selected result's relative path when the
-    user asks to jump to its containing directory, or ``None`` when closed.
-    Viewing and editing happen in place without leaving the list.
+    user asks to jump to its containing directory, or ``None`` when closed --
+    with :attr:`to_pane` set when the closing key was ``p``, which asks for
+    the hits to be listed in the pane.  Viewing and editing happen in place
+    without leaving the list.
     """
 
     def __init__(self, fs: FileSystem, root: str, pattern: str,
@@ -92,6 +96,8 @@ class FindBrowser:
         self.cursor = 0
         self.top = 0
         self.notice = ""
+        #: Whether the browser was closed with ``p``: list the hits in the pane.
+        self.to_pane = False
 
     # -- selection helpers -------------------------------------------------
     def current(self):
@@ -141,7 +147,7 @@ class FindBrowser:
             theme.paint(win, row + 1, 0, line, role, width)
 
         hint = self.notice or \
-            " Enter/g goto dir   v/F3 view   e/F4 edit   q/Esc close "
+            " Enter/g goto dir   p to pane   v/F3 view   e/F4 edit   q/Esc close "
         theme.paint(win, height - 1, 0, hint, "keybar", width)
         win.noutrefresh()
 
@@ -179,6 +185,10 @@ class FindBrowser:
                 cur = self.current()
                 if cur is not None:
                     return cur[0]
+            elif key in (ord("p"), ord("P")):
+                # Every hit, to the pane: tagged, copied and deleted there.
+                self.to_pane = True
+                return None
             elif key in (ord("v"), curses.KEY_F3):
                 self._open(viewer_for, stdscr)
             elif key in (ord("e"), curses.KEY_F4):

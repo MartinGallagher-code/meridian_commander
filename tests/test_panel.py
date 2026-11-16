@@ -607,3 +607,57 @@ def test_a_move_that_stays_put_keeps_its_reason(tmp_path):
     assert panel.chdir("sub") and panel.failure is None
     assert not panel.set_location(fs, str(tmp_path / "gone"))
     assert panel.path == str(tmp_path / "sub") and "gone" in panel.failure
+
+
+# -- path_of: the one way from a listed name to a path (MC-026) ----------------
+
+def test_path_of_in_a_directory_is_the_directory_and_the_name(fs, tree):
+    panel = Panel(fs, str(tree))
+    entry = next(e for e in panel.entries if e.name == "b.txt")
+    assert panel.path_of(entry) == str(tree / "b.txt")
+    assert panel.path_of("b.txt") == str(tree / "b.txt")
+
+
+def test_path_of_a_name_below_the_directory_joins_each_part(fs, tree):
+    panel = Panel(fs, str(tree))
+    assert panel.path_of("zdir/run_07/out.tsv") == \
+        str(tree / "zdir" / "run_07" / "out.tsv")
+
+
+def test_path_of_joins_the_parts_in_the_backends_own_terms(tmp_path):
+    """Split on "/" and joined by the backend, never handed over whole."""
+
+    class _Backslashed(LocalFileSystem):
+        def join(self, *parts):
+            return "\\".join(parts)
+
+    panel = Panel(_Backslashed(), str(tmp_path))
+    assert panel.path_of("run_07/out/results.tsv") == \
+        f"{tmp_path}\\run_07\\out\\results.tsv"
+
+
+def test_only_path_of_joins_a_pane_to_a_listed_name():
+    """No action builds a path from a pane's directory and a name by itself.
+
+    Each of those sites used to, and in a list of find results -- where a
+    name is a path below the directory -- one left behind would reach the
+    wrong file on a backend that does not read "/" in a name as a
+    separator.  Panel.path_of is the one place that turns a name into a
+    path; a typed name goes through Panel.resolve.
+    """
+    import inspect
+    import re
+
+    from meridian_commander import app, jobs, panel, peek, quickview
+
+    pattern = re.compile(
+        r"\.join\(\s*[\w.]*(?:\.path|_path)\s*,\s*[\w.]*name\s*\)")
+    for module in (app, panel, peek, quickview):
+        assert pattern.findall(inspect.getsource(module)) == [], \
+            module.__name__
+    # Nor a target, or a job's source, from a name handed over whole: a find
+    # result keeps its path below the directory it was found in, and that
+    # path is split and joined part by part, wherever it goes.
+    whole = re.compile(r"\.join\(\s*[\w.]+\s*,\s*(?:[\w.]*\.name|name)\s*\)")
+    for module in (app, jobs, panel, peek, quickview):
+        assert whole.findall(inspect.getsource(module)) == [], module.__name__

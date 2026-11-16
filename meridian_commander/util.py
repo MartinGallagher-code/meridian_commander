@@ -127,6 +127,22 @@ def truncate(text: str, width: int) -> str:
     return text[: width - 1] + "~"
 
 
+def truncate_middle(text: str, width: int) -> str:
+    """Truncate ``text`` to ``width`` columns by cutting out its middle.
+
+    For a path below a directory -- a find result -- where both ends say
+    something: the first part which tree it is in (``run_07``), the last
+    which file.  Too narrow to keep both, it is cut at the end as
+    :func:`truncate` cuts.
+    """
+    if len(text) <= width:
+        return text
+    if width < 3:
+        return truncate(text, width)
+    head = (width - 1) // 2
+    return text[:head] + "~" + text[len(text) - (width - 1 - head):]
+
+
 def ljust(text: str, width: int) -> str:
     return truncate(text, width).ljust(width)
 

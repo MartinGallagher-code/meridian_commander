@@ -64,7 +64,48 @@ own section here, so not every version below is published to PyPI.
 - `App.run()` closes the backends however its loop ends, an exception
   included.
 
-1.22.0 is MC-026's, in its own pull request; this one takes the next number.
+## [1.22.0] — 2026-11-16
+
+### Added
+
+- **Find's hits in a pane** — Midnight Commander's *panelize*. `p` in the
+  Find files list, or **Command ▸ Find files to pane…** (which skips the
+  list), lists every hit in the pane by its path below the directory searched
+  — `run_07/out/results.tsv` — under a caption naming the pattern, the count
+  and the place, with `(truncated)` when find stopped at its 2,000. The pane's
+  own keys then work on the real files: tagging (`Insert`/`Space`, `+`, `\`,
+  `-`, `*`), the filter and the search, on the whole path; `F3`, `F4`,
+  `Ctrl-Q`, `h`, `w`, `a`, `l`, `r`, `x` and `Enter`; `n` and `F7`, offered the
+  hit's directory, whose new file joins the list; `F8`, to the trash or for
+  good; and `F5`/`F6`, in the background too, which keep each hit's path
+  under the target and make the directories it needs, so run trees whose every
+  run has the same file names stay apart. A hit inside a tagged directory goes
+  with it. What a move or `F8` removes leaves the list, the cursor holding its
+  place. `Ctrl-R` checks the list — one listing for each directory that holds
+  hits, not a round trip for each — and drops what has gone, without
+  searching again. `<`, `Backspace`, `..` or any move gives the pane a
+  directory again; back and forward skip the list, which is never recorded as
+  a place. `F9`, `D`, `u`, and a plug-in that works on the other pane, refuse
+  it with a message. Local, SFTP, SSH and FTP panes and archives alike.
+  (MC-026)
+- `Panel.path_of()`, the one way from a listed name to a path, and
+  `Panel.show_results()`, `leave_results()`, `recheck()` and `reload()`;
+  `util.truncate_middle()`.
+
+### Changed
+
+- Every action that reached an entry — 18 places in `app.py`, and more in the
+  panel, quick view and head + tail — asks `Panel.path_of()` instead of joining
+  the pane's directory and the name itself, and a typed name goes through
+  `Panel.resolve()`. A test fails if one joins them by hand again. Nothing
+  changes in a directory. (MC-026)
+- A program `Enter` runs starts in the directory its file is in: the pane's,
+  as before, unless it is a find result.
+
+### Fixed
+
+- A footer too long for its pane — a long name under the cursor in a narrow
+  pane — was written over the frame's bottom-right corner.
 
 ## [1.21.0] — 2026-11-13
 
@@ -1206,6 +1247,7 @@ that never is points at nothing; its section above still says what changed.
 -->
 
 [1.23.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.22.0...v1.23.0
+[1.22.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.21.0...v1.22.0
 [1.21.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.20.0...v1.21.0
 [1.20.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.18.0...v1.19.0
