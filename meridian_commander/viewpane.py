@@ -120,7 +120,7 @@ class ViewPane(PanePlugin):
         if self.menu:
             self.put(stdscr, y + h - 1, x, w, MENU_HINT, theme.attr("keybar"))
 
-    def cursor(self) -> tuple[int, int] | None:
+    def screen_cursor(self) -> tuple[int, int] | None:
         """Where the terminal's cursor goes: the editor's, on the screen."""
         spot = getattr(self.view, "cursor_at", None)
         if spot is None or self.menu or self._box is None:

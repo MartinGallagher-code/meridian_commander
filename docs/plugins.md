@@ -181,5 +181,24 @@ def may_close(self) -> bool:
         self.ctx.app.stdscr, "Unsaved", "Discard the changes?")
 ```
 
+A plug-in that takes typing can show the terminal's cursor where the typing
+goes. After each frame the application asks the active pane's plug-in for
+`screen_cursor()`, and shows the cursor at the `(row, column)` it returns —
+screen coordinates, the ones `draw()` is given — or keeps it hidden for
+`None`, which is what the default returns. The editor in a pane uses it. The
+name is taken, so do not use it for anything else; `cursor` is free, and the
+built-in process and container lists keep their selected row in it. An
+answer that is not a pair of ints, a place off the screen, or an exception,
+means no cursor.
+
+```python
+def draw(self, stdscr, y, x, h, w):
+    self.origin = (y, x)
+    ...
+
+def screen_cursor(self):
+    return self.origin[0] + 1 + self.line, self.origin[1] + self.column
+```
+
 The [API reference](api.md) documents `PluginContext`, `PanePlugin` and
 `InputOutputPlugin` in full.

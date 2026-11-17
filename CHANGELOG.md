@@ -12,6 +12,24 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.25.1] — 2026-11-16
+
+### Fixed
+
+- Opening the **Processes** plug-in ended the program with `TypeError: 'int'
+  object is not callable`, and so did opening **Containers**. Since 1.21.0
+  each frame asked the active pane's plug-in where the terminal's cursor
+  goes by calling any attribute named `cursor`, the hook the editor in a
+  pane answers. Both lists keep their selected row in `cursor`, so the
+  first frame called `0()`, outside the guard a plug-in's `draw()` has.
+  Both open and redraw again, from local and SSH panes. (MC-030)
+- The hook is now `PanePlugin.screen_cursor()`, declared on the base class
+  with a default of `None` and documented for plug-in authors, and `cursor`
+  is the plug-in's own again. A hook that is missing, is not a method or
+  raises, an answer that is not a pair of ints, and a place off the screen
+  all mean no cursor now, instead of an end to the program. The editor in a
+  pane places and hides the cursor as before. (MC-030)
+
 ## [1.25.0] — 2026-11-16
 
 ### Added
@@ -1349,6 +1367,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.25.1]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.25.0...v1.25.1
 [1.25.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.24.0...v1.25.0
 [1.24.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.23.0...v1.24.0
 [1.23.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.22.0...v1.23.0

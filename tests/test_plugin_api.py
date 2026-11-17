@@ -90,6 +90,22 @@ def test_on_exit_is_a_no_op_by_default(ctx):
     assert PanePlugin(ctx).on_exit() is None
 
 
+def test_a_plugin_has_no_terminal_cursor_by_default(ctx):
+    # The hook the application asks at the end of every frame (MC-030).
+    assert PanePlugin(ctx).screen_cursor() is None
+
+
+def test_a_plugin_may_keep_its_own_cursor_beside_the_hook(ctx):
+    # ``cursor`` is the plug-in's to use -- a selected row, say -- and does
+    # not stand in for the hook.
+    class _List(PanePlugin):
+        def on_start(self):
+            self.cursor = 4
+
+    plugin = _List(ctx)
+    assert plugin.cursor == 4 and plugin.screen_cursor() is None
+
+
 def test_put_clips_pads_and_survives_the_screen_edge():
     def draw(stdscr):
         # Clipped to the width, and padded out to it.

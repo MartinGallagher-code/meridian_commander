@@ -654,10 +654,15 @@ class App:
         # or has none.  Last, so nothing written after it moves it.  The
         # cursor is hidden again only after being shown here: a draw that
         # never shows one leaves the cursor, and the library, alone.
-        where = getattr(self.active.plugin, "cursor", None)
-        spot = where() if where is not None else None
+        spot = self._screen_cursor()
         if spot is not None:
-            stdscr.move(*spot)
+            try:
+                stdscr.move(*spot)
+            except curses.error:
+                # Off the screen: a place worked out for a size the pane no
+                # longer has.  No cursor, rather than an end to the program.
+                spot = None
+        if spot is not None:
             curses.curs_set(1)
             self._cursor_shown = True
         elif self._cursor_shown:
@@ -665,6 +670,32 @@ class App:
             self._cursor_shown = False
         stdscr.noutrefresh()
         curses.doupdate()
+
+    def _screen_cursor(self) -> tuple[int, int] | None:
+        """Where the active pane's plug-in puts the terminal's cursor, if
+        anywhere: its ``PanePlugin.screen_cursor()``.
+
+        The hook was looked up as ``cursor`` until 1.25.1, which the process
+        and container lists keep as their selected row, so ``0()`` ended the
+        program the moment either opened (MC-030).  A plug-in is someone
+        else's code, as its draw() is, and draw() runs outside any handler:
+        a hook that is missing or not a method -- a plug-in that does not
+        subclass PanePlugin -- that raises, or that answers anything but a
+        pair of ints, means no cursor.
+        """
+        hook = getattr(self.active.plugin, "screen_cursor", None)
+        # Most frames have no plug-in, or one without the hook: answered
+        # here, rather than by calling None and catching the TypeError.
+        if not callable(hook):
+            return None
+        try:
+            spot = hook()
+        except Exception:
+            return None
+        if (isinstance(spot, tuple) and len(spot) == 2
+                and all(isinstance(n, int) for n in spot)):
+            return spot
+        return None
 
     def _draw_desktop(self, top: int, bottom: int, width: int) -> None:
         """Fill the desktop with the light-shade texture, as the IDEs did."""

@@ -4,17 +4,22 @@
 
 from __future__ import annotations
 
+import curses
 import importlib
+import os
 
 import pytest
 
 from meridian_commander import plugins
+from meridian_commander.plugin_api import PluginContext
 from meridian_commander.plugins.csv_build import CsvBuild
 from meridian_commander.plugins.csv_clean import CsvClean
 from meridian_commander.plugins.csv_profile import CsvProfile
 from meridian_commander.plugins.find_files import FindFiles
 
 from support import read
+from test_containers import Engines
+from test_provost_browser import make_store
 
 
 # -- discovery -----------------------------------------------------------------
@@ -889,3 +894,41 @@ def test_apply_agg_helper_ignores_an_aggregate_it_does_not_know():
 
     # The groupby verb validates the name first, but the helper stays defensive.
     assert _apply_agg("median", ["1", "2"]) == ""
+
+
+# -- every built-in, drawn by the application (MC-030) -------------------------
+
+def _builtins() -> list[type]:
+    """The plug-ins shipped in the package, as the menu offers them."""
+    return [cls for cls in plugins.discover()[0]
+            if cls.__module__.startswith(plugins.__name__ + ".")]
+
+
+@pytest.mark.parametrize("cls", _builtins(), ids=lambda cls: cls.__name__)
+def test_every_builtin_draws_as_the_active_panes_plugin(app, cls, tmp_path,
+                                                        monkeypatch):
+    """Each built-in opened as the menu opens it, then a whole frame drawn.
+
+    The plug-ins' own suites draw each one into a window; only the
+    application's draw() also asks the plug-in where the terminal's cursor
+    goes.  1.21.0 to 1.25.0 ended the program there on Processes and
+    Containers, which keep their selected row as ``cursor``.
+    """
+    engines = Engines(tmp_path / "engines", monkeypatch)
+    engines.install("podman")             # Containers, not the machine's own
+    monkeypatch.setenv("PATH", os.pathsep.join([str(engines.bin),
+                                                "/usr/bin", "/bin"]))
+    monkeypatch.setenv("SHELL", "/bin/sh")                    # Terminal
+    monkeypatch.setenv("PROVOST_WORKSPACE", make_store(tmp_path))
+    monkeypatch.setattr(curses, "doupdate", lambda: None)
+    shown: list[int] = []
+    monkeypatch.setattr(curses, "curs_set", shown.append)
+    plugin = cls(PluginContext(app=app, own_panel=app.left,
+                               other_panel=app.right))
+    app.left.plugin = plugin
+    app.active = app.left
+    try:
+        app.draw()
+    finally:
+        plugin.on_exit()
+    assert shown == []              # none of them has a cursor to show
