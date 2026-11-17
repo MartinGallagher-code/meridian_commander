@@ -1293,7 +1293,8 @@ fails — a name that does not exist, no network, a short name with no
 registry to look in — the error stays on the screen until you press a key.
 Podman asks *which registry* a short name should come from when more than one
 could serve it; that question is asked in the terminal, where you can answer
-it.
+it. With [your own registry](#your-own-registry) set, a short name is pulled
+from there instead.
 
 **Finding something to download.** `f` asks for a search term and lists what
 the registries return, name and description, in their own order. `Enter` on
@@ -1301,7 +1302,9 @@ a result pulls it; `Esc` goes back to the images. Podman searches the
 registries named under `unqualified-search-registries` in
 `/etc/containers/registries.conf` (or `~/.config/containers/registries.conf`);
 when none is named it finds nothing, so name the registry in the term:
-`quay.io/alpine`. Docker searches Docker Hub only.
+`quay.io/alpine`. Docker searches Docker Hub only. With
+[your own registry](#your-own-registry) set, a term with no registry in it
+searches there.
 
 **Managing.** Each of these asks first in the footer, naming the item by its
 name and ID; `Enter` or `y` goes ahead, `Esc` (or any other key) cancels. The
@@ -1339,7 +1342,42 @@ through a shell, and containers and images are acted on by their IDs. A name
 you type is pulled only if it is an image name (letters, digits and
 `._/:@+-`, starting with a letter or digit), so nothing typed can run a
 command or be read as an option; a search term is passed after `--` for the
-same reason.
+same reason. With a registry set, the name is checked as typed and again
+with the registry in front of it.
+
+### Your own registry
+
+`registry =` under
+[`[plugin:containers]`](configuration.md#plugincontainers--podman-or-docker)
+names a registry of your own, such as `yard.example.lan:5000/team`. Then:
+
+- `p` on a short name — one whose first part is not a registry, such as
+  `myapp:1.2` or `team/app` — pulls it from there:
+  `yard.example.lan:5000/team/myapp:1.2`. A name that names a registry
+  (`quay.io/podman/hello`, `localhost/mybox`, `host:5000/app`) is pulled
+  exactly as typed, so `docker.io/library/alpine` still reaches Docker Hub.
+- `f` on a term with no registry in it searches
+  `yard.example.lan:5000/team/term`. `Enter` on a result pulls it from the
+  registry it was found in.
+- The caption says `registry yard.example.lan:5000/team`, and the `pull>` and
+  `find>` prompts show where a short name is going (`-> yard…/myapp:1.2`)
+  before `Enter` sends it there.
+
+A name counts as naming a registry the way the engines decide it: the part
+before the first `/` has a `.` or a `:` in it, or is `localhost`. Log in
+outside Meridian, with `podman login` or `docker login`; until then the
+registry's "unauthorized" is what the pull or search shows. Searching a
+private registry depends on what it offers: Podman falls back to its
+catalogue, which may need permission to read, and Docker uses the old search
+API, which most private registries do not serve. Either way, a registry that
+refuses a search shows its own reason, not "nothing found".
+
+A registry with no certificate, or a self-signed one, needs `tls_verify =
+false` for Podman, which then passes `--tls-verify=false` on pulls and
+searches from that registry and no other. Docker takes this from
+`insecure-registries` in its daemon's `daemon.json` instead, and is never
+passed the option. Writing `http://` in the address does not turn checking
+off.
 
 ## Searching a pane by name
 

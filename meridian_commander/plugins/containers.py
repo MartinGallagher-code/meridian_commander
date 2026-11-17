@@ -18,6 +18,10 @@ and what can be done from them:
 * ``p`` downloads (pulls) an image by name, and ``f`` finds one in the
   registries first; the pull runs in the pane's terminal with the engine's
   own progress, and the list comes back with the new image under the cursor.
+  With ``registry`` set, a short name (``myapp:1.2``, ``team/app``) is pulled
+  from that registry, and a search term with no registry in it searches
+  there; a name that names a registry (``quay.io/podman/hello``) still goes
+  where it says.  The caption and the prompts name the registry.
 * ``s`` starts or stops a container, ``R`` restarts it, and ``F8`` removes a
   container or an image.  Each asks first, naming the item by name and ID.
   Nothing is ever forced and nothing deletes in bulk.
@@ -41,6 +45,11 @@ Configure it in ``config.ini``::
     refresh = 3
     # seconds a listing or a registry search may take
     timeout = 10
+    # your own registry, where short names are pulled from and searched:
+    # host, host:port or host:port/path, with or without https://
+    registry = yard.example.lan:5000/team
+    # false: Podman skips TLS checks for that registry, and only that one
+    tls_verify = true
 """
 
 from __future__ import annotations
@@ -63,7 +72,13 @@ DEFAULTS = {
     "refresh": 3,          # seconds between automatic refreshes
     "timeout": 10,         # seconds a listing or a search may take
     "search_limit": 25,    # results a registry search asks for
+    "registry": "",        # your own registry: where short names go
+    "tls_verify": "true",  # false: Podman skips TLS checks for it
 }
+
+#: How ``tls_verify`` may be written, and what each means.
+SWITCH = {"true": True, "yes": True, "on": True, "1": True,
+          "false": False, "no": False, "off": False, "0": False}
 
 #: The engines, in the order ``auto`` tries them.
 ENGINES = ("podman", "docker")
@@ -94,6 +109,15 @@ HEX_ID = re.compile(r"[0-9a-f]{12,64}\Z")
 #: letter or digit first -- so it can never be taken for an option, and
 #: nothing in it means anything to a shell (none is used anyway).
 REFERENCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/:@+-]{0,511}\Z")
+
+#: A registry address as an engine takes it: a host name or IPv4 address,
+#: an optional port, and optional path components, lowercase as the engines
+#: require of everything after the host.  The shapes of docker/distribution's
+#: reference grammar, which Podman shares, less IPv6.
+_LABEL = r"(?:[A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9])"
+_COMPONENT = r"[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*"
+REGISTRY = re.compile(rf"(?P<host>{_LABEL}(?:\.{_LABEL})*)"
+                      rf"(?::(?P<port>[0-9]{{1,5}}))?(?:/{_COMPONENT})*\Z")
 
 #: What the engines' sizes are counted in: Docker and Podman both write
 #: decimal units ("6.81MB", "4.69 MB"); the binary ones are here in case.
@@ -329,6 +353,82 @@ def pulled_image(images: list[Image], name: str) -> str | None:
     return None
 
 
+# -- the registry ---------------------------------------------------------------
+
+def names_registry(name: str) -> bool:
+    """Whether ``name`` says which registry it comes from.
+
+    The engines' own rule (docker/distribution's ``splitDockerDomain``,
+    which Podman shares): the part before the first ``/`` is a registry
+    when it has a ``.`` or a ``:`` in it, is ``localhost``, or has a capital
+    letter.  So ``team/app`` is a short name and ``host:5000/app`` is not.
+    """
+    first, slash, _ = name.partition("/")
+    return bool(slash) and ("." in first or ":" in first
+                            or first == "localhost" or first.lower() != first)
+
+
+def registry_of(name: str) -> str:
+    """The registry ``name`` names, as written; "" if it names none."""
+    return name.partition("/")[0] if names_registry(name) else ""
+
+
+def qualify(name: str, registry: str) -> str:
+    """``name`` as it is to be pulled or searched: from ``registry``,
+    unless it names a registry of its own or no registry is set."""
+    if not registry or names_registry(name):
+        return name
+    return f"{registry}/{name}"
+
+
+def normalise_registry(text: str) -> str:
+    """The ``registry`` setting as the engines take it: ``host:port/path``.
+
+    It may be written as a URL (``https://yard.lan:5000/team/``) or as the
+    engines expect it; the scheme and any trailing ``/`` go.  Empty means
+    no registry.  Anything else that is not an address raises, naming the
+    setting, which the application shows instead of opening the pane.
+    """
+    written = text.strip()
+    if not written:
+        return ""
+    address = written
+    for scheme in ("https://", "http://"):
+        if address.lower().startswith(scheme):
+            address = address[len(scheme):]
+            break
+    address = address.rstrip("/")
+    match = REGISTRY.match(address)
+    if match is None or not 1 <= int(match.group("port") or 1) <= 65535:
+        hint = ""
+        if ";" in written or "#" in written:
+            hint = (" A comment goes on a line of its own: a ; or # after "
+                    "a value is part of the value.")
+        raise RuntimeError(
+            f"[plugin:containers] registry = {written} is not a registry "
+            f"address: write it as host, host:port or host:port/path, such "
+            f"as yard.example.lan:5000/team.{hint}")
+    host = match.group("host")
+    if not (match.group("port") or "." in host or host == "localhost"):
+        # The engines would read "yard/app" as Docker Hub's user "yard".
+        raise RuntimeError(
+            f"[plugin:containers] registry = {written}: a host with no dot "
+            f"and no port is taken for a Docker Hub account, not a "
+            f"registry. Give its port ({host}:5000) or its full name "
+            f"({host}.example.lan).")
+    return address
+
+
+def read_switch(key: str, text: str) -> bool:
+    """A true/false setting; anything else raises, naming it."""
+    value = SWITCH.get(text.strip().lower())
+    if value is None:
+        raise RuntimeError(
+            f"[plugin:containers] {key} = {text.strip()} is not one I know: "
+            f"use true or false.")
+    return value
+
+
 # -- the engine -----------------------------------------------------------------
 
 def find_engine(setting: str) -> tuple[str, str]:
@@ -482,6 +582,11 @@ class ContainersPlugin(PanePlugin):
                 "Containers works on local panes only: it runs this "
                 "machine's podman or docker. Open it from a local pane.")
         self.engine, self.command = find_engine(str(self.cfg["engine"]))
+        #: Where short names go ("" for the engine's own choice), and
+        #: whether Podman checks that registry's certificate.
+        self.registry = normalise_registry(str(self.cfg["registry"]))
+        self.tls_verify = read_switch("tls_verify",
+                                      str(self.cfg["tls_verify"]))
         self.containers: list[Container] = []
         self.images: list[Image] = []
         self.found: list[Found] = []
@@ -505,6 +610,9 @@ class ContainersPlugin(PanePlugin):
         self.after_term: tuple | None = None  # what the terminal was for
         self._last_refresh = 0.0
         self.refresh()
+        if self.registry and not self.tls_verify and self.engine == "docker":
+            self.status = ("tls_verify = false is for Podman: Docker takes it"
+                           " from insecure-registries in its daemon.json")
 
     # -- running the engine ---------------------------------------------------
     def _capture(self, args: list[str]) -> str:
@@ -902,6 +1010,7 @@ class ContainersPlugin(PanePlugin):
         if self.task is not None:
             self.status = f"still {self.task.what}: wait for it to finish"
             return
+        query = qualify(term, self.registry)
 
         def done(code, out, err):
             if code != 0:
@@ -909,12 +1018,23 @@ class ContainersPlugin(PanePlugin):
                           f"{_message(err) or _message(out) or code}")
                 return
             self.found = parse_search(out)
-            self.searched = term
+            if self.registry:
+                # Docker names a result without the registry it came from
+                # ("team/app"); it is pulled from where it was found.
+                for row in self.found:
+                    row.name = qualify(row.name, registry_of(query))
+            self.searched = query
             self._show("search")
             self._rebuild_view()
             if self.found:
                 self.status = (f"{len(self.found)} found: Enter pulls one, "
                                f"Esc goes back")
+            elif self.registry and _message(err):
+                # A registry that answers a search with a complaint and no
+                # results: the complaint is the answer, not "nothing found".
+                self._say(f"search of {query}: {_message(err)}")
+            elif self.registry:
+                self._say(f"nothing found for {query}")
             elif self.engine == "podman":
                 self._say(f"nothing found for {term} -- Podman searches the "
                           f"registries registries.conf names; name one, as "
@@ -923,22 +1043,41 @@ class ContainersPlugin(PanePlugin):
                 self._say(f"nothing found for {term}")
 
         # "--" ends the options: a term that starts with "-" is a term.
-        argv = [self.command, "search", "--limit",
-                str(int(self.cfg["search_limit"])), "--format",
-                SEARCH_FORMAT, "--", term]
+        argv = ([self.command, "search", "--limit",
+                 str(int(self.cfg["search_limit"])), "--format",
+                 SEARCH_FORMAT] + self._tls_args(query) + ["--", query])
         self._start_task(argv, float(self.cfg["timeout"]),
-                         f"searching for {term}", done)
+                         f"searching for {query}", done)
+
+    def _tls_args(self, name: str) -> list[str]:
+        """``--tls-verify=false`` when ``tls_verify = false`` and ``name``
+        is on the configured registry -- never for any other registry, and
+        never for Docker, which takes it from its daemon's configuration."""
+        if self.tls_verify or self.engine != "podman" or not self.registry:
+            return []
+        # Host names are not case-sensitive; the registry's path is not
+        # part of where TLS is checked.
+        if registry_of(name).lower() != \
+                self.registry.partition("/")[0].lower():
+            return []
+        return ["--tls-verify=false"]
 
     # -- the terminal: pull and shell ---------------------------------------------
     def _pull(self, name: str) -> None:
         if not name:
             self.status = "nothing to pull"
             return
-        if not REFERENCE.match(name):
-            self.status = f"not an image name: {name}"
-            return
-        self._open_term([self.command, "pull", name],
-                        f"{self.engine} pull {name}", ("pull", name))
+        # Checked as typed and again with the registry in front: a name
+        # that starts like an option stays refused, and a long one may no
+        # longer fit.
+        target = qualify(name, self.registry)
+        for text in (name, target):
+            if not REFERENCE.match(text):
+                self.status = f"not an image name: {text}"
+                return
+        self._open_term(
+            [self.command, "pull"] + self._tls_args(target) + [target],
+            f"{self.engine} pull {target}", ("pull", target))
 
     def _shell(self, row: Container) -> None:
         # The ID, not the name: hex, checked when it was listed.
@@ -985,6 +1124,8 @@ class ContainersPlugin(PanePlugin):
         stopped = len(self.containers) - running
         text = (f" [containers] {self.engine}: {running} running,"
                 f" {stopped} stopped, {len(self.images)} images")
+        if self.registry:
+            text += f" -- registry {self.registry}"
         if self.list == "search":
             text += f" -- found for {self.searched!r}"
         return text + " "
@@ -1027,10 +1168,8 @@ class ContainersPlugin(PanePlugin):
             return f" {self._question()} Enter/y=yes  Esc=no "
         if self.mode == "filter":
             return f" filter> {self.filter} "
-        if self.mode == "pull":
-            return f" pull> {self.entry} "
-        if self.mode == "find":
-            return f" find> {self.entry} "
+        if self.mode in ("pull", "find"):
+            return self._prompt()
         if self.status:
             return f" {self.status} "
         if self.task is not None:
@@ -1042,6 +1181,18 @@ class ContainersPlugin(PanePlugin):
                     "  / filter  o sort  Esc close ")
         return (" ? keys  Enter shell  s start/stop  R restart  F8 remove"
                 "  a all  i images  p pull  / filter  Esc close ")
+
+    def _prompt(self) -> str:
+        """The pull or find prompt; with a registry set, it says where a
+        short name is going before Enter sends it there."""
+        text = f" {self.mode}> {self.entry} "
+        typed = self.entry.strip()
+        if not self.registry:
+            return text
+        if not typed:
+            return f" {self.mode}>  (short names go to {self.registry}) "
+        target = qualify(typed, self.registry)
+        return f"{text} -> {target} " if target != typed else text
 
     def _empty(self) -> tuple[str, int | None]:
         """What the list area says when there is nothing in it."""

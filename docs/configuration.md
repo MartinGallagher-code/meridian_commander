@@ -158,7 +158,7 @@ literal rather than a template.
 
 ## `[plugin:containers]` — Podman or Docker
 
-The [Containers](usage.md#containers-podman-and-docker) plug-in reads four
+The [Containers](usage.md#containers-podman-and-docker) plug-in reads six
 settings, shown here with their defaults:
 
 ```ini
@@ -171,10 +171,33 @@ refresh = 3
 timeout = 10
 # how many results a registry search asks for
 search_limit = 25
+# your own registry, where short names are pulled from and searched;
+# empty: the engine's own choice (Podman's registries.conf, Docker Hub)
+registry =
+# false: Podman does not check that registry's certificate
+tls_verify = true
 ```
 
 Comments go on lines of their own: a `;` after a value is part of the value.
 An `engine` that is not installed stops the plug-in from opening, with a
-message naming it. Starting, stopping, restarting and removing are not bound
+message naming it.
+
+`registry` is the address of a registry of your own: `host`, `host:port` or
+`host:port/path`, such as `yard.example.lan:5000/team`. It may be written as a
+URL, `https://yard.example.lan:5000/team/`: the scheme and a trailing `/` are
+dropped. With it set, a short name typed at `p` is pulled from it, and a term
+typed at `f` is searched there; a name that names a registry still goes where
+it says ([Your own registry](usage.md#your-own-registry)). A value that is not
+an address stops the plug-in from opening, with a message naming the setting;
+so does a host with no `.` and no port, such as `yard`, which the engines would
+take for a Docker Hub account (write `yard:5000`, or the host's full name).
+IPv6 addresses are not accepted.
+
+`tls_verify = false` (also `no`, `off` or `0`) is for a registry served over
+plain HTTP or with a self-signed certificate. It makes Podman skip the check
+for that registry only, by passing `--tls-verify=false` on its pulls and
+searches. Docker is never passed it: list the registry under
+`insecure-registries` in Docker's `/etc/docker/daemon.json` instead. An
+`http://` in `registry` does not turn checking off on its own. Starting, stopping, restarting and removing are not bound
 by `timeout`: they run in the background and may take up to two minutes,
 since stopping waits out the container's grace period.

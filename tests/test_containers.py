@@ -31,8 +31,9 @@ from meridian_commander.plugins import containers as containers_mod
 from meridian_commander.plugins import discover
 from meridian_commander.plugins.containers import (
     IMAGES_FORMAT, PS_FORMAT, SEARCH_FORMAT, ContainersPlugin, EngineTerminal,
-    age_seconds, find_engine, parse_containers, parse_images, parse_search,
-    pulled_image, size_bytes, split_reference,
+    age_seconds, find_engine, names_registry, normalise_registry,
+    parse_containers, parse_images, parse_search, pulled_image, qualify,
+    read_switch, size_bytes, split_reference,
 )
 from meridian_commander.plugins.terminal import MENU_KEY
 
@@ -1275,7 +1276,10 @@ def test_enter_on_nothing_does_nothing(engines, ctx):
 def _search(plugin, term: str) -> None:
     plugin.handle_key(ord("f"))
     _type(plugin, term)
-    assert plugin._footer() == f" find> {term} "
+    # With a registry set, the prompt goes on to say where it is going.
+    footer = plugin._footer()
+    assert (footer.startswith(f" find> {term} ") if plugin.registry
+            else footer == f" find> {term} ")
     plugin.handle_key(10)
     _settle(plugin)
 
@@ -1403,6 +1407,364 @@ def test_remove_on_a_result_is_refused(docker, engines):
     _search(docker, "alpine")
     docker.handle_key(curses.KEY_F8)
     assert docker.status == "a search result is not on this machine"
+
+
+# -- your own registry: [plugin:containers] registry --------------------------------
+
+YARD = "yard.lan:5000/team"
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("yard.lan", "yard.lan"),
+    ("yard.lan:5000", "yard.lan:5000"),
+    ("yard.lan:5000/team", "yard.lan:5000/team"),
+    ("https://yard.lan:5000/team/", "yard.lan:5000/team"),
+    ("HTTP://yard.lan//", "yard.lan"),
+    ("  yard.lan:5000/team/sub-group/a_b.c  ", "yard.lan:5000/team/sub-group/a_b.c"),
+    ("localhost", "localhost"),
+    ("localhost:5000", "localhost:5000"),
+    ("10.0.0.5:5000", "10.0.0.5:5000"),
+    ("Yard.Example.LAN:65535", "Yard.Example.LAN:65535"),   # hosts: any case
+    ("", ""), ("   ", ""),
+])
+def test_a_registry_address_is_read_as_the_engines_take_it(text, expected):
+    assert normalise_registry(text) == expected
+
+
+@pytest.mark.parametrize("text", [
+    "yard lan", "-yard.lan", "https://", "http:///", ":5000", "/team",
+    "yard.lan?x=1", "yard.lan/team?x=1", "yard.lan#top",
+    "yard.lan:5000/Team", "yard.lan:0", "yard.lan:65536", "yard.lan:",
+    "user@yard.lan", "ftp://yard.lan", "[::1]:5000", "yard.lan/team//app",
+    "yard-.lan", "yard..lan", "yard.lan/-team",
+])
+def test_a_value_that_is_not_a_registry_address_is_refused(text):
+    with pytest.raises(RuntimeError) as raised:
+        normalise_registry(text)
+    message = str(raised.value)
+    assert message.startswith(f"[plugin:containers] registry = {text.strip()}")
+    assert "host:port/path" in message
+
+
+@pytest.mark.parametrize("text", ["yard.lan ; my own", "yard.lan  # mine"])
+def test_a_comment_after_the_registry_is_named_as_the_trouble(text):
+    with pytest.raises(RuntimeError, match="a line of its own"):
+        normalise_registry(text)
+
+
+@pytest.mark.parametrize("text", ["containeryard", "yard/team", "https://Yard/"])
+def test_a_host_the_engines_would_take_for_a_docker_hub_user_is_refused(text):
+    # "yard/app" means Docker Hub's user "yard" to both engines.
+    with pytest.raises(RuntimeError, match="Docker Hub account") as raised:
+        normalise_registry(text)
+    assert "[plugin:containers] registry" in str(raised.value)
+    assert ":5000" in str(raised.value)          # how to say it instead
+
+
+@pytest.mark.parametrize("name, expected", [
+    ("alpine", f"{YARD}/alpine"),
+    ("alpine:3.19", f"{YARD}/alpine:3.19"),
+    ("team/app:1", f"{YARD}/team/app:1"),
+    ("myapp:1.2", f"{YARD}/myapp:1.2"),
+    ("alpine@sha256:" + "a" * 64, f"{YARD}/alpine@sha256:" + "a" * 64),
+    # Each of these names a registry, so it goes where it says.
+    ("quay.io/podman/hello", "quay.io/podman/hello"),
+    ("docker.io/library/nginx", "docker.io/library/nginx"),
+    ("localhost/x", "localhost/x"),
+    ("host:5000/x", "host:5000/x"),
+    ("Host/x", "Host/x"),
+])
+def test_a_short_name_is_qualified_and_a_registry_name_is_not(name, expected):
+    assert qualify(name, YARD) == expected
+    assert qualify(name, "") == name             # no registry: as typed
+    assert names_registry(name) == (expected == name)
+
+
+def test_a_name_with_no_slash_never_names_a_registry():
+    assert not names_registry("quay.io")
+    assert not names_registry("localhost")
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("true", True), ("Yes", True), ("on", True), ("1", True),
+    (" false ", False), ("NO", False), ("off", False), ("0", False),
+])
+def test_tls_verify_is_true_or_false(text, expected):
+    assert read_switch("tls_verify", text) is expected
+
+
+def test_tls_verify_that_is_neither_is_refused():
+    with pytest.raises(RuntimeError, match=r"tls_verify = maybe .* true or "
+                                           r"false"):
+        read_switch("tls_verify", "maybe")
+
+
+def _yard(engines, ctx, tmp_path, engine: str = "podman",
+          settings: str = "") -> ContainersPlugin:
+    """The plug-in with ``registry`` set, written as the owner might."""
+    engines.install(engine)
+    _config(tmp_path, f"[plugin:containers]\nregistry = https://{YARD}/\n"
+                      f"{settings}")
+    return ContainersPlugin(ctx)
+
+
+def _pull(plugin, name: str) -> None:
+    plugin.handle_key(ord("p"))
+    _type(plugin, name)
+    plugin.handle_key(10)
+
+
+def test_an_empty_registry_setting_changes_nothing(engines, ctx, tmp_path):
+    engines.install("podman")
+    _config(tmp_path, "[plugin:containers]\nregistry =\ntls_verify = false\n")
+    plugin = ContainersPlugin(ctx)
+    assert plugin.registry == ""
+    _pull(plugin, "alpine")
+    assert plugin.term.argv == [engines.path("podman"), "pull", "alpine"]
+    assert "registry" not in plugin._caption()
+    plugin.on_exit()
+
+
+def test_a_bad_registry_stops_it_opening(engines, ctx, tmp_path):
+    engines.install("podman")
+    _config(tmp_path, "[plugin:containers]\nregistry = yard lan\n")
+    with pytest.raises(RuntimeError,
+                       match=r"registry = yard lan is not a registry"):
+        ContainersPlugin(ctx)
+    assert engines.calls() == []          # the engine is never called
+
+
+def test_a_bad_tls_verify_stops_it_opening(engines, ctx, tmp_path):
+    engines.install("podman")
+    _config(tmp_path, "[plugin:containers]\ntls_verify = sometimes\n")
+    with pytest.raises(RuntimeError, match="tls_verify = sometimes"):
+        ContainersPlugin(ctx)
+
+
+def test_the_menu_says_why_a_bad_registry_will_not_open(engines, app,
+                                                        tmp_path, monkeypatch):
+    engines.install("podman")
+    _config(tmp_path, "[plugin:containers]\nregistry = -yard.lan\n")
+    scripted = _ScriptedDialogs(monkeypatch, menu=["Containers"])
+    app._plugin_mode()
+    assert app.left.plugin is None
+    assert "Containers failed to start" in scripted.last_message
+    assert "[plugin:containers] registry = -yard.lan" in scripted.last_message
+    assert "Traceback" not in scripted.last_message
+
+
+@pytest.mark.parametrize("typed, pulled", [
+    ("alpine", f"{YARD}/alpine"),
+    ("team/app:1", f"{YARD}/team/app:1"),
+    ("quay.io/x", "quay.io/x"),
+    ("localhost/x", "localhost/x"),
+    ("host:5000/x", "host:5000/x"),
+    ("alpine@sha256:" + "0" * 64, f"{YARD}/alpine@sha256:" + "0" * 64),
+])
+@pytest.mark.parametrize("engine", ["podman", "docker"])
+def test_p_pulls_a_short_name_from_the_registry(engines, ctx, tmp_path,
+                                                engine, typed, pulled):
+    plugin = _yard(engines, ctx, tmp_path, engine)
+    _pull(plugin, typed)
+    assert plugin.term.argv == [engines.path(engine), "pull", pulled]
+    assert plugin.term._caption() == f" [{engine} pull {pulled}] "
+    plugin.on_exit()
+
+
+def test_the_pulled_image_is_found_under_the_registry(engines, ctx, tmp_path,
+                                                      app):
+    # The same name from Docker Hub is listed first: given the short name,
+    # the match on the end of the path would have chosen it.
+    pulled = ("docker.io/library/alpine\tlatest\t111111111111\t1 day ago\t1MB\n"
+              f"{YARD}/alpine\tlatest\t222222222222\t1 day ago\t1MB\n")
+    plugin = _yard(engines, ctx, tmp_path)
+    engines.answer("podman", "pull", then={"images": {"out": pulled}})
+    _pull(plugin, "alpine")
+    assert _pump(plugin, lambda: plugin.term is None)
+    assert plugin.list == "images"
+    assert plugin.view[plugin.cursor].id == "222222222222"
+    assert plugin.status == f"pulled {YARD}/alpine"
+    assert f"Containers: pulled {YARD}/alpine" in app.message
+
+
+def test_a_name_too_long_once_the_registry_is_added_is_refused(
+        engines, ctx, tmp_path):
+    plugin = _yard(engines, ctx, tmp_path)
+    name = "a" * 500                       # fits as typed, not with the yard
+    _pull(plugin, name)
+    assert plugin.term is None
+    assert plugin.status == f"not an image name: {YARD}/{name}"
+    assert "pull" not in engines.verbs()
+
+
+@pytest.mark.parametrize("name", ["-v", "--all-tags", "$(id)", "a b"])
+def test_a_hostile_name_is_still_refused_with_a_registry(engines, ctx,
+                                                         tmp_path, name):
+    # "yard/-v" would pass the pattern; what was typed is checked first.
+    plugin = _yard(engines, ctx, tmp_path)
+    _pull(plugin, name)
+    assert plugin.term is None
+    assert plugin.status == f"not an image name: {name}"
+    assert "pull" not in engines.verbs()
+
+
+def test_the_prompts_say_where_a_short_name_goes(engines, ctx, tmp_path):
+    plugin = _yard(engines, ctx, tmp_path)
+    for key, word in ((ord("p"), "pull"), (ord("f"), "find")):
+        plugin.handle_key(key)
+        assert plugin._footer() == f" {word}>  (short names go to {YARD}) "
+        _type(plugin, "alpine")
+        assert plugin._footer() == f" {word}> alpine  -> {YARD}/alpine "
+        assert f"-> {YARD}/alpine" in _paint(plugin)[-1]
+        plugin.handle_key(21)
+        _type(plugin, "quay.io/x")
+        assert plugin._footer() == f" {word}> quay.io/x "
+        plugin.handle_key(27)
+
+
+def test_the_caption_names_the_registry(engines, ctx, tmp_path):
+    plugin = _yard(engines, ctx, tmp_path)
+    assert plugin._caption().endswith(f" images -- registry {YARD} ")
+    assert f"registry {YARD}" in _paint(plugin)[0]
+
+
+@pytest.mark.parametrize("engine", ["podman", "docker"])
+def test_f_searches_the_registry_for_a_short_term(engines, ctx, tmp_path,
+                                                  engine):
+    plugin = _yard(engines, ctx, tmp_path, engine)
+    _search(plugin, "alpine")
+    assert engines.calls()[-1] == [
+        engines.path(engine), "search", "--limit", "25", "--format",
+        SEARCH_FORMAT, "--", f"{YARD}/alpine"]
+    assert f"found for '{YARD}/alpine'" in plugin._caption()
+
+
+def test_a_search_term_that_names_a_registry_goes_there(engines, ctx,
+                                                        tmp_path):
+    plugin = _yard(engines, ctx, tmp_path)
+    _search(plugin, "quay.io/libpod/alpine")
+    assert engines.calls()[-1][-2:] == ["--", "quay.io/libpod/alpine"]
+    # Podman names its results in full: Enter pulls them as they are.
+    plugin.handle_key(10)
+    assert plugin.term.argv[-1] == "quay.io/libpod/alpine"
+    plugin.on_exit()
+
+
+def test_a_docker_result_is_pulled_from_where_it_was_found(engines, ctx,
+                                                           tmp_path):
+    # Docker names a result by its path in the registry searched, not by
+    # the registry: "team/alpine", from the yard.
+    plugin = _yard(engines, ctx, tmp_path, "docker")
+    engines.answer("docker", "search", out="team/alpine\tours\n"
+                                            "team/alpine-tools\tours too\n")
+    _search(plugin, "alpine")
+    assert [row.name for row in plugin.view] == [
+        "yard.lan:5000/team/alpine", "yard.lan:5000/team/alpine-tools"]
+    plugin.handle_key(curses.KEY_DOWN)
+    plugin.handle_key(10)
+    assert plugin.term.argv == [engines.path("docker"), "pull",
+                                "yard.lan:5000/team/alpine-tools"]
+    plugin.on_exit()
+
+
+def test_a_docker_hub_result_is_pulled_from_docker_hub(engines, ctx,
+                                                       tmp_path):
+    plugin = _yard(engines, ctx, tmp_path, "docker")
+    _search(plugin, "docker.io/alpine")
+    assert plugin.view[0].name == "docker.io/alpine"
+    plugin.handle_key(10)
+    assert plugin.term.argv[-1] == "docker.io/alpine"    # not the yard
+    plugin.on_exit()
+
+
+@pytest.mark.parametrize("engine, text", [
+    ("podman", "Error: couldn't search registry \"yard.lan:5000\": "
+               "unable to retrieve auth token: invalid username/password: "
+               "unauthorized: authentication required"),
+    ("docker", "Error response from daemon: Unexpected status code 404"),
+])
+def test_a_registry_that_refuses_a_search_says_why(engines, ctx, tmp_path,
+                                                   app, engine, text):
+    plugin = _yard(engines, ctx, tmp_path, engine)
+    engines.answer(engine, "search", err=text + "\n", code=125)
+    _search(plugin, "alpine")
+    assert plugin.status == f"search failed: {text}"
+    assert "nothing found" not in plugin.status
+    assert text in app.message
+
+
+def test_a_complaint_with_no_results_is_shown_not_nothing_found(
+        engines, ctx, tmp_path):
+    plugin = _yard(engines, ctx, tmp_path)
+    engines.answer("podman", "search", out="",
+                   err="WARN[0000] the registry has no v1 search endpoint\n")
+    _search(plugin, "alpine")
+    assert plugin.status == (f"search of {YARD}/alpine: WARN[0000] the "
+                             f"registry has no v1 search endpoint")
+
+
+def test_nothing_found_in_the_registry_names_it(engines, ctx, tmp_path):
+    plugin = _yard(engines, ctx, tmp_path)
+    engines.answer("podman", "search", out="")
+    _search(plugin, "zzz")
+    # Not the registries.conf hint: the search went to the yard.
+    assert plugin.status == f"nothing found for {YARD}/zzz"
+
+
+def test_tls_verify_false_tells_podman_for_that_registry_only(engines, ctx,
+                                                              tmp_path):
+    plugin = _yard(engines, ctx, tmp_path, settings="tls_verify = false\n")
+    command = engines.path("podman")
+    _pull(plugin, "alpine")
+    assert plugin.term.argv == [command, "pull", "--tls-verify=false",
+                                f"{YARD}/alpine"]
+    plugin.on_exit()
+    plugin.term = None
+    _pull(plugin, "yard.lan:5000/other/app")   # the same host, typed in full
+    assert "--tls-verify=false" in plugin.term.argv
+    plugin.on_exit()
+    plugin.term = None
+    _pull(plugin, "quay.io/x")                 # any other registry: checked
+    assert plugin.term.argv == [command, "pull", "quay.io/x"]
+    plugin.on_exit()
+    plugin.term = None
+    _search(plugin, "alpine")
+    assert engines.calls()[-1][-3:] == ["--tls-verify=false", "--",
+                                        f"{YARD}/alpine"]
+    _search(plugin, "quay.io/x")
+    assert "--tls-verify=false" not in engines.calls()[-1]
+
+
+def test_tls_verify_matches_the_host_in_any_case(engines, ctx, tmp_path):
+    engines.install("podman")
+    _config(tmp_path, "[plugin:containers]\nregistry = Yard.LAN:5000\n"
+                      "tls_verify = no\n")
+    plugin = ContainersPlugin(ctx)
+    _pull(plugin, "yard.lan:5000/app")
+    assert plugin.term.argv[2] == "--tls-verify=false"
+    plugin.on_exit()
+
+
+def test_tls_verify_is_never_passed_to_docker(engines, ctx, tmp_path):
+    plugin = _yard(engines, ctx, tmp_path, "docker",
+                   settings="tls_verify = false\n")
+    # Docker has no such option: its daemon's insecure-registries decides.
+    assert "daemon.json" in plugin._footer()
+    _pull(plugin, "alpine")
+    assert plugin.term.argv == [engines.path("docker"), "pull",
+                                f"{YARD}/alpine"]
+    plugin.on_exit()
+    plugin.term = None
+    _search(plugin, "alpine")
+    assert not any("--tls-verify" in arg for arg in engines.calls()[-1])
+
+
+def test_tls_verify_left_true_adds_nothing(engines, ctx, tmp_path):
+    plugin = _yard(engines, ctx, tmp_path)
+    assert plugin.tls_verify is True and plugin.status == ""
+    _pull(plugin, "alpine")
+    assert "--tls-verify=false" not in plugin.term.argv
+    plugin.on_exit()
 
 
 # -- drawing ------------------------------------------------------------------------

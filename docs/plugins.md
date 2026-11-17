@@ -48,7 +48,8 @@ Run remote script) have no menu, and the four that already run on keys
   apart (`i` and `c`). `Enter` opens a shell inside a running container in
   the pane's terminal, `p` pulls an image by name, `f` searches the
   registries, `s` starts or stops a container, `R` restarts it and `F8`
-  removes a container or an image after asking. Auto-refreshing; filter with
+  removes a container or an image after asking. `registry =` in `config.ini`
+  sends short names to your own registry. Auto-refreshing; filter with
   `/`, sort with `o`. Local panes only. See
   [Containers](usage.md#containers-podman-and-docker) in the usage guide.
 - **Find in other pane** — recursively search the other pane's directory by

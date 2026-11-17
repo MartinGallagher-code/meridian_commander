@@ -12,6 +12,43 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.26.0] — 2026-11-17
+
+### Added
+
+- **Your own registry for Containers.** `registry =` under
+  `[plugin:containers]` in `config.ini` names a container registry of your
+  own, such as `yard.example.lan:5000/team`, written either as the engines
+  take it or as a URL (`https://…/`, whose scheme and trailing `/` are
+  dropped). With it set, a short name typed at `p` (`myapp:1.2`, `team/app`)
+  is pulled from that registry, and a term typed at `f` is searched there; a
+  name that names a registry (`quay.io/podman/hello`, `localhost/x`,
+  `host:5000/x`) still goes exactly where it says, by the engines' own rule.
+  The caption names the registry, and the `pull>` and `find>` prompts show
+  where a short name is going before `Enter` sends it. After the pull, the
+  images list comes back on the image from that registry, not a same-named
+  one from another. Left empty, the default, nothing changes. (MC-031)
+- `tls_verify = false` under `[plugin:containers]`, for a registry on plain
+  HTTP or with a self-signed certificate: Podman is passed
+  `--tls-verify=false` on pulls and searches from that registry and no
+  other. Docker is never passed it; its daemon's `insecure-registries`
+  decides. An `http://` in the address never turns checking off by itself.
+  (MC-031)
+
+### Changed
+
+- A `registry` that is not an address (spaces, a leading `-`, a query
+  string, a capital letter in the path, a port out of range, a `;` comment
+  after the value) stops Containers from opening, with a message naming the
+  setting, as a bad `engine` does. So does a host with no dot and no port,
+  such as `yard`, which the engines would take for a Docker Hub account.
+  (MC-031)
+- With a registry set, a Docker search result is pulled from the registry
+  it was found in: Docker names results by their path there (`team/app`),
+  which on its own would have meant the configured registry or Docker Hub.
+  A search that the registry answers with a complaint and no results shows
+  the complaint, not "nothing found". (MC-031)
+
 ## [1.25.1] — 2026-11-16
 
 ### Fixed
@@ -1367,6 +1404,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.26.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.25.1...v1.26.0
 [1.25.1]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.25.0...v1.25.1
 [1.25.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.24.0...v1.25.0
 [1.24.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.23.0...v1.24.0

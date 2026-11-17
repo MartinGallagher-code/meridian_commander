@@ -338,7 +338,9 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   terminal; `p` pulls an image by name and `f` finds one in the registries,
   with the engine's progress on screen; `s` starts or stops a container, `R`
   restarts it and `F8` removes a container or an image, each after asking.
-  Local panes; Podman is used when both are installed. See
+  With `registry =` set in `config.ini`, short names are pulled from and
+  searched in your own registry. Local panes; Podman is used when both are
+  installed. See
   [Containers](https://meridian-commander.readthedocs.io/en/latest/usage.html#containers-podman-and-docker).
 - **Mouse support** — click to select, double-click to open, wheel to scroll,
   and **right-click for a context menu** of actions (view, edit, copy, move,
