@@ -12,6 +12,28 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.27.0] — 2026-11-23
+
+### Changed
+
+- **The help (`F1`) shows all of itself.** It was one block of text, and the
+  message box it was shown in kept only the lines that fitted on the screen:
+  on an 80x24 terminal, 17 of its 143 lines, with nothing to say the rest
+  existed. It is now laid out in titled sections (moving around, tagging,
+  working on files, panes and views, the viewers by file type, background
+  work, the Options menu, the function keys and their aliases, the mouse),
+  in two columns side by side on a terminal 151 columns wide or more and one
+  column below that. Whatever does not fit scrolls: `↑`/`↓` or `j`/`k`,
+  `PgUp`/`PgDn` and `Home`/`End`, with a scrollbar and the position in the
+  footer. `Esc` or `Enter` closes it; every other key leaves it open, so a key
+  pressed to scroll never throws it away. Every key and fact it gave before
+  is still there, and `Ctrl-T`, which was listed twice, is listed once.
+  (MC-032)
+- **A message taller than the screen scrolls** instead of being cut off. The
+  same keys move it, a scrollbar and the footer show where it is, and `Esc`
+  or `Enter` closes it. A message that fits looks and closes as before, with
+  any key. (MC-032)
+
 ## [1.26.0] — 2026-11-17
 
 ### Added
@@ -1404,6 +1426,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.27.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.26.0...v1.27.0
 [1.26.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.25.1...v1.26.0
 [1.25.1]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.25.0...v1.25.1
 [1.25.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.24.0...v1.25.0

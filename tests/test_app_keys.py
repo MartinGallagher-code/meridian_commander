@@ -2151,12 +2151,16 @@ def test_a_list_that_cannot_be_written_says_so(commanding, monkeypatch):
 def test_the_help_describes_background_commands(app, monkeypatch):
     scripted = _ScriptedDialogs(monkeypatch)
     app.handle_key(curses.KEY_F1)
-    text = scripted.last_message
-    for phrase in ("  &              background commands", "Type a command",
-                   "Add/Edit/Delete the list", "Ctrl-] then q hides it, k stops it",
-                   "local panes only", "Quitting stops them",
-                   "Enter shows one in", "k stops it, d removes an ended one"):
-        assert phrase in text
+    # Each phrase under the key it belongs to, not merely somewhere.
+    entries = {keys: text for section in scripted.helps[-1]
+               for keys, text in section.entries}
+    assert entries["&"].startswith("background commands")
+    for phrase in ("Type a command", "Add/Edit/Delete the list",
+                   "Ctrl-] then q hides it, k stops it", "local panes only",
+                   "Quitting stops them"):
+        assert phrase in entries["&"]
+    for phrase in ("Enter shows one in", "k stops it, d removes an ended one"):
+        assert phrase in entries["J"]
 
 
 def test_the_manual_describes_what_the_help_does():

@@ -1686,7 +1686,7 @@ where it should.)
 
 | Key | Action | Key | Action |
 | --- | --- | --- | --- |
-| `Tab` | switch active pane | `F1` | help |
+| `Tab` | switch active pane | `F1` | help: every key, in sections (see below) |
 | `↑`/`↓` `j`/`k` | move cursor | `F2` | open / connect location |
 | `PgUp`/`PgDn` | page | `F3` | view (`.md`, `.xlsx`, `.docx`, `.pptx`, `.dc`) |
 | `Home`/`End` | first / last | `F4` | edit file |
@@ -1728,6 +1728,21 @@ to open a menu, and **right-click** for a context menu of actions.
 In the **menus and dialogs**: `Tab`/arrows move, the red letter of a caption
 chooses it outright, `Enter` accepts and `Esc` closes. In a drop-down, `←`/`→`
 walk to the neighbouring menu without closing the bar.
+
+**The help** (`F1`, `1`, `?`, or **Help ▸ Contents**) lists every key in titled
+sections: moving around, tagging, working on files, panes and views, the
+viewers by file type, background work, the Options menu, the function keys
+with their aliases, and the mouse. On a terminal 151 columns wide or more the
+sections are laid out in two columns side by side, split where it evens their
+heights out and never in the middle of a section; on a narrower one they are
+one column. Whatever does not fit scrolls: `↑`/`↓` (or `j`/`k`) a row,
+`PgUp`/`PgDn` a page, `Home`/`End` to either end. A scrollbar down the right
+and the footer (`49/75` — the last row in view, of all of them) show where you
+are. `Esc` or `Enter` closes it; any other key leaves it open.
+
+A **message** works the same way when it is taller than the screen: it
+scrolls, with a scrollbar and its position in the footer, and `Esc` or `Enter`
+closes it. A message that fits closes with any key, as it always has.
 
 In the **viewer**: `/` (or F7) searches — smart case (a lowercase pattern is
 case-insensitive), matches highlighted, `n`/`N` next/previous with wrap-around;

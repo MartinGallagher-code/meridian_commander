@@ -117,12 +117,142 @@ def test_a_message_offers_an_ok_button(monkeypatch):
     assert "OK" in drawn
 
 
-def test_message_clips_text_too_tall_for_the_screen(monkeypatch):
-    body = "\n".join(f"line {i}" for i in range(60))
-    _, window = _run(monkeypatch, lambda s: dialogs.message(s, "Long", body),
-                     [10], rows=10)
-    # It draws what fits and still offers the dismiss hint.
-    assert "press any key" in _text(window)
+def _painted(window) -> list[str]:
+    """Every string the dialog wrote, in order."""
+    return [draw[2] for draw in window.drawn if len(draw) > 2]
+
+
+def _footers(window) -> list[str]:
+    """What each picture said in the bottom border, in order."""
+    bottom = window.getmaxyx()[0] - 1
+    return [draw[2] for draw in window.drawn
+            if len(draw) > 2 and draw[0] == bottom and draw[1] == 2]
+
+
+_LONG = "\n".join(f"line {i:02d}" for i in range(60))
+
+
+def test_a_message_too_tall_for_the_screen_scrolls_to_its_last_line(
+        monkeypatch):
+    """The lines that did not fit were dropped, with nothing to say so.
+
+    A message taller than the screen now scrolls: every one of its lines can
+    be reached, a scrollbar is drawn while it scrolls, and the footer says
+    how far down the reader is and how to close it.
+    """
+    keys = [curses.KEY_NPAGE] * 20 + [10]
+    _, window = _run(monkeypatch,
+                     lambda s: dialogs.message(s, "Long", _LONG), keys,
+                     rows=12)
+    painted = _painted(window)
+    for i in range(60):
+        assert f"line {i:02d}" in painted
+    # A 12-row screen: a 10-row window, 5 rows of text in view.
+    footers = _footers(window)
+    assert "5/60  Esc/Enter close" in footers[0]
+    assert "60/60  Esc/Enter close" in footers[-1]
+    assert theme.glyph("block") in painted     # the scrollbar's thumb
+    assert not any("press any key" in footer for footer in footers)
+
+
+def test_the_footer_names_the_scroll_keys_only_when_they_fit(monkeypatch):
+    _, narrow = _run(monkeypatch,
+                     lambda s: dialogs.message(s, "Long", _LONG), [27],
+                     rows=12)
+    wide_text = _LONG + "\n" + "w" * 60
+    _, wide = _run(monkeypatch,
+                   lambda s: dialogs.message(s, "Long", wide_text), [27],
+                   rows=12)
+    # 34 wide: the position and how to close it, and no half a key name.
+    assert _footers(narrow)[0].rstrip("╞ ").endswith("Esc/Enter close")
+    assert "Up/Down PgUp/PgDn Home/End" in _footers(wide)[0]
+
+
+@pytest.mark.parametrize("key, top", [
+    (curses.KEY_DOWN, 1),
+    (ord("j"), 1),
+    (curses.KEY_NPAGE, 5),
+    (curses.KEY_END, 55),
+])
+def test_the_scroll_keys_move_a_long_message(monkeypatch, key, top):
+    _, window = _run(monkeypatch,
+                     lambda s: dialogs.message(s, "Long", _LONG), [key, 27],
+                     rows=12)
+    rows = [draw for draw in window.drawn
+            if len(draw) > 2 and draw[2].startswith("line ")]
+    # The first picture starts at the top; the second where the key left it.
+    assert rows[0][2] == "line 00" and rows[0][0] == 1
+    assert rows[5][2] == f"line {top:02d}" and rows[5][0] == 1
+
+
+@pytest.mark.parametrize("keys, top", [
+    ([curses.KEY_END, curses.KEY_UP], 54),
+    ([curses.KEY_END, ord("k")], 54),
+    ([curses.KEY_END, curses.KEY_PPAGE], 50),
+    ([curses.KEY_END, curses.KEY_HOME], 0),
+    ([curses.KEY_UP], 0),                       # already at the top
+    ([curses.KEY_END, curses.KEY_DOWN], 55),    # already at the bottom
+    ([curses.KEY_END, curses.KEY_NPAGE], 55),
+])
+def test_a_long_message_stops_at_its_ends(monkeypatch, keys, top):
+    _, window = _run(monkeypatch,
+                     lambda s: dialogs.message(s, "Long", _LONG),
+                     keys + [27], rows=12)
+    rows = [draw[2] for draw in window.drawn
+            if len(draw) > 2 and draw[2].startswith("line ")]
+    # Every picture is a full view, a key past either end included.
+    assert len(rows) == 5 * (len(keys) + 1)
+    last_picture = rows[-5:]
+    assert last_picture[0] == f"line {top:02d}"
+    assert last_picture[-1] == f"line {top + 4:02d}"
+
+
+@pytest.mark.parametrize("key", [27, 10, 13, curses.KEY_ENTER])
+def test_esc_and_enter_close_a_long_message(monkeypatch, key):
+    _, window = _run(monkeypatch,
+                     lambda s: dialogs.message(s, "Long", _LONG), [key],
+                     rows=12)
+    assert window._keys == []      # closed on the first key
+
+
+@pytest.mark.parametrize("key", [ord(" "), ord("x"), curses.KEY_F1,
+                                 curses.KEY_LEFT, curses.KEY_MOUSE])
+def test_other_keys_leave_a_long_message_open(monkeypatch, key):
+    """A key meant to move the text must not throw it away."""
+    _, window = _run(monkeypatch,
+                     lambda s: dialogs.message(s, "Long", _LONG),
+                     [key, key, 27], rows=12)
+    assert len(_footers(window)) == 3     # drawn after each key, until Esc
+    assert window._keys == []
+
+
+def test_a_message_that_fits_still_closes_with_any_key(monkeypatch):
+    _, window = _run(monkeypatch,
+                     lambda s: dialogs.message(s, "Note", "one\ntwo"),
+                     [ord("x"), ord("y")])
+    assert window._keys == [ord("y")]    # the first key closed it
+    # And it looks as it always did: no scrollbar, no position.
+    assert theme.glyph("up") not in _painted(window)
+    assert "press any key" in _footers(window)[0]
+    assert "/2" not in _footers(window)[0]
+
+
+@pytest.mark.parametrize("rows, cols", [(1, 1), (2, 40), (5, 10), (6, 40),
+                                        (7, 40), (40, 3), (12, 7)])
+def test_a_long_message_on_a_tiny_screen_does_not_crash(monkeypatch, rows,
+                                                        cols):
+    keys = [curses.KEY_DOWN, curses.KEY_NPAGE, curses.KEY_END,
+            curses.KEY_PPAGE, curses.KEY_HOME, 27]
+    _, window = _run(monkeypatch,
+                     lambda s: dialogs.message(s, "Long", _LONG), keys,
+                     rows=rows, cols=cols)
+    assert window._keys == []
+
+
+def test_a_long_message_survives_a_window_that_refuses_to_draw(monkeypatch):
+    _, window = _run(monkeypatch, lambda s: dialogs.message(s, "Long", _LONG),
+                     [curses.KEY_NPAGE, 10], rows=12, fail_draws=True)
+    assert window._keys == []
 
 
 def test_message_survives_a_window_that_refuses_to_draw(monkeypatch):

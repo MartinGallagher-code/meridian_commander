@@ -87,6 +87,33 @@ class _StubScreen:
 TAKE_DEFAULT = object()
 
 
+def layout_lines(rows) -> list[str]:
+    """A dialog layout's rows as the lines of text they paint."""
+    lines = []
+    for row in rows:
+        line = ""
+        for offset, text, _role in row:
+            line = line.ljust(offset) + text
+        lines.append(line)
+    return lines
+
+
+def help_text(sections, intro: str = "") -> str:
+    """The help as plain text, one entry a line, no description wrapped.
+
+    A description that is never wrapped stays whole, so a test can look for
+    a phrase without knowing where some screen width would break it.
+    """
+    lines = [intro, ""] if intro else []
+    for section in sections:
+        lines.append(section.title)
+        if section.note:
+            lines.append(f"  {section.note}")
+        lines += [f"  {keys:<14} {text}" for keys, text in section.entries]
+        lines.append("")
+    return "\n".join(lines)
+
+
 class _ScriptedDialogs:
     """Scripted stand-ins for the blocking dialogs.
 
@@ -112,10 +139,13 @@ class _ScriptedDialogs:
         self.prompt_defaults: list[str] = []   # the answer each one offered
         self.prompt_notes: list[list] = []     # the lines under each field
         self.messages: list[tuple] = []
+        #: The sections each help screen was given, as they were given.
+        self.helps: list[list] = []
         monkeypatch.setattr(dialogs, "menu", self._menu)
         monkeypatch.setattr(dialogs, "prompt", self._prompt)
         monkeypatch.setattr(dialogs, "confirm", self._confirm)
         monkeypatch.setattr(dialogs, "message", self._message)
+        monkeypatch.setattr(dialogs, "help_screen", self._help_screen)
 
     def _menu(self, stdscr, title, options, keys=None, text=""):
         self.menus.append((title, list(options)))
@@ -147,6 +177,12 @@ class _ScriptedDialogs:
 
     def _message(self, stdscr, title, text, error=False):
         self.messages.append((title, text, error))
+
+    def _help_screen(self, stdscr, title, sections, intro=""):
+        # Recorded as a message too, as plain text, so a test reads what the
+        # help says the way it reads any other dialog's words.
+        self.helps.append(list(sections))
+        self.messages.append((title, help_text(sections, intro), False))
 
     @property
     def last_message(self) -> str:

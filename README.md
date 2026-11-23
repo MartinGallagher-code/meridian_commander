@@ -401,6 +401,11 @@ to switch panes, **F5**/**F6** to copy/move between them, **F9** to
 synchronize, and **F10** to quit. `Esc` opens the menu bar, which reaches
 everything a key does.
 
+The help lists every key in titled sections, in two columns on a terminal
+151 columns wide or more. It scrolls with `↑`/`↓` (or `j`/`k`),
+`PgUp`/`PgDn` and `Home`/`End`, and `Esc` or `Enter` closes it. A message too
+long for the screen scrolls the same way.
+
 ## Documentation
 
 The manual is at **<https://meridian-commander.readthedocs.io/>**:
