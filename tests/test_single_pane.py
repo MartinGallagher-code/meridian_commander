@@ -243,7 +243,9 @@ def test_the_options_menu_entry_toggles_it_and_carries_a_tick(app):
 def test_the_help_screen_lists_the_key(app, monkeypatch):
     dialogs_seen = _ScriptedDialogs(monkeypatch)
     app._help()
-    assert "  z              single pane" in dialogs_seen.all_text
+    entries = {keys: text for section in dialogs_seen.helps[-1]
+               for keys, text in section.entries}
+    assert entries["z"].startswith("single pane")
 
 
 def test_a_tab_flips_to_the_other_pane_at_full_width(single):

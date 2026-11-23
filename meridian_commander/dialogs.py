@@ -19,7 +19,9 @@ layout and loses only the paint.
 from __future__ import annotations
 
 import curses
+import textwrap
 from dataclasses import dataclass
+from typing import Callable, List, Sequence, Tuple
 
 from . import theme
 from .util import read_key, typed_char
@@ -86,22 +88,270 @@ def _buttons(win, y: int, specs: list[tuple[str, bool]], width: int) -> None:
         x = theme.button(win, y, x, caption, width=bw, focused=focused)
 
 
+# -- scrolling text ------------------------------------------------------------
+#
+# A message and the help both show text that may be taller than the screen.
+# Each lays its text out as columns of rows for the width it is given, and
+# one loop draws whichever rows are in view and scrolls through the rest.
+
+#: One run of text in a row: its column within the row, the text, its role.
+Segment = Tuple[int, str, str]
+#: A row of text: the runs it is painted as, left to right.
+Row = Tuple[Segment, ...]
+#: A column of rows: where it starts in the text area, how wide it may paint,
+#: and its rows, top to bottom.
+Column = Tuple[int, int, List[Row]]
+
+#: Keys that close a dialog whose text scrolls: Esc and Enter.  Any other key
+#: either scrolls it or leaves it where it is.
+CLOSE_KEYS = (27, 10, 13, curses.KEY_ENTER)
+
+#: Said in the footer while the text scrolls, after the position; and by the
+#: help, which only these keys close, even when it does not scroll.
+CLOSE_HINT = "Esc/Enter close"
+#: Said after that, when the footer has room for all of it.
+SCROLL_HINT = "Up/Down PgUp/PgDn Home/End"
+
+
+def _scrolled(key: int | str, top: int, body: int, total: int) -> int | None:
+    """Where a scroll key moves the top row, or None for any other key.
+
+    Not clamped here: :func:`_pager` clamps the top row every time it draws,
+    since a resize can move the ends as well as a key.
+    """
+    if key in (curses.KEY_UP, ord("k")):
+        top -= 1
+    elif key in (curses.KEY_DOWN, ord("j")):
+        top += 1
+    elif key == curses.KEY_PPAGE:
+        top -= max(1, body)
+    elif key == curses.KEY_NPAGE:
+        top += max(1, body)
+    elif key == curses.KEY_HOME:
+        top = 0
+    elif key == curses.KEY_END:
+        top = total
+    else:
+        return None
+    return top
+
+
+def _pager(stdscr, title: str, width: int,
+           layout: Callable[[int], List[Column]], idle_footer: str,
+           any_key: bool) -> None:
+    """Show text laid out by ``layout``, scrolling whatever does not fit.
+
+    ``layout(text_width)`` returns the text as :data:`Column` s for a text
+    area that many cells wide (at least one).  The window asks for ``width``
+    and for as many rows as the text has at that width, and the screen clamps
+    both.  Text that fits is drawn as a message always was, with
+    ``idle_footer`` and an OK button; ``any_key`` closes it with any key.
+    Text that does not fit grows a scrollbar and its position in the footer,
+    the scroll keys move it, and only :data:`CLOSE_KEYS` close it -- which is
+    the point of scrolling: a key meant to move the text must not throw it
+    away.
+
+    A terminal resized while it is open gets the dialog drawn again for the
+    new size, rather than the old window left hanging off its edge.
+    """
+    laid: dict = {}
+
+    def columns(text_width: int) -> list[Column]:
+        text_width = max(1, text_width)
+        if text_width not in laid:
+            laid[text_width] = layout(text_width)
+        return laid[text_width]
+
+    def rows_in(cols: list[Column]) -> int:
+        return max((len(rows) for _, _, rows in cols), default=0)
+
+    def open_window():
+        # As wide as asked for and the screen allows -- or narrower, when the
+        # layout stops short of that (the help's columns have a widest).
+        room = max(1, min(width, stdscr.getmaxyx()[1] - 2))
+        cols = columns(room - 6)
+        used = max((x + col_w for x, col_w, _ in cols), default=0) + 6
+        return _center(stdscr, rows_in(cols) + 5, min(room, used))
+
+    win = open_window()
+    top = 0
+    while True:
+        win_h, win_w = win.getmaxyx()
+        cols = columns(win_w - 6)
+        total = rows_in(cols)
+        body = max(0, win_h - 5)
+        # As menu() clamps its list: never above the first row, and never so
+        # far down that the last row leaves the bottom of the view.
+        top = max(0, min(top, total - body))
+        scrolling = total > body
+        shown = min(body, total - top)
+        footer = idle_footer
+        if scrolling:
+            footer = f"{top + shown}/{total}  {CLOSE_HINT}"
+            # The keys only whole: the frame cuts a footer too long for it,
+            # and half a key name reads as a fault.  The frame's footer has
+            # its two brackets, two spaces, and a cell short of the inside.
+            if len(footer) + 2 + len(SCROLL_HINT) + 4 <= win_w - 3:
+                footer += f"  {SCROLL_HINT}"
+        _box(win, title, footer)
+        for x, col_w, rows in cols:
+            for i, row in enumerate(rows[top:top + shown]):
+                for offset, text, role in row:
+                    room = max(0, min(col_w, win_w - 6 - x) - offset)
+                    theme.paint(win, 1 + i, 3 + x + offset, text[:room], role)
+        if scrolling:
+            theme.scrollbar(win, 1, win_w - 2, body, top, body, total)
+        _buttons(win, min(win_h - 3, min(total, body) + 2), [("~O~K", True)],
+                 win_w)
+        win.refresh()
+        k = read_key(win)
+        if k in CLOSE_KEYS or (any_key and not scrolling):
+            return
+        if k == curses.KEY_RESIZE:
+            # What was behind the dialog first, so nothing of the old window
+            # is left where the new one does not reach.
+            stdscr.touchwin()
+            stdscr.noutrefresh()
+            win = open_window()
+            continue
+        moved = _scrolled(k, top, body, total)
+        if moved is not None:
+            top = moved
+
+
 def message(stdscr, title: str, text: str, error: bool = False) -> None:
-    """Show a modal message; dismissed with any key."""
+    """Show a modal message.
+
+    One that fits on the screen is dismissed with any key, as it always was.
+    One taller than the screen scrolls instead of being cut off: Up/Down
+    (``j``/``k``), PgUp/PgDn and Home/End move it, a scrollbar and the
+    footer say where it is, and Esc or Enter closes it.
+    """
     lines = text.split("\n")
     width = max(len(title) + 8,
                 max((len(line) for line in lines), default=0) + 6, 34)
-    height = len(lines) + 5
-    win = _center(stdscr, height, width)
-    _box(win, title, "press any key")
     role = "dialogerror" if error else "dialog"
-    win_h, win_w = win.getmaxyx()
-    body = lines[: max(0, win_h - 5)]
-    for i, line in enumerate(body):
-        theme.paint(win, 1 + i, 3, line[: win_w - 6], role)
-    _buttons(win, min(win_h - 3, len(body) + 2), [("~O~K", True)], win_w)
-    win.refresh()
-    read_key(win)
+    rows: list[Row] = [((0, line, role),) for line in lines]
+
+    def layout(text_width: int) -> list[Column]:
+        # Each line keeps its own breaks and is clipped, never re-wrapped:
+        # a message is often a listing, and its columns must stay columns.
+        return [(0, text_width, rows)]
+
+    _pager(stdscr, title, width, layout, "press any key", any_key=True)
+
+
+# -- the help ------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class HelpSection:
+    """A titled part of the help: (keys, what they do) pairs, and a note.
+
+    The descriptions are prose, not pre-wrapped: :func:`help_layout` wraps
+    them to whatever width the columns come to.
+    """
+
+    title: str
+    entries: Tuple[Tuple[str, str], ...]
+    note: str = ""
+
+
+#: Entries sit this far in from their section's title.
+HELP_INDENT = 2
+#: The keys' column: a description starts this far past the indent, and keys
+#: as long as this or longer get a row of their own above it.
+HELP_KEYS = 15
+#: The narrowest a description may be wrapped to beside its keys.  Narrower
+#: than that, the keys go on a row of their own and it goes under them.
+HELP_TEXT_MIN = 20
+#: Blank columns between the help's two columns.
+HELP_GUTTER = 3
+#: The narrowest column the help is split into two of.  Narrower than that
+#: (a terminal under 151 columns) it stays one column, still scrolling.
+HELP_COLUMN_MIN = 70
+#: The widest a column grows: on a very wide terminal the help stops widening
+#: rather than stretching its lines out of reading range.
+HELP_COLUMN_MAX = 100
+
+
+def _wrap(text: str, width: int) -> list[str]:
+    # Hyphens are not break points here: "Ctrl-R" and "F-keys" stay whole.
+    return textwrap.wrap(text, max(1, width), break_on_hyphens=False) or [""]
+
+
+def _help_section(section: HelpSection, width: int) -> list[Row]:
+    """One section's rows at ``width``: the title, the note, the entries."""
+    beside = width >= HELP_INDENT + HELP_KEYS + HELP_TEXT_MIN
+    hang = (HELP_INDENT + HELP_KEYS if beside
+            else max(0, min(2 * HELP_INDENT, width - 1)))
+    indent = min(HELP_INDENT, hang)
+    rows: list[Row] = [((0, section.title, "dialogtitle"),)]
+    if section.note:
+        rows += [((indent, line, "dialog"),)
+                 for line in _wrap(section.note, width - indent)]
+    for keys, text in section.entries:
+        lines = _wrap(text, width - hang)
+        keys_cell = (indent, keys, "dialoghot")
+        if beside and len(keys) < HELP_KEYS:
+            rows.append((keys_cell, (hang, lines[0], "dialog")))
+            lines = lines[1:]
+        else:
+            rows.append((keys_cell,))
+        rows += [((hang, line, "dialog"),) for line in lines]
+    return rows
+
+
+def _stacked(blocks: list[list[Row]]) -> list[Row]:
+    """Blocks of rows one under another, a blank row between each two."""
+    rows: list[Row] = []
+    for block in blocks:
+        if rows:
+            rows.append(())
+        rows += block
+    return rows
+
+
+def help_layout(sections: Sequence[HelpSection], width: int,
+                intro: str = "") -> list[Column]:
+    """The help laid out for a text area ``width`` cells wide.
+
+    Two columns side by side where each can be :data:`HELP_COLUMN_MIN` wide,
+    otherwise one.  Two columns split the sections into two runs of about
+    equal height, at a section boundary, so no section is broken across
+    them; the columns then scroll together, row by row.
+    """
+    width = max(1, width)
+    two = (width - HELP_GUTTER) // 2 >= HELP_COLUMN_MIN and len(sections) > 1
+    col_w = min((width - HELP_GUTTER) // 2 if two else width, HELP_COLUMN_MAX)
+    blocks = [_help_section(section, col_w) for section in sections]
+    if intro:
+        blocks.insert(0, [((0, line, "dialog"),)
+                          for line in _wrap(intro, col_w)])
+    if not two:
+        return [(0, col_w, _stacked(blocks))]
+    # The intro stays above the first section, so a split never falls
+    # between them.
+    first = 2 if intro else 1
+    split = min(range(first, len(blocks)),
+                key=lambda at: max(len(_stacked(blocks[:at])),
+                                   len(_stacked(blocks[at:]))))
+    return [(0, col_w, _stacked(blocks[:split])),
+            (col_w + HELP_GUTTER, col_w, _stacked(blocks[split:]))]
+
+
+def help_screen(stdscr, title: str, sections: Sequence[HelpSection],
+                intro: str = "") -> None:
+    """Show the help: titled sections of keys, in two columns where they fit.
+
+    It scrolls like a long :func:`message` -- Up/Down (``j``/``k``),
+    PgUp/PgDn, Home/End -- and only Esc or Enter closes it, even when it all
+    fits: every other key is one a reader may press looking for something,
+    and the help should still be there afterwards.
+    """
+    width = 2 * HELP_COLUMN_MAX + HELP_GUTTER + 6
+    _pager(stdscr, title, width,
+           lambda text_width: help_layout(sections, text_width, intro),
+           CLOSE_HINT, any_key=False)
 
 
 def confirm(stdscr, title: str, text: str, default_yes: bool = False) -> bool:
