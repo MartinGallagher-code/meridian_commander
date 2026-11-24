@@ -99,8 +99,8 @@ def test_shift_f9_starts_it_after_an_ordinary_sync(app, tmp_path, monkeypatch,
     assert notice.startswith("Auto-sync is on. These two are kept in step:")
     assert f"local:{tmp_path / 'left'}" in notice
     assert "Every 2 seconds" in notice and "F9 or Shift-F9 stops it" in notice
-    assert app.message == ("Auto-sync on: left ⇄ right -- F9 or Shift-F9 "
-                           "stops it")
+    assert app.message == (f"Auto-sync on: left {theme.glyph('both')} "
+                           "right -- F9 or Shift-F9 stops it")
     assert runner.interval == 2.0
     assert runner.panels == (app.left, app.right)
     assert [place.name for place in runner.places] == ["left", "right"]
@@ -447,7 +447,7 @@ def test_the_bar_gives_way_on_a_narrow_line(app, tmp_path, monkeypatch):
     _same(tmp_path)
     _start(app, monkeypatch, confirm=())
     assert app._autosync_bar(100) == \
-        " AUTO-SYNC  left ⇄ right  watching  F9 stops "
+        f" AUTO-SYNC  left {theme.glyph('both')} right  watching  F9 stops "
     assert app._autosync_bar(60) == " AUTO-SYNC  watching  F9 stops "
     assert app._autosync_bar(40) == " AUTO-SYNC  F9 stops "
     assert app._autosync_bar(10) == " AUTO-SYNC "
@@ -461,6 +461,7 @@ def _drawn(tmp_path, monkeypatch, prepare, rows=24, cols=100):
         app = App(stdscr, str(tmp_path / "left"), str(tmp_path / "right"))
         app.use_trash = False
         holder["app"] = app
+        assert theme.glyph("tl") == "+"
         _same(tmp_path)
         _ScriptedDialogs(monkeypatch)
         app._auto_sync()
@@ -477,6 +478,13 @@ def _drawn(tmp_path, monkeypatch, prepare, rows=24, cols=100):
 
     monkeypatch.setattr(curses, "has_colors", lambda: True)
     monkeypatch.setattr(curses, "doupdate", curses.doupdate)
+    # The plain frames: the frame's colour is read back from its corner, and
+    # ncurses 6.4's inch() ORs a box-drawing character's code point into
+    # what it returns for the cell -- "+" reads back as its attributes alone.
+    monkeypatch.setenv("MERIDIAN_ASCII", "1")
+    # theme.init() takes the plain set for the whole process; put back the
+    # one in force now, so the tests after this one draw as they would have.
+    monkeypatch.setattr(theme, "GLYPHS", theme.GLYPHS)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     for side in ("left", "right"):
@@ -487,7 +495,7 @@ def _drawn(tmp_path, monkeypatch, prepare, rows=24, cols=100):
 
 def test_it_cannot_be_missed_while_it_runs(tmp_path, monkeypatch):
     (text, attrs), app = _drawn(tmp_path, monkeypatch, lambda app: None)
-    assert "AUTO-SYNC  left" in text[-2] and "F9 stops" in text[-2]
+    assert "AUTO-SYNC  left <-> right" in text[-2] and "F9 stops" in text[-2]
     assert "9Stop" in text[-1]
     assert attrs["frame"] == attrs["syncframe"]
     assert attrs["bar"] == attrs["syncbar"]
@@ -526,7 +534,7 @@ def test_the_jobs_list_shows_it_first(app, tmp_path, monkeypatch):
     assert isinstance(pane, JobsPane)
     assert pane.entries()[0] is runner
     assert JobsPane.lines_for_autosync(runner) == (
-        " A. running   Auto-sync left ⇄ right",
+        f" A. running   Auto-sync left {theme.glyph('both')} right",
         "    watching, every 2s  Enter: all of it")
 
 
