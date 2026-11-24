@@ -112,6 +112,12 @@ SECTIONS = (
         ("D",
          "compare both panes' files side by side: n/N next/previous "
          "difference, one scrollbar"),
+        ("K",
+         "join both panes' tables: File A (the left pane's) top left, File "
+         "B top right, the rows they make joined below.  m marks a join "
+         "column in each, Tab moves between the three, o which rows are "
+         "kept, e how strict a match is, z zoom, F2 saves the join, F1 its "
+         "keys"),
         ("h",
          "this pane becomes head + tail of the file the other pane is on, "
          "and follows its cursor; +/- more/fewer lines, Esc gives the pane "

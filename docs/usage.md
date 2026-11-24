@@ -903,6 +903,10 @@ matters here: both files are read through their pane's connection, so a local
 file compares against an SFTP, SSH, FTP or inside-an-archive one with nothing
 fetched to disk first. Each side is read up to 8 MB.
 
+**`K` — join two tables.** Takes the table each pane is offering, as `D`
+takes its files, and puts them side by side above the rows they make joined
+on columns you pick in each — see [Joining two tables](#joining-two-tables).
+
 **`h` — head and tail, in the pane.** The active pane stops being a listing and
 becomes the two ends of whatever the **other** pane's cursor is on: the first
 and last lines with a rule between them saying how many were skipped. It
@@ -917,6 +921,95 @@ Home/End then scroll the overflow), `r` re-reads a file that has grown, and
 `Esc` — or `h` again — gives the pane back to its listing. The file is streamed
 once and only the two ends are held, so peeking at a multi-gigabyte log costs
 what peeking at a short one does, on a remote pane as much as a local one.
+
+## Joining two tables
+
+**`K`** — or **Command ▸ Join two tables on their columns** — takes the file
+each pane is offering, the tagged one or the one under the cursor, and opens
+the two side by side with the rows they make together underneath:
+
+```
+ File A: people.tsv -- 4 rows -- 2 colum File B: orders.csv -- 4 rows -- 2 colum
+     1:id name                               1:uid item
+  1     1 ann                             1      2 pen
+  2     2 bob                             2      2 ink
+  3     2 bo                              3      1 cup
+  4     3 cy                              4      9 hat
+
+ id: 1  Tab next  [m]ark join column  [o uid: 1  Tab next  [m]ark join column  [
+ Joined on A.id = B.uid -- 5 rows -- matching rows only, exact text -- 4 columns
+     A.id A.name   B.uid B.item
+  1     1 ann          1 cup
+  2     2 bob          2 pen
+  3     2 bob          2 ink
+  4     2 bo           2 pen
+  5     2 bo           2 ink
+
+ A.id: 1  Tab next  [o] rows  [e] match  [z]oom  F2 save  F1 keys  [q]uit
+```
+
+**File A**, top left, is always the left pane's file and **File B**, top
+right, the right pane's, whichever pane is active — as `D` keeps the left
+pane's file on the left. Both must be tables the table browser opens (`.tsv`,
+`.csv`, `.tab`, `.psv`), but not the same kind: a TSV joins a CSV, and a file
+on an SFTP pane joins one inside a zip. A pane offering no single table — on
+a directory, with two files tagged, listing find results — is refused with
+the reason, as `D` refuses it.
+
+**Picking the columns.** In File A and in File B, **`m`** marks the cursor's
+column as a join column, and `m` again unmarks it. Mark more than one to join
+on several: they pair up **in the order you marked them**, A's first with B's
+first, A's second with B's second, and a row matches only when every pair
+does. Each marked column's header shows its place in the pairing (`1:id`,
+`1:uid`), and the output's title says it in full: `Joined on A.id = B.uid`.
+Until both files have the same number of columns marked, the bottom half says
+what to do instead.
+
+**The output** is every combination of an A row and a B row that match: a
+value found twice in A and three times in B gives six rows, in A's order and,
+within each A row, B's. Its columns are all of A's and then all of B's, each
+named for its file — `A.id`, `B.id` — so two columns of the same name stay
+apart in the grid, in a filter and in a saved file. To leave some out, hide
+them with `-` in the output: `F2` saves only the columns shown.
+
+- **`o`** — which rows are kept: *matching rows only*; *matching rows, and
+  every row of A*, an A row with no match getting a blank B side; or
+  *matching rows, and every row of A and B*, the unmatched B rows after the
+  rest, in B's order.
+- **`e`** — how strict a match is: *exact text*; *any case, spaces trimmed*
+  (`Ann ` matches `ann`); or *any case, spaces trimmed, numbers by value*
+  (`7`, `7.0` and `007` are one value). Numbers are compared exactly, not as
+  floating point, so two twenty-digit identifiers that differ in the last
+  digit stay apart.
+- **A blank key matches nothing.** A row whose join cells are all empty is
+  not matched with every other such row — in a results file blank is the
+  commonest value of all, and those combinations are rows nobody wants. Such
+  rows are kept only where unmatched rows are, and the title counts them.
+
+**The three regions are table browsers.** **`Tab`** and **`Shift-Tab`** move
+the keyboard between them; the one with the keyboard has the bright title and
+footer. Each keeps all of the table browser's keys — `f`, `=`/`!` and
+`Backspace` to filter, `s` to sort, `Enter` for the row as a record, `i` for
+a column's summary, `F` to freeze, `-`/`+` to hide and show, `/` to find —
+and the output follows what the two files show: it is made from the rows each
+one keeps, in the order shown, so filtering File A down to one city joins just
+those rows, and sorting it reorders the output. Moving the output's cursor
+moves File A's and File B's to the rows that output row came from. **`z`**
+zooms the region with the keyboard to the whole screen and back, **`F1`**
+lists these keys, and **`q`** (or `Esc`) goes back to the panes.
+
+**Saving.** `F2` in the output saves the joined rows, the columns shown and
+the header, as `F2` does in the table browser: beside File A, offered as
+`people-orders.joined.tsv`, in the format its name asks for. `F2` in File A or
+File B saves that file's view.
+
+**Limits.** Each file is read as the table browser reads it, up to 16 MB and
+50,000 rows, and a file only partly read says so in its own title and the
+output's. The output holds at most 50,000 rows as well: a join that would make
+more stops there, without making the rest, and its title says it was cut
+short. On an 80x24 terminal each file has its quarter and the output the
+bottom half; a terminal smaller than 40x10 says so, and `z` still shows one
+region at a time on it.
 
 ## One pane at a time
 
@@ -1698,6 +1791,7 @@ where it should.)
 | `x` | extract the archive into the other pane | `/` | search this pane by name (see above) |
 | `F` | filter: show only the names matching a pattern (see above) | | |
 | `D` | compare both panes' files | `h` | head + tail of the other pane's file, in this pane |
+| `K` | join both panes' tables on columns picked in each (see above) | | |
 | `Ctrl-Q` | quick view: the other pane shows the cursor's file (see below) | | |
 | `+` / `\` | tag / untag the names matching a pattern | `F8` | delete: to the trash on a local pane, or permanently (see below) |
 | `-` / `*` | untag all / invert the tags | `w` | open with the system's application (see above) |
@@ -1782,6 +1876,10 @@ rows, `!` hide them, `←`/`→` other columns), `F` to freeze the columns up to
 cursor's, `-` to hide a column and `+` to show them all, `H` to read the first
 line as data, `c` for the column colours, `#` for the comment lines above the
 table, `q` quits.
+In the **join screen** (`K`): `Tab`/`Shift-Tab` move between File A, File B
+and the output, `m` marks or unmarks a join column in File A or File B, `o`
+chooses which rows are kept, `e` how strict a match is, `z` zooms, `F1` lists
+the keys, `q` returns to the panes; every table browser key works in each.
 In the **terminal pane** (`t`): every key goes to the program. `Ctrl-]` then
 `Tab` switches to the other pane, `z` zooms the terminal to the full width and
 back, `q` closes the terminal, `PgUp` (or `[`)

@@ -12,6 +12,32 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.28.0] — 2026-11-24
+
+### Added
+
+- **Join two tables** (`K`, or **Command ▸ Join two tables on their
+  columns**). The table each pane is offering opens side by side -- File A,
+  the left pane's, top left; File B, the right pane's, top right -- above the
+  rows they make joined, across the bottom half. `m` marks the cursor's column
+  as a join column in either file; several pair up in the order marked, each
+  header shows its place (`1:id`), and the output's title says the pairing
+  (`Joined on A.id = B.uid`). The output is every combination of matching
+  rows (a value twice in A and three times in B gives six), its columns A's
+  and then B's, named `A.…` and `B.…`. `o` keeps the matches only, or those
+  and every row of A, or those and every row of both; `e` matches the exact
+  text, or ignoring case and spaces at either end, or that and numbers by
+  value (`7` = `7.0` = `007`, compared exactly). A row whose join cells are
+  all blank matches nothing. All three regions are table browsers, so each
+  filters, sorts, shows a record or a summary and saves (`F2`) as any table
+  does; the output is made from the rows each file shows, in their order, so
+  a filter in File A narrows the join, and the files' cursors follow the
+  output's to the rows it came from. `Tab`/`Shift-Tab` move between them, `z`
+  zooms one to the whole screen, `F1` lists the keys. A join past 50,000 rows
+  stops there and says so, as does a file only partly read; a terminal
+  smaller than 40x10 says it is too small. Build dataset's `join <key>` is
+  unchanged. (MC-033)
+
 ## [1.27.0] — 2026-11-23
 
 ### Changed
@@ -1426,6 +1452,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.28.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.27.0...v1.28.0
 [1.27.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.26.0...v1.27.0
 [1.26.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.25.1...v1.26.0
 [1.25.1]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.25.0...v1.25.1
