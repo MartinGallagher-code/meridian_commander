@@ -38,7 +38,12 @@ from support import _FakeRemoteBackend, read, write
 @pytest.fixture
 def where(tmp_path, monkeypatch):
     """Two empty directories, ``a`` and ``b``, and a trash and home of their
-    own."""
+    own.
+
+    The FreeDesktop trash on every platform, as the trash's own tests have
+    it: on macOS the desktop's trash is the real ``~/.Trash``.
+    """
+    monkeypatch.setattr(trash.sys, "platform", "linux")
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     for name in ("a", "b", "home"):

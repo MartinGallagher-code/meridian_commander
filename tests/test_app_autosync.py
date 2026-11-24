@@ -16,7 +16,7 @@ import time
 import pytest
 
 from meridian_commander import autosync as autosync_mod
-from meridian_commander import dialogs, theme
+from meridian_commander import dialogs, theme, trash
 from meridian_commander.app import MENUS, App
 from meridian_commander.autosync import AutoSyncRunner
 from meridian_commander.filesystems import LocalFileSystem
@@ -39,7 +39,12 @@ _REAL_THREAD = autosync_mod._thread
 
 @pytest.fixture(autouse=True)
 def _quiet(monkeypatch):
-    """No real progress window and no real thread: the tests step it."""
+    """No real progress window and no real thread: the tests step it.
+
+    The FreeDesktop trash, in the app fixture's data directory, on every
+    platform: on macOS the desktop's trash is the real ``~/.Trash``.
+    """
+    monkeypatch.setattr(trash.sys, "platform", "linux")
     monkeypatch.setattr(curses, "doupdate", lambda: None)
     monkeypatch.setattr(curses, "has_colors", lambda: False)
 
