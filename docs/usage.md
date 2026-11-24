@@ -1795,7 +1795,8 @@ where it should.)
 | `Ctrl-Q` | quick view: the other pane shows the cursor's file (see below) | | |
 | `+` / `\` | tag / untag the names matching a pattern | `F8` | delete: to the trash on a local pane, or permanently (see below) |
 | `-` / `*` | untag all / invert the tags | `w` | open with the system's application (see above) |
-| `Ctrl-U` | swap panes | `F9` | synchronize panes |
+| `Ctrl-U` | swap panes | `F9` | synchronize panes; while auto-sync runs, stop it |
+| | | `Shift-F9` / `S` | auto-sync: keep both panes in step until stopped (see [Auto-sync](transfers.md#auto-sync-keeping-the-panes-in-step)) |
 | `Ctrl-R` | reload panes | `F10` | quit |
 | `Ctrl-G` | go to path | `Ctrl-T` | change sort order: name, natural name (`run_2` before `run_10`), extension, size, time |
 | `Esc` | the menu bar | `Alt+F`/`C`/`O`/`H` | a menu by name |
@@ -1813,7 +1814,8 @@ where it should.)
 
 **F-key aliases** (for terminals that swallow function keys): press the digit
 `1`–`0` for `F1`–`F10`, or the mnemonic letter — `?`/`1` help, `o` open/connect,
-`v` view, `e` edit, `c` copy, `m` move, `d` delete, `s` sync, `q` quit.
+`v` view, `e` edit, `c` copy, `m` move, `d` delete, `s` sync, `q` quit;
+`S` for `Shift-F9`, auto-sync.
 
 **Mouse**: click to select and focus a pane, double-click to open a
 file/directory, scroll wheel to move through the listing, **click the menu bar**

@@ -51,6 +51,14 @@ listing = short
 ; good (no).  Remote panes and archives have no trash and always ask plainly.
 trash = yes
 
+[autosync]
+; How often auto-sync (Shift-F9) looks at the two directories, in seconds:
+; "interval" when both panes are on this machine, "remote_interval" when
+; either is on another one (SFTP, SSH or FTP), where each look walks both
+; trees over the network.  Neither goes below half a second.
+interval = 2
+remote_interval = 10
+
 [plugins]
 ; Extra directories to search for plug-ins, colon-separated.
 ; Built-in plug-ins and ~/.config/meridian-commander/plugins/ are always used.
@@ -323,6 +331,32 @@ def save_trash(on: bool) -> bool:
     if trash_enabled() == on:
         return True
     return _save_ui("trash", "yes" if on else "no")
+
+
+#: The shortest interval ``[autosync]`` may set, in seconds: shorter would
+#: have the checks walking both trees nearly all the time.
+AUTOSYNC_MIN_INTERVAL = 0.5
+
+
+def autosync_intervals(local: float = 2.0,
+                       remote: float = 10.0) -> tuple[float, float]:
+    """``[autosync] interval`` and ``remote_interval``, in seconds.
+
+    Either one blank, not a number, or not a finite one is its default;
+    one below :data:`AUTOSYNC_MIN_INTERVAL` is raised to it.
+    """
+    parser = load()
+    found = []
+    for key, default in (("interval", local), ("remote_interval", remote)):
+        raw = (parser.get("autosync", key, fallback="") or "").strip()
+        try:
+            value = float(raw)
+        except ValueError:
+            value = default
+        if value != value or value in (float("inf"), float("-inf")):
+            value = default
+        found.append(max(AUTOSYNC_MIN_INTERVAL, value))
+    return found[0], found[1]
 
 
 def extra_plugin_dirs() -> list[str]:

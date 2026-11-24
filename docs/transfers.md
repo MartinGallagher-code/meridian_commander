@@ -207,3 +207,92 @@ file count and takes **Esc** or **q** to abandon it. Nothing has been copied at
 that point, so cancelling a scan costs you nothing but the wait. The walk is
 iterative rather than recursive, so tree depth is bounded by the filesystem
 rather than by Python's recursion limit.
+
+## Auto-sync: keeping the panes in step
+
+`F9` is a one-off. **Auto-sync** keeps going: from the moment it is turned on,
+anything that changes in one pane's directory is made in the other, until you
+stop it. **`Shift-F9`** (or `S`, or **Command ▸ Auto-sync panes**) turns it on,
+and the same key turns it off again.
+
+**Starting.** It refuses what `F9` refuses — a pane listing find results, and
+two directories where one is inside the other — and a pane inside an archive.
+A directory that looks large is asked about first, as for `F9`. Then it runs an
+ordinary `F9` pass: you see the plan and confirm it, and both sides start out
+the same. If you decline the plan, or cancel the copy, auto-sync does not
+start. A short notice says it is on, and what it keeps in step.
+
+**While it runs** the panes stay usable, and it is hard to miss:
+
+- an **AUTO-SYNC** bar on the status line names the two directories, says how
+  it is going (`watching`, how many copied, how many to the trash, how many
+  failed) and that `F9` stops it;
+- both pane frames are drawn in a colour nothing else uses;
+- the function bar's `9` reads **Stop**: while auto-sync is on, `F9` stops it
+  rather than starting a one-off sync.
+
+It checks both directories, the whole tree under each as `F9` walks it, **every
+2 seconds** when both panes are on this machine and **every 10 seconds** when
+either is remote (SFTP, SSH or FTP). Both can be set in `config.ini` (see
+[Configuration](configuration.md#autosync--how-often-auto-sync-looks)).
+Changes count whoever made them: Meridian, an editor in another window, a
+build, a download. The checks run on a thread of their own, with a connection
+of their own to a remote pane, so a check of a big or remote tree never holds
+up the keyboard, and browsing that host is not held up behind it. When a check
+changes something, the pane it changed is reloaded, with the cursor kept on
+the same name, and the status line says what was done.
+
+**What a check does:**
+
+- A file **new or changed** on one side is copied to the other, keeping its
+  modification time — once it has **held still for two checks** in a row, so a
+  file still being written (a download, a build, an editor saving) is not
+  copied half-way. A new file therefore arrives within two checks.
+- When a file has changed on **one side only**, that side's copy wins, even if
+  its clock says it is older (a file put back to an earlier version).
+- When the **same file changed on both sides** between checks, the newer copy
+  wins, as with `F9`; the copy it replaces is **moved to the trash** first, not
+  written over, and the status line says so.
+- A file **deleted or renamed** on one side — one the last check saw on both
+  sides — is **moved to the trash** on the other side once it has been gone
+  for two checks (an editor that saves by renaming leaves a brief gap). Never
+  on the first check, and never for a file only one side has had. A folder
+  emptied that way, and gone from the other side, is removed too; it holds
+  nothing. A renamed file arrives under its new name and the old name goes to
+  the trash.
+- **Nothing is ever deleted for good.** On a local pane the trash is the
+  desktop's own (the same one `F8` uses). On a remote pane it is a folder of
+  Meridian's own on that machine, outside the synced folder:
+  `~/.meridian-trash/`, under the date and time and then the whole path the
+  file had — `/srv/www/index.html` goes to
+  `~/.meridian-trash/2026-11-24_153000/srv/www/index.html`. A local disk with
+  no usable trash is not deleted on: the file is left, and counted as a
+  failure.
+- A trash inside one of the synced folders (syncing your home directory) is
+  left out of the checks, so what goes into it is not copied across.
+- Empty folders are not copied, as with `F9`; they arrive with their first
+  file.
+
+**When something goes wrong, it keeps going.** A copy or a move to the trash
+that fails (permission denied, a full disk) is counted on the bar, and not
+tried again until one of the two copies changes. `J` lists auto-sync above the
+jobs; `Enter` on it shows every failure in full, then what it has done.
+
+**A dropped connection** to a remote pane does not stop it: the bar says it is
+reconnecting, it dials again at every check, and nothing is copied or deleted
+until the connection is back. A password typed when it started is kept in
+memory for that, never written anywhere.
+
+**A folder that is suddenly empty is not believed.** If everything on one side
+disappears at once — which is what an unmounted disk looks like — nothing is
+mirrored: the bar says so, and auto-sync waits until that side has files
+again. Deleting the last file of a folder that held one is mirrored as usual.
+
+**It stops** when you press `Shift-F9` or `F9`, or choose the menu entry again,
+or `c` on it in `J`; when either pane changes directory or connection (`Enter`,
+`Backspace`, `<`/`>`, `Ctrl-G`, `~`, a preset, a new connection, `=`, find
+results listed in the pane); and when Meridian quits. The status line says
+why. Swapping the panes (`Ctrl-U`) does not stop it. A file being copied when
+it stops is finished first; when quitting, it gets five seconds, and past that
+it is cancelled and the part written removed, so no half-written file is left.
+

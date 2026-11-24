@@ -12,6 +12,36 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.29.0] — 2026-11-24
+
+### Added
+
+- **Auto-sync** (`Shift-F9`, `S`, or **Command ▸ Auto-sync panes**) keeps the
+  two panes in step until it is stopped. It refuses what `F9` refuses (find
+  results, one directory inside the other) and an archive, asks first about
+  a pane that looks large, and starts with an ordinary `F9` pass, plan and
+  all. Then it checks both trees every 2 seconds (10 when either pane is
+  remote; both set under `[autosync]` in `config.ini`), on a thread and
+  connections of its own, so the panes stay usable. A file new or changed
+  on one side is copied to the other, keeping its time, once it has held
+  still for two checks; when only one side changed, that side wins, and
+  when both did the newer wins and the other goes to the trash. A file
+  deleted or renamed on one side, which the last check saw on both, goes to
+  the trash on the other side once it has been gone for two checks -- the
+  desktop's trash on a local pane, `~/.meridian-trash/<date>/<its path>` on
+  a remote one -- and never on the first check; a folder emptied that way,
+  and gone from the other side, is removed. A trash inside a synced folder
+  is left out. Failures are counted on the bar, not retried until the file
+  changes, and read in full in `J`; a dropped connection is dialled again at
+  each check, with nothing copied or deleted meanwhile; a side whose folder
+  is suddenly empty (an unmounted disk) is not mirrored. While it runs an
+  AUTO-SYNC bar on the status line says what is kept in step and how it is
+  going, both pane frames take a colour of their own, and the function
+  bar's `9` reads **Stop**. It stops on `F9` or `Shift-F9`, `c` in `J`,
+  either pane changing directory or connection, and quitting (a copy under
+  way is given five seconds, then cancelled and removed), and the status
+  line says why. `F9`'s one-off sync is unchanged. (MC-034)
+
 ## [1.28.0] — 2026-11-24
 
 ### Added
@@ -1452,6 +1482,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.29.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.28.0...v1.29.0
 [1.28.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.27.0...v1.28.0
 [1.27.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.26.0...v1.27.0
 [1.26.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.25.1...v1.26.0

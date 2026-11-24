@@ -187,7 +187,15 @@ SECTIONS = (
         ("F6/6/m", "Move"),
         ("F7/7", "Mkdir"),
         ("F8/8/d", "Delete"),
-        ("F9/9/s", "Sync: both panes hold the newest version of every file"),
+        ("F9/9/s", "Sync: both panes hold the newest version of every file.  "
+                   "While auto-sync runs it reads Stop, and stops it"),
+        ("Shift-F9/S",
+         "Auto-sync: after an F9 pass, keep both panes in step until "
+         "stopped -- every 2 s (10 s remote) a file new or changed on one "
+         "side is copied to the other once it holds still, and one deleted "
+         "goes to the trash on the other side.  An AUTO-SYNC bar and "
+         "coloured frames show it; it stops on F9 or Shift-F9, a pane "
+         "changing directory, or quit.  J reads its failures"),
         ("F10/0/q", "Quit"),
     ), note="Each also has digit and letter aliases, for terminals that "
             "swallow the F-keys."),

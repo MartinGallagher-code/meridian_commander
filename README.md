@@ -135,6 +135,16 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   preview and confirmation before anything is written, and a directory big
   enough that syncing it is probably a mistake is queried *before* the scan
   starts rather than after you have waited for it.
+- **Auto-sync** (`Shift-F9`) — keeps the two panes in step until you stop it:
+  after an ordinary `F9` pass, both directories are checked every 2 seconds
+  (10 when one is remote), and a file new or changed on one side is copied to
+  the other once it has stopped changing. A file deleted or renamed on one
+  side goes to the trash on the other — the desktop's trash locally,
+  `~/.meridian-trash/` on a remote host — never deleted for good. The panes
+  stay usable; an AUTO-SYNC bar, coloured pane frames and `9 Stop` on the
+  function bar say it is on. It stops on `F9` or `Shift-F9`, when either pane
+  changes directory, and on quit; failures are counted and can be read in
+  `J`, and a dropped connection is dialled again at each check.
 - **File viewer** (`F3`) — scrollable, with **search** (`/`, smart case,
   highlighted matches, `n`/`N` next/previous with wrap-around), toggleable
   line numbers (`l`) and horizontal scrolling; works on remote files too.

@@ -28,7 +28,7 @@ rather than scanned for a minute and then declined.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Iterable
+from typing import Callable, Collection, Iterable
 
 from .filesystems import DirEntry, FileSystem
 from .operations import (
@@ -146,11 +146,23 @@ def _index_tree(
     side: str = "",
     progress: ProgressCB = _noop_progress,
     cancel: CancelCB = _noop_cancel,
+    dirs: set[str] | None = None,
+    failed: list[str] | None = None,
+    skip: Collection[str] = (),
 ) -> dict[str, DirEntry]:
     """Map every file's relative path (POSIX separators) to its entry.
 
     Directories are walked but only files are recorded -- directories are
-    created implicitly as their files are copied.
+    created implicitly as their files are copied.  ``dirs``, when given,
+    collects the relative path of every directory walked, and ``skip`` names
+    relative paths of directories not to walk at all.
+
+    ``failed`` is for a caller that must tell an empty directory from one it
+    could not read -- auto-sync, to which a file missing on one side is a
+    delete to mirror.  When it is given, an unreadable subdirectory's relative
+    path is added to it, and a root that cannot be listed raises rather than
+    passing for an empty tree.  ``F9`` gives none of the three and walks as it
+    always has.
 
     A symlink to a directory is neither: it is not descended into (that would
     copy the target twice, or for ever if it points at an ancestor), and
@@ -184,11 +196,19 @@ def _index_tree(
         except Exception:
             # An unreadable directory is skipped rather than fatal: one denied
             # subdirectory should not cost the user the whole sync.
+            if failed is not None:
+                if not rel:
+                    raise
+                failed.append(rel)
             continue
         for entry in entries:
             child_rel = f"{rel}/{entry.name}" if rel else entry.name
             child_path = fs.join(path, entry.name)
             if entry.is_dir and not entry.is_symlink:
+                if child_rel in skip:
+                    continue
+                if dirs is not None:
+                    dirs.add(child_rel)
                 stack.append((child_path, child_rel))
             elif entry.is_dir:
                 continue          # a link to a directory: neither walked nor copied

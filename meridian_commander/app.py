@@ -26,6 +26,7 @@ Key bindings (also shown in the F1 help screen)::
     + / \\          tag / untag by pattern      F8   delete
     - / *          untag all / invert the tags
     Ctrl-U         swap panes                  F9   synchronize panes
+                                               Shift-F9 / S  auto-sync panes
     Ctrl-R         reload both panes           F10  quit
     Ctrl-G         go to path                  Esc  the menu bar
     Ctrl-T         change sort order           Alt+F/C/O/H  a menu by name
@@ -80,6 +81,12 @@ from .operations import (
     same_place,
 )
 from .archive import ArchiveFileSystem, archive_stem, is_archive, open_archive
+from .autosync import (
+    LOCAL_INTERVAL,
+    REMOTE_INTERVAL,
+    AutoSyncRunner,
+    Place,
+)
 from .browsers import has_own_browser, viewer_for
 from .compare import Comparison
 from .joinview import JoinScreen
@@ -201,6 +208,8 @@ MENUS: list[dict] = [
             {"label": "Sa~m~e location in other pane", "name": "mirror",
              "key": "="},
             {"label": "S~y~nchronize panes", "name": "sync", "key": "F9"},
+            {"label": "A~u~to-sync panes", "name": "auto_sync",
+             "key": "Shift+F9"},
             {"label": "~C~ompare files side by side", "name": "compare",
              "key": "D"},
             {"label": "Join t~w~o tables on their columns", "name": "join",
@@ -403,6 +412,8 @@ class App:
         self._quit_when_done = False
         #: Commands running in the background, and ended ones (MC-027).
         self.commands = CommandList()
+        #: Auto-sync between the two panes while it is on (MC-034).
+        self.autosync: AutoSyncRunner | None = None
 
         left_fs = LocalFileSystem()
         right_fs = LocalFileSystem()
@@ -652,7 +663,14 @@ class App:
             right -= len(status) + 1
             theme.paint(stdscr, height - 2, right, status, "hint")
             room -= len(status) + 1
-        theme.paint(stdscr, height - 2, 1, self.message[:room], "hint")
+        left_at = 1
+        if self.autosync is not None:
+            bar = self._autosync_bar(room)
+            theme.paint(stdscr, height - 2, left_at, bar, "syncbar")
+            left_at += len(bar) + 1
+            room -= len(bar) + 1
+        theme.paint(stdscr, height - 2, left_at, self.message[:max(0, room)],
+                    "hint")
         self._draw_function_bar(height - 1, width)
         # The editor in a pane has a cursor; everything else draws its own
         # or has none.  Last, so nothing written after it moves it.  The
@@ -761,8 +779,14 @@ class App:
         else:
             footer = self._panel_footer(panel)
             footer_role = "panelerror" if panel.error else "panelinfo"
-        theme.frame(stdscr, y, x, h, w,
-                    "frame" if active else "framenc",
+        if self.autosync is not None:
+            # Both panes are kept in step -- they are always the two it was
+            # started on, swapped or not -- and their frames say so, in a
+            # colour nothing else uses, for as long as it lasts.
+            frame_role = "syncframe"
+        else:
+            frame_role = "frame" if active else "framenc"
+        theme.frame(stdscr, y, x, h, w, frame_role,
                     title=header, title_role="title" if active else "titlenc",
                     double=active, close=False,
                     footer=footer, footer_role=footer_role)
@@ -925,7 +949,8 @@ class App:
         keys = [
             ("1", "Help"), ("2", "Conn"), ("3", "View"), ("4", "Edit"),
             ("5", "Copy"), ("6", "Move"), ("7", "Mkdir"), ("8", "Del"),
-            ("9", "Sync"), ("10", "Quit"),
+            ("9", "Stop" if self.autosync is not None else "Sync"),
+            ("10", "Quit"),
         ]
         theme.fill(self.stdscr, y, 0, width, "keybar")
         seg = max(1, width // len(keys))
@@ -953,6 +978,10 @@ class App:
     #: How often a command's end is looked for while one runs out of sight.
     #: Its output does not wait for this: a thread of its own reads it.
     COMMANDS_POLL_MS = 500
+    #: How often the main loop looks at what auto-sync has done.  The checks
+    #: run on their own thread at their own interval; this only decides how
+    #: soon a pane shows what one of them changed.
+    AUTOSYNC_POLL_MS = 500
     SIZING_POLL_MS = 5
 
     def _tick_plugins(self) -> int | None:
@@ -967,6 +996,7 @@ class App:
         jobs_running = bool(self.jobs.jobs) and self._tick_jobs()
         commands_running = (bool(self.commands.commands)
                             and self._tick_commands())
+        syncing = self.autosync is not None and self._tick_autosync()
         for panel in (self.left, self.right):
             # A pane counting what is under its subdirectories is work in
             # progress too, and wants the same polling loop: that is what
@@ -999,6 +1029,8 @@ class App:
             poll = self.JOBS_POLL_MS
         if commands_running and poll is None:
             poll = self.COMMANDS_POLL_MS
+        if syncing and poll is None:
+            poll = self.AUTOSYNC_POLL_MS
         return poll
 
     def _tick_jobs(self) -> bool:
@@ -1089,6 +1121,8 @@ class App:
                 entry["checked"] = self.use_trash
             elif entry.get("name") == "open_in_pane":
                 entry["checked"] = self.open_in_pane
+            elif entry.get("name") == "auto_sync":
+                entry["checked"] = self.autosync is not None
             items.append(entry)
         return items
 
@@ -1162,6 +1196,7 @@ class App:
             "reload": self._reload,
             "mirror": self._mirror_to_other_pane,
             "sync": self._sync,
+            "auto_sync": self._auto_sync,
             "compare": self._compare,
             "join": self._join_files,
             "peek": self._peek,
@@ -1368,6 +1403,8 @@ class App:
             self._delete()
         elif key in (curses.KEY_F9, ord("9"), ord("s")):
             self._sync()
+        elif key in (curses.KEY_F21, ord("S")):  # Shift-F9: auto-sync
+            self._auto_sync()
         elif key in (curses.KEY_F10, ord("0"), ord("q"), 3):  # 3 = Ctrl-C
             self._quit()
         elif key == curses.KEY_RESIZE:
@@ -3133,6 +3170,17 @@ class App:
 
     def _dial(self, preset: presets.Preset) -> FileSystem | None:
         """A new connection to a preset's place, or ``None`` having said why."""
+        dialled = self._dial_info(preset)
+        return None if dialled is None else dialled[0]
+
+    def _dial_info(self, preset: presets.Preset
+                   ) -> tuple[FileSystem, dict] | None:
+        """:meth:`_dial`, with the details that made the connection.
+
+        Auto-sync keeps them to dial again, without asking, after its
+        connection drops -- the password too, when one had to be typed.
+        They stay in memory and are never written anywhere.
+        """
         info = preset.connect_info()
         try:
             fs = self._connect(info)
@@ -3154,7 +3202,7 @@ class App:
                 dialogs.message(self.stdscr, "Connection failed",
                                 f"{preset.label()}\n\n{exc2}", error=True)
                 return None
-        return fs
+        return fs, info
 
     def _save_preset(self) -> None:
         """Save the active pane's location under a name."""
@@ -4171,7 +4219,7 @@ class App:
             self._set_message(f"Deleted {len(removed)} item(s)"
                               + (" from the trash" if in_trash else ""))
 
-    def _sync_scope_warning(self) -> str | None:
+    def _sync_scope_warning(self, auto: bool = False) -> str | None:
         """Text to show before syncing two panes, or None if they look sane.
 
         Both panes have already been listed to be drawn, so counting what is in
@@ -4183,6 +4231,10 @@ class App:
         also means the numbers in the dialog are the ones the pane holds,
         hidden files included or excluded exactly as the pane has them -- and
         a filter's hidden names counted, since sync walks past any filter.
+
+        ``auto`` words it for auto-sync, which walks the trees again every
+        few seconds and mirrors deletes, where ``F9`` walks them once and
+        deletes nothing.
         """
         sides = [("Left ", self.left), ("Right", self.right)]
         surveys = [(label, panel, survey_directory(panel.listed))
@@ -4196,6 +4248,22 @@ class App:
                          + self._hidden_tag(panel))
             lines.append(f"       {survey.describe()}"
                          + ("   <-- large" if survey.is_large else ""))
+        if auto:
+            lines += [
+                "",
+                "Auto-sync descends into every subdirectory on both sides,",
+                "every few seconds for as long as it is on: it copies the",
+                "newer of every pair of files, and moves a file deleted on",
+                "one side to the trash on the other. On a directory this",
+                "size every check takes a long time, and it may copy far",
+                "more than you meant to.",
+                "",
+                "It starts with an ordinary sync, whose full plan you see",
+                "before anything is written.",
+                "",
+                "Keep these two directories in step anyway?",
+            ]
+            return "\n".join(lines)
         lines += [
             "",
             "Sync descends into every subdirectory on both sides and",
@@ -4219,6 +4287,11 @@ class App:
         return "   (hidden pane)" if self._hidden(panel) else ""
 
     def _sync(self) -> None:
+        if self.autosync is not None:
+            # While auto-sync runs the function bar's 9 reads "Stop": the
+            # panes are being kept in step already, and this is the way out.
+            self._stop_auto_sync("stopped with F9")
+            return
         left, right = self.left, self.right
         for panel, side in ((left, "left"), (right, "right")):
             if panel.results is not None:
@@ -4232,7 +4305,19 @@ class App:
                                            warning):
             self._set_message("Sync cancelled")
             return
+        self._sync_pass()
 
+    def _sync_pass(self, title: str = "Synchronize panes",
+                   auto: bool = False) -> bool:
+        """Scan both panes, show the plan, copy: ``F9``'s pass.
+
+        Returns whether the two ended in step -- every planned file copied,
+        or nothing to copy -- which is what auto-sync waits for before it
+        starts.  ``title`` heads the plan; ``auto`` leaves out the "already
+        in sync" box, which would only stand between auto-sync's start and
+        its own notice.
+        """
+        left, right = self.left, self.right
         # The scan gets its own progress dialog. It is the slow half on a big
         # tree -- and the half with nothing to show for itself -- so it needs
         # the escape hatch more than the copying that follows does.
@@ -4244,19 +4329,20 @@ class App:
         except OperationCancelled:
             scan.close()
             self._set_message("Sync cancelled")
-            return
+            return False
         except Exception as exc:
             scan.close()
             dialogs.message(self.stdscr, "Sync error", str(exc), error=True)
-            return
+            return False
         finally:
             scan.close()
 
         if not plan:
-            dialogs.message(self.stdscr, "Synchronize",
-                            "The two directories are already in sync.")
+            if not auto:
+                dialogs.message(self.stdscr, "Synchronize",
+                                "The two directories are already in sync.")
             self._set_message("Already in sync")
-            return
+            return True
 
         # Build a preview.
         lines = [
@@ -4273,10 +4359,10 @@ class App:
         lines.append("")
         lines.append("'->' copy left->right   '<-' copy right->left")
 
-        if not dialogs.confirm(self.stdscr, "Synchronize panes",
+        if not dialogs.confirm(self.stdscr, title,
                                "\n".join(lines), default_yes=True):
             self._set_message("Sync cancelled")
-            return
+            return False
 
         dlg = dialogs.ProgressDialog(self.stdscr, "Synchronize")
 
@@ -4296,7 +4382,7 @@ class App:
         except Exception as exc:
             dlg.close()
             dialogs.message(self.stdscr, "Sync error", str(exc), error=True)
-            return
+            return False
         finally:
             dlg.close()
 
@@ -4309,8 +4395,234 @@ class App:
             # be the delete count's mistake in another place.
             self._set_message(
                 f"Sync cancelled -- {copied} of {planned} file(s) copied")
-        else:
-            self._set_message(f"Synchronized: {copied} file(s) copied")
+            return False
+        self._set_message(f"Synchronized: {copied} file(s) copied")
+        return True
+
+    # -- auto-sync (MC-034) ----------------------------------------------------
+    def _auto_sync(self) -> None:
+        """Shift-F9: keep both panes in step until it is stopped.
+
+        While it is on, this turns it off.  Otherwise it refuses what ``F9``
+        refuses (a list of find results, one directory inside the other) and
+        an archive, which is rewritten whole for every file written to it;
+        asks first about a pane that looks large; brings the two into step
+        with an ordinary ``F9`` pass, plan and all; and then starts the
+        checks, on connections of their own (:mod:`.autosync`).
+        """
+        if self.autosync is not None:
+            self._stop_auto_sync("turned off")
+            return
+        left, right = self.left, self.right
+        for panel, side in ((left, "left"), (right, "right")):
+            if panel.results is not None:
+                self._set_message(f"Auto-sync: the {side} pane lists find "
+                                  "results -- < goes back to the directory")
+                return
+            if isinstance(panel.fs, ArchiveFileSystem):
+                dialogs.message(
+                    self.stdscr, "Auto-sync",
+                    f"The {side} pane is inside an archive, which is "
+                    "rewritten\nwhole for every file written to it. "
+                    "Auto-sync keeps\ndirectories in step, not archives.",
+                    error=True)
+                return
+        if overlapping(left.fs, left.path, right.fs, right.path) or \
+                overlapping(right.fs, right.path, left.fs, left.path):
+            dialogs.message(
+                self.stdscr, "Auto-sync",
+                f"{left.path} and {right.path}\nare the same directory, or "
+                "one is inside the other --\nthere is nothing to keep in "
+                "step between them.", error=True)
+            return
+        warning = self._sync_scope_warning(auto=True)
+        if warning and not dialogs.confirm(self.stdscr, "Auto-sync panes",
+                                           warning):
+            self._set_message("Auto-sync not started")
+            return
+        if not self._sync_pass("Auto-sync panes", auto=True):
+            self._set_message(f"Auto-sync not started -- {self.message}")
+            return
+
+        opened: list[tuple] = []
+        for panel in (left, right):
+            dialled = self._autosync_connection(panel)
+            if dialled is None:
+                for fs, again in opened:
+                    if again is not None:
+                        fs.close()
+                self._set_message("Auto-sync not started -- it needs a "
+                                  "connection of its own")
+                return
+            opened.append(dialled)
+        names = self._place_names(left, right)
+        places = (Place(opened[0][0], left.fs.normpath(left.path), names[0]),
+                  Place(opened[1][0], right.fs.normpath(right.path), names[1]))
+        from . import config as config_mod
+
+        local, remote = config_mod.autosync_intervals(LOCAL_INTERVAL,
+                                                      REMOTE_INTERVAL)
+        interval = local if _is_local(left.fs) and _is_local(right.fs) \
+            else remote
+        runner = AutoSyncRunner(
+            (left, right), places, (opened[0][1], opened[1][1]), interval,
+            closing=[fs for fs, again in opened if again is not None])
+        self.autosync = runner
+        runner.start()
+        dialogs.message(
+            self.stdscr, "Auto-sync",
+            "Auto-sync is on. These two are kept in step:\n\n"
+            f"  {left.fs.label()}:{left.path}{self._hidden_tag(left)}\n"
+            f"  {right.fs.label()}:{right.path}{self._hidden_tag(right)}\n\n"
+            f"Every {interval:g} seconds, a file new or changed on one side\n"
+            "is copied to the other, and a file deleted on one side\n"
+            "goes to the trash on the other.\n\n"
+            "F9 or Shift-F9 stops it; so does either pane changing\n"
+            "directory, and quitting.")
+        self._set_message(f"Auto-sync on: {names[0]} {theme.glyph('both')} "
+                          f"{names[1]} -- F9 or Shift-F9 stops it")
+
+    def _autosync_connection(self, panel: Panel) -> tuple | None:
+        """A connection for auto-sync's checks, and a way to dial it again.
+
+        A local side gets a backend of its own, which holds nothing open and
+        needs no redialling.  A remote side is dialled again, as a background
+        job's is, so browsing that host is never held up behind a check; the
+        details it took are kept, so a dropped connection can be dialled
+        again at the next check without asking.  ``None`` when it cannot be
+        made, having said why.
+        """
+        if _is_local(panel.fs):
+            return LocalFileSystem(), None
+        dialled = self._dial_info(
+            presets.from_location("auto-sync", panel.fs, panel.path))
+        if dialled is None:
+            return None
+        fs, info = dialled
+        return fs, lambda: self._connect(info)
+
+    @staticmethod
+    def _place_names(left: Panel, right: Panel) -> list[str]:
+        """What auto-sync calls the two directories: short, but different.
+
+        The last part of each path -- after the host, for a remote one --
+        then the last two, then the whole path, whichever first tells them
+        apart.
+        """
+        def name(panel: Panel, depth: int | None) -> str:
+            fs = panel.fs
+            path = fs.normpath(panel.path)
+            parts = [part for part in path.split(fs.sep) if part]
+            tail = path if depth is None or not parts \
+                else "/".join(parts[-depth:])
+            if _is_local(fs):
+                return tail
+            return f"{getattr(fs, 'host', '') or fs.label()}:{tail}"
+
+        for depth in (1, 2, None):
+            names = [name(left, depth), name(right, depth)]
+            if names[0] != names[1]:
+                break
+        return names
+
+    def _stop_auto_sync(self, reason: str) -> None:
+        """Turn auto-sync off, saying why on the status line.
+
+        Not waited for: a copy under way finishes on the worker's thread,
+        into the directories it was syncing, and the worker then closes its
+        connections and ends.
+        """
+        runner = self.autosync
+        if runner is None:
+            return
+        self.autosync = None
+        runner.stop()
+        self._set_message(f"Auto-sync stopped: {reason}")
+
+    def _end_auto_sync(self) -> None:
+        """Stop auto-sync as Meridian ends, leaving no file half-copied.
+
+        The file being copied is given the jobs' grace to finish.  Past that
+        it is cancelled, and a cancelled copy removes what it had written.
+        """
+        runner = self.autosync
+        if runner is None:
+            return
+        self.autosync = None
+        runner.stop()
+        if not runner.wait(self.JOBS_GRACE):
+            runner.abort()
+            runner.wait(self.JOBS_GRACE)
+
+    def _tick_autosync(self) -> bool:
+        """Take in what auto-sync did; stop it if a pane has moved.
+
+        Returns whether it is still on.  Each pane's place is compared here,
+        on every turn of the loop, with the one it had when auto-sync
+        started, rather than hooking every way a pane can move -- Enter,
+        Backspace, back and forward, Ctrl-G, ~, a preset, a new connection,
+        =, a find listed in the pane, a connection closed -- any of which a
+        later change could add to.
+        """
+        runner = self.autosync
+        assert runner is not None
+        moved = runner.moved()
+        if moved is not None:
+            panel, what = moved
+            side = "left" if panel is self.left else "right"
+            self._stop_auto_sync(f"the {side} pane changed {what}")
+            return False
+        reports, notes = runner.tick()
+        for side, panel in enumerate(runner.panels):
+            if any(report.changed(side) for report in reports):
+                # By name, as any reload keeps it: the cursor stays on the
+                # file it was on while the listing changes around it.
+                panel.refresh()
+        news = self._autosync_news(reports, notes)
+        if news:
+            self._set_message(f"Auto-sync: {news}")
+        return True
+
+    @staticmethod
+    def _autosync_news(reports: list, notes: list[str]) -> str:
+        """What the checks since the last turn did, for the status line."""
+        parts = list(notes)
+        conflicts = [rel for report in reports for rel in report.conflicts]
+        if conflicts:
+            more = f" (and {len(conflicts) - 1} more)" \
+                if len(conflicts) > 1 else ""
+            parts.append(f"{conflicts[0]}{more} changed on both sides -- the "
+                         "newer was kept, the other is in the trash")
+        copied = sum(sum(report.copied) for report in reports)
+        trashed = sum(sum(report.trashed) for report in reports)
+        failed = sum(len(report.failures) for report in reports)
+        if copied:
+            parts.append(f"{copied} copied")
+        if trashed:
+            parts.append(f"{trashed} to the trash")
+        if failed:
+            parts.append(f"{failed} failed -- J to read")
+        return "; ".join(parts)
+
+    def _autosync_bar(self, room: int) -> str:
+        """The AUTO-SYNC bar: what is kept in step, how it goes, the stop key.
+
+        It shares the hint line with the messages, so it takes up to three
+        fifths of it, giving way from the middle: the names go first, then
+        how it is going; AUTO-SYNC and the key that stops it stay.
+        """
+        runner = self.autosync
+        assert runner is not None
+        names = (f"{runner.places[0].name} {theme.glyph('both')} "
+                 f"{runner.places[1].name}")
+        head, stop = "AUTO-SYNC", "F9 stops"
+        limit = max(len(head) + 2, room * 3 // 5)
+        for parts in ((head, names, runner.status(), stop),
+                      (head, runner.status(), stop), (head, stop)):
+            text = " " + "  ".join(parts) + " "
+            if len(text) <= limit:
+                return text
+        return f" {head} "
 
     def _help(self) -> None:
         """F1: every key, in titled sections that scroll (helptext.py)."""
@@ -4364,6 +4676,7 @@ class App:
             self._close_plugin(panel)
         self.opener.cleanup()
         self.commands.stop_all()
+        self._end_auto_sync()
         self.jobs.cancel_all()
         self.jobs.wait(self.JOBS_GRACE)
         for fs in self._backends:
