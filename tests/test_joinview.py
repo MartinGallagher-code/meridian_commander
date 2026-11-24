@@ -604,8 +604,16 @@ def _tables(app, tmp_path):
 
 
 def _opened(monkeypatch, saves=None):
-    """Capture the JoinScreen the app builds instead of running it."""
+    """Capture the JoinScreen the app builds instead of running it.
+
+    With no screen run there is no curses screen either, and the app hides
+    the cursor through curses afterwards: so that call is stood in for, as
+    Compare's tests do.  Without it these pass on Linux only because some
+    earlier test in the run started curses; on macOS none does.
+    """
     from meridian_commander import app as app_mod
+
+    monkeypatch.setattr(curses, "curs_set", lambda visible: None)
 
     seen: list = []
 
