@@ -14,13 +14,20 @@ moves, numbered ``&1``, ``&2``: running, stopped, or exited with their
 status.  On a command ``Enter`` shows its terminal in this pane, ``k`` (or
 ``c``) stops it after asking, and ``d`` removes one that has ended.  ``k``
 still moves the cursor up on a copy or a move.
+
+While auto-sync runs (``Shift-F9``, MC-034) it heads the list: what it keeps
+in step and how it is going.  ``Enter`` on it shows everything it has kept
+-- every failure in full, then what it did -- and ``c`` stops it after
+asking.
 """
 
 from __future__ import annotations
 
 import curses
+import textwrap
 
 from . import dialogs, theme
+from .autosync import AutoSyncRunner
 from .background import Command
 from .jobs import FINISHED, Job
 from .plugin_api import PanePlugin
@@ -38,12 +45,13 @@ class JobsPane(PanePlugin):
         #: Redraw on the poll, so progress moves without a key being pressed.
         self.wants_timer = True
 
-    def entries(self) -> list[Job | Command]:
-        """The copies and moves, then the commands."""
+    def entries(self) -> list[AutoSyncRunner | Job | Command]:
+        """Auto-sync while it runs, the copies and moves, then the commands."""
         app = self.ctx.app
-        return [*app.jobs.jobs, *app.commands.commands]
+        syncing = [app.autosync] if app.autosync is not None else []
+        return [*syncing, *app.jobs.jobs, *app.commands.commands]
 
-    def selected(self) -> Job | Command | None:
+    def selected(self) -> AutoSyncRunner | Job | Command | None:
         entries = self.entries()
         if not entries:
             return None
@@ -77,6 +85,14 @@ class JobsPane(PanePlugin):
             second += "  (shown)"
         return first, second
 
+    @staticmethod
+    def lines_for_autosync(runner: AutoSyncRunner) -> tuple[str, str]:
+        first = (f" A. {runner.state_text():<9} Auto-sync "
+                 f"{runner.places[0].name} {theme.glyph('both')} "
+                 f"{runner.places[1].name}")
+        second = f"    {runner.status()}, every {runner.interval:g}s"
+        return first, second + "  Enter: all of it"
+
     def draw(self, stdscr, y: int, x: int, h: int, w: int) -> None:
         if h < 4 or w < 12:
             return
@@ -90,6 +106,8 @@ class JobsPane(PanePlugin):
             attr = curses.A_REVERSE if entry is current else None
             if isinstance(entry, Command):
                 top, bottom = self.lines_for_command(entry)
+            elif isinstance(entry, AutoSyncRunner):
+                top, bottom = self.lines_for_autosync(entry)
             else:
                 top, bottom = self.lines_for(entry)
             self.put(stdscr, row, x, w, top, attr)
@@ -105,6 +123,8 @@ class JobsPane(PanePlugin):
             row += 1
         if isinstance(current, Command):
             keys = " Enter: show  k: stop  d: remove  J: close "
+        elif isinstance(current, AutoSyncRunner):
+            keys = " Enter: report  c: stop  J: close "
         else:
             keys = " p: pause  c: cancel  Enter: errors  J: close "
         self.put(stdscr, y + h - 1, x, w, keys, theme.attr("keybar"))
@@ -123,6 +143,8 @@ class JobsPane(PanePlugin):
             self.row = max(0, self.row - 1)
         elif isinstance(job, Command):
             self._command_key(job, key)
+        elif isinstance(job, AutoSyncRunner):
+            self._autosync_key(job, key)
         elif job is None:
             pass
         elif key == ord("p"):
@@ -151,3 +173,21 @@ class JobsPane(PanePlugin):
             app._stop_command(command)
         elif key == ord("d"):
             app._remove_command(command)
+
+    def _autosync_key(self, runner: AutoSyncRunner, key: int | str) -> None:
+        """A key on auto-sync's row: read all of it, or stop it."""
+        app = self.ctx.app
+        if key in (10, 13, curses.KEY_ENTER):
+            # Every line in full: a message clips what is too wide for the
+            # screen, so the long ones -- a failure's path and its reason --
+            # are wrapped to fit first.
+            width = max(20, app.stdscr.getmaxyx()[1] - 10)
+            lines = []
+            for line in runner.report_text().split("\n"):
+                lines += textwrap.wrap(line, width,
+                                       subsequent_indent="    ") or [""]
+            dialogs.message(app.stdscr, "Auto-sync", "\n".join(lines),
+                            error=bool(runner.failures))
+        elif key in (ord("c"), curses.KEY_DC):
+            if dialogs.confirm(app.stdscr, "Auto-sync", "Stop auto-sync?"):
+                app._stop_auto_sync("stopped from the jobs list")

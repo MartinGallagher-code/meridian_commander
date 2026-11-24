@@ -87,6 +87,12 @@ ROLES: dict[str, tuple[str, str, int, int]] = {
     # -- window frames -----------------------------------------------------
     "frame": ("lightgray", "blue", 0, curses.A_BOLD),
     "framenc": ("darkgray", "blue", 0, curses.A_DIM),
+    # While auto-sync runs (MC-034): both panes' frames, and the bar on the
+    # hint line, in colours nothing else on the screen uses, so it cannot be
+    # missed.  Without colour the bar is reversed and bold.
+    "syncframe": ("lightmagenta", "blue", curses.A_BOLD, curses.A_BOLD),
+    "syncbar": ("white", "magenta", curses.A_BOLD,
+                curses.A_REVERSE | curses.A_BOLD),
     "title": ("yellow", "blue", curses.A_BOLD, curses.A_BOLD),
     "titlenc": ("lightgray", "blue", 0, curses.A_DIM),
     "scroll": ("lightgray", "blue", 0, curses.A_DIM),
@@ -192,6 +198,7 @@ SCHEMES: dict[str, dict[str, tuple[str, str, int, int]]] = {
         "hintkey": ("yellow", "black", curses.A_BOLD, curses.A_BOLD),
         "frame": ("darkgray", "black", 0, curses.A_BOLD),
         "framenc": ("darkgray", "black", 0, curses.A_DIM),
+        "syncframe": ("lightmagenta", "black", curses.A_BOLD, curses.A_BOLD),
         "title": ("yellow", "black", curses.A_BOLD, curses.A_BOLD),
         "titlenc": ("lightgray", "black", 0, curses.A_DIM),
         "scroll": ("darkgray", "black", 0, curses.A_DIM),
@@ -257,7 +264,7 @@ UNICODE_GLYPHS = {
     "lcap": "╡", "rcap": "╞",
     "close": "[■]", "shade": "░", "block": "█",
     "up": "▲", "down": "▼", "submenu": "►", "check": "√", "bullet": "•",
-    "tag": "*", "link": "@", "times": "×",
+    "tag": "*", "link": "@", "times": "×", "both": "⇄",
 }
 
 ASCII_GLYPHS = {
@@ -267,7 +274,7 @@ ASCII_GLYPHS = {
     "lcap": "[", "rcap": "]",
     "close": "[x]", "shade": ".", "block": "#",
     "up": "^", "down": "v", "submenu": ">", "check": "x", "bullet": "*",
-    "tag": "*", "link": "@", "times": "x",
+    "tag": "*", "link": "@", "times": "x", "both": "<->",
 }
 
 

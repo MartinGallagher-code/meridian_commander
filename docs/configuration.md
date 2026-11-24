@@ -8,7 +8,8 @@ Press **`C`** for the configuration menu:
   (blank for the built-in one — see below); `[ui] panes` is how many panes
   are on screen at start (below); `[ui] open_in` is `pane` for `F3` and `F4`
   to open in a pane (below); `[ui] listing` is `long` for the mode and
-  owner columns (below); plug-ins read their settings from
+  owner columns (below); `[autosync]` says how often auto-sync looks
+  (below); plug-ins read their settings from
   `[plugin:<name>]` sections; `[plugins] dirs` adds extra plug-in directories.
 - **Edit a plug-in file** lists every discovered plug-in file (built-in and
   user) and opens the chosen one in the editor.
@@ -70,6 +71,22 @@ trash = no
 **Options ▸ Trash on delete** switches it and writes the file. Remote panes and
 archives have no trash either way. See
 [Deleting to the trash](usage.md#deleting-to-the-trash).
+
+## `[autosync]` — how often auto-sync looks
+
+Auto-sync (`Shift-F9`) checks both directories every `interval` seconds when
+both panes are on this machine, and every `remote_interval` seconds when either
+is remote, where each check walks both trees over the network:
+
+```ini
+[autosync]
+interval = 2
+remote_interval = 10
+```
+
+Neither goes below half a second; a value that is blank or not a number is the
+default. It is read when auto-sync starts. See
+[Auto-sync](transfers.md#auto-sync-keeping-the-panes-in-step).
 
 ## `[ui] listing` — the mode and owner columns
 
