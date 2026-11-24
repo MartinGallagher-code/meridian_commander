@@ -251,6 +251,13 @@ accelerator letters, green buttons and drop shadows under every dialog — the
   other. `n`/`N` jump between blocks of differences. Built in rather than a
   call out to `vimdiff`, so a local file compares against an SFTP, SSH, FTP or
   in-archive one with nothing fetched to disk first.
+- **Join two tables** (`K`) — the table each pane is offering, side by side,
+  and underneath every combination of their rows that match on the columns
+  you mark in each (`m`; several pair up in the order marked). Keep only the
+  matches or the unmatched rows too (`o`), match exactly, ignoring case and
+  spaces, or numbers by value (`e`). All three are table browsers, so the
+  output filters, sorts and saves (`F2`) like any table, and a filter in
+  either file narrows the join.
 - **Quick view** (`Ctrl-Q`, Command ▸ Quick view) — the other pane shows the
   file under the cursor in the viewer `F3` would open, and follows the cursor:
   text, Markdown, documents, decks, sheets, tables, PDFs, images (in

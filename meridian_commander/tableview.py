@@ -124,10 +124,26 @@ def frozen_room(avail: int) -> int:
 
 
 class TableView:
-    def __init__(self, fs: FileSystem, path: str) -> None:
+    def __init__(self, fs: FileSystem, path: str,
+                 table: Table | None = None) -> None:
+        """Browse the table at ``path``, or ``table`` when one is given.
+
+        A table given is rows already in memory -- the join screen's output
+        -- and ``path`` is then only where ``F2`` offers to save them.
+        """
         self.fs = fs
         self.path = path
         self.name = fs.basename(path)
+        #: What the title calls this table, before its name.
+        self.caption = "Table"
+        #: Drawn as the region with the keyboard; the join screen draws the
+        #: other two regions' title and footer dimmed.
+        self.active = True
+        #: The join columns marked in the header, in the order picked (the
+        #: join screen's ``m``): marked with their position, ``1:id``.
+        self.marks: list[int] = []
+        #: The keys the grid's footer lists.
+        self.footer_keys = FOOTER_KEYS
         self.error: str | None = None
         self.has_header = True
         self.view = View()
@@ -158,15 +174,15 @@ class TableView:
         self.summary: Summary | None = None
         self.summary_pick = 0
         self.summary_top = 0
-        self._measured: dict[tuple[bool, int], tuple[list[int], list[bool],
-                                                     list[int]]] = {}
+        self._measured: dict[tuple[bool, int, tuple[int, ...]],
+                             tuple[list[int], list[bool], list[int]]] = {}
         self._labels: dict[bool, list[str]] = {}
         #: Where F2 offers to save when the file's own directory cannot be
         #: written: the other pane, which the application sets.
         self.elsewhere: saveview.Place | None = None
         #: Every file F2 has written, so the application can list them.
         self.saved: list[saveview.Written] = []
-        self.table = self._load()
+        self.table = self._load() if table is None else table
         self.ncols = self.table.ncols
         self.refresh()
 
@@ -239,7 +255,7 @@ class TableView:
         Measured once, over the top of the file, so the columns do not shift
         under the reader while scrolling -- the spreadsheet grid's rule.
         """
-        key = (self.has_header, self.max_width)
+        key = (self.has_header, self.max_width, tuple(self.marks))
         cached = self._measured.get(key)
         if cached is not None:
             return cached
@@ -252,8 +268,11 @@ class TableView:
             tail = max((decimals(value) for value in values
                         if looks_numeric(value)), default=0)
             tails.append(tail if numeric[-1] else 0)
-            # One column more than the name, for the sort arrow.
+            # One column more than the name, for the sort arrow, and room
+            # for a join column's place in the pairing ("1:").
             width = display_width(labels[column]) + 1
+            if column in self.marks:
+                width += len(f"{self.marks.index(column) + 1}:")
             for value in values:
                 width = max(width, display_width(displayed(value, tails[-1])[0],
                                                  self.max_width))
@@ -506,18 +525,33 @@ class TableView:
         if self.table.truncated:
             # The rows a filter kept are the rows it found among those read:
             # a result that looks whole is not, and both places say so.
-            read = _count(self.data_rows(), "row")
-            notes.append(f"Only the {read} read can be saved: the file goes "
-                         f"on past them.")
-            caveat = f", from the first {read} only: the file goes on"
+            note, caveat = self.cut_short()
+            notes.append(note)
+        base, tag = self.save_base()
         self.notice, written = saveview.save_as(
             stdscr, self.fs, self.path, title="Save view",
             what=saveview.shape(len(self.order), len(columns)),
-            base=self.name, tag="view",
+            base=base, tag=tag,
             render=lambda name: self._render(records, columns, name),
             elsewhere=self.elsewhere, notes=notes, caveat=caveat)
         if written is not None:
             self.saved.append(written)
+
+    def save_base(self) -> tuple[str, str]:
+        """The name ``F2`` offers is made from: ``fruit.tsv`` and ``view``
+        offer ``fruit.view.tsv``."""
+        return self.name, "view"
+
+    def truncated_note(self) -> str:
+        """What the title adds when the table is not all there."""
+        return " [truncated]"
+
+    def cut_short(self) -> tuple[str, str]:
+        """What ``F2`` says of a table that is not all there: a line for its
+        prompt, and the end of the footer after a save."""
+        read = _count(self.data_rows(), "row")
+        return (f"Only the {read} read can be saved: the file goes on past "
+                f"them.", f", from the first {read} only: the file goes on")
 
     def _render(self, records: list[list[str]], columns: list[int],
                 name: str) -> bytes:
@@ -683,11 +717,23 @@ class TableView:
             except curses.error:
                 pass
 
+    def _bar_role(self) -> str:
+        """The title's and footer's colour: dimmed when another region of
+        the join screen has the keyboard."""
+        return "keybar" if self.active else "titlenc"
+
     def _draw_title(self, win, width: int) -> None:
-        # Most telling first, since a narrow screen cuts the end off: how many
-        # rows and which filters chose them, the sort, then the shape of the
-        # file.
-        parts = [f" Table: {self.name}"]
+        theme.paint(win, 0, 0, clean(" -- ".join(self.title_parts()) + " "),
+                    self._bar_role(), width)
+
+    def title_parts(self) -> list[str]:
+        """The title, as the pieces joined by ``--``.
+
+        Most telling first, since a narrow screen cuts the end off: how many
+        rows and which filters chose them, the sort, then the shape of the
+        file.
+        """
+        parts = [f" {self.caption}: {self.name}"]
         if not self.error:
             rows = self.data_rows()
             if self.view.filters:
@@ -696,7 +742,7 @@ class TableView:
             else:
                 info = _count(rows, "row")
             if self.table.truncated:
-                info += " [truncated]"
+                info += self.truncated_note()
             parts.append(info)
             if self.view.keys:
                 labels = self.labels()
@@ -712,20 +758,29 @@ class TableView:
             if comments:
                 shape += f", {_count(comments, 'comment line')} above (#)"
             parts.append(shape)
-        theme.paint(win, 0, 0, clean(" -- ".join(parts) + " "), "keybar", width)
+        return parts
 
     def _draw_headers(self, win, gutter: int, columns) -> None:
         theme.fill(win, 1, 0, gutter, "panelhead")
         labels = self.labels()
         numeric = self._measure()[1]
         for index, x, cell_w in columns:
+            label = labels[index]
+            marked = index in self.marks
+            if marked:
+                # Its place in the pairing, so which A column goes with
+                # which B column reads straight off the two headers.
+                label = f"{self.marks.index(index) + 1}:{label}"
             direction = self.view.direction(index)
             if direction is None:
-                text = fit(labels[index], cell_w, numeric[index])
+                text = fit(label, cell_w, numeric[index])
             else:
-                text = (fit(labels[index], cell_w - 1, numeric[index])
+                text = (fit(label, cell_w - 1, numeric[index])
                         + theme.glyph("down" if direction else "up"))
-            role = "panelcursor" if index == self.col else "panelhead"
+            if index == self.col:
+                role = "panelcursortag" if marked else "panelcursor"
+            else:
+                role = "paneltag" if marked else "panelhead"
             theme.paint(win, 1, gutter + x, text, role)
 
     def _draw_row(self, win, y: int, position: int, gutter: int,
@@ -805,7 +860,8 @@ class TableView:
         if self.hidden:
             parts.append(f"{_count(len(self.hidden), 'column')} hidden")
         parts.append(f"{self.name} ")
-        theme.paint(win, 0, 0, clean(" -- ".join(parts)), "keybar", width)
+        theme.paint(win, 0, 0, clean(" -- ".join(parts)), self._bar_role(),
+                    width)
         start, lines = self.record_lines(width)
         body_h = max(0, height - 2)
         self.record_top = max(0, min(self.record_top, len(lines) - body_h))
@@ -824,7 +880,8 @@ class TableView:
                             f"{_count(self.data_rows(), 'row')}, filtered")
         else:
             parts.insert(2, _count(summary.count, "row"))
-        theme.paint(win, 0, 0, clean(" -- ".join(parts)), "keybar", width)
+        theme.paint(win, 0, 0, clean(" -- ".join(parts)), self._bar_role(),
+                    width)
         lines = self.summary_lines(summary, width)
         body_h = max(0, height - 2)
         self.summary_top = max(0, min(self.summary_top, len(lines) - body_h))
@@ -851,9 +908,9 @@ class TableView:
                     parts.append(f"[{self.ragged_note(index)}]")
             if self.search:
                 parts.append(f"/{self.search}")
-            parts.append(FOOTER_KEYS)
+            parts.append(self.footer_keys)
             hint = "  ".join(parts)
-        theme.paint(win, height - 1, 0, f" {hint} ", "keybar", width)
+        theme.paint(win, height - 1, 0, f" {hint} ", self._bar_role(), width)
 
     # -- interaction ---------------------------------------------------------
     def _record_key(self, key, body_h: int) -> None:

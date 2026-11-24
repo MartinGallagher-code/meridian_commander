@@ -82,6 +82,8 @@ from .operations import (
 from .archive import ArchiveFileSystem, archive_stem, is_archive, open_archive
 from .browsers import has_own_browser, viewer_for
 from .compare import Comparison
+from .joinview import JoinScreen
+from .table import is_table
 from .panel import Panel, Search
 from . import usage
 from .peek import PeekPane
@@ -201,6 +203,8 @@ MENUS: list[dict] = [
             {"label": "S~y~nchronize panes", "name": "sync", "key": "F9"},
             {"label": "~C~ompare files side by side", "name": "compare",
              "key": "D"},
+            {"label": "Join t~w~o tables on their columns", "name": "join",
+             "key": "K"},
             {"label": "He~a~d + tail in this pane", "name": "peek",
              "key": "h"},
             {"label": "~Q~uick view in the other pane", "name": "quick_view",
@@ -1159,6 +1163,7 @@ class App:
             "mirror": self._mirror_to_other_pane,
             "sync": self._sync,
             "compare": self._compare,
+            "join": self._join_files,
             "peek": self._peek,
             "quick_view": self._quick_view,
             "terminal": self._open_terminal_pane,
@@ -1333,6 +1338,8 @@ class App:
             self._extract()
         elif key == ord("D"):  # compare both panes' files side by side
             self._compare()
+        elif key == ord("K"):  # join both panes' tables on key columns
+            self._join_files()
         elif key == ord("h"):  # head + tail of the other pane's file
             self._peek()
         elif key == ord("/"):  # search this pane's listing by name
@@ -3562,6 +3569,37 @@ class App:
                        picked[1][0], picked[1][1]).run(self.stdscr)
         except Exception as exc:
             dialogs.message(self.stdscr, "Compare error", str(exc), error=True)
+        curses.curs_set(0)
+
+    def _join_files(self) -> None:
+        """Each pane's table above, and the rows they make joined below.
+
+        The left pane's file is File A, top left, whichever pane is active,
+        for the reason :meth:`_compare` gives; a pane offering no single file
+        is refused as it refuses it, and so is a file the table browser does
+        not open.
+        """
+        picked = []
+        for panel, side in ((self.left, "left"), (self.right, "right")):
+            path, why = self._sole_file(panel)
+            if path is not None and not is_table(panel.fs.basename(path)):
+                path, why = None, (f"{panel.fs.basename(path)} is not a "
+                                   f"table (.tsv .tab .psv .csv)")
+            if path is None:
+                hidden = " (hidden)" if self._hidden(panel) else ""
+                self._set_message(f"Join: {side} pane{hidden} -- {why}")
+                return
+            picked.append((panel.fs, path))
+        try:
+            # Each file's view saves (F2) beside it, or else in the pane
+            # opposite the one it came from, as F3's does.
+            screen = JoinScreen(picked[0][0], picked[0][1], picked[1][0],
+                                picked[1][1], a_elsewhere=self.right,
+                                b_elsewhere=self.left)
+            screen.run(self.stdscr)
+            self._list_saved(screen)
+        except Exception as exc:
+            dialogs.message(self.stdscr, "Join error", str(exc), error=True)
         curses.curs_set(0)
 
     def _peek(self) -> None:
