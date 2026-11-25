@@ -381,10 +381,12 @@ accelerator letters, green buttons and drop shadows under every dialog — the
 ## Install
 
 ```bash
-pip install meridian-commander
-
-# with SFTP/SSH support (remote panes, in-pane remote terminal, SSH plug-ins)
+# the install to use: local, FTP, and SFTP/SSH (remote panes, the in-pane
+# remote terminal, the SSH plug-ins)
 pip install "meridian-commander[ssh]"
+
+# local and FTP only, on the standard library alone
+pip install meridian-commander
 
 # optional: pandas acceleration for the data plug-ins' group-by on large files
 pip install "meridian-commander[data]"
@@ -392,6 +394,11 @@ pip install "meridian-commander[data]"
 # or from a checkout
 pip install ".[ssh]"
 ```
+
+Keep the quotes: zsh, the macOS default shell, answers an unquoted `[ssh]`
+with "no matches found". Installed without `[ssh]`? Connecting over SFTP or
+SSH says so, and gives the one command that adds `paramiko` to the Python
+that runs Meridian.
 
 This installs the `meridian-commander` command and its short alias `meridian`.
 **[pipx](https://pipx.pypa.io/) is recommended** — it puts the commands

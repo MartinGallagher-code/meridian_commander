@@ -8,7 +8,7 @@ bidirectional directory synchronization, a file viewer and a file editor.
 
 from __future__ import annotations
 
-__version__ = "1.29.0"
+__version__ = "1.30.0"
 
 from .app import main
 

@@ -12,6 +12,28 @@ day the version was cut.
 From 1.5.0 on, every pull request into `main` moves the version and adds its
 own section here, so not every version below is published to PyPI.
 
+## [1.30.0] — 2026-11-25
+
+### Changed
+
+- **A missing `paramiko` now says exactly how to install it.** Connecting
+  over SFTP or SSH, or running an SSH plug-in, on a Python without
+  `paramiko` used to say "pip install paramiko", and on many machines that
+  `pip` belongs to a different Python from the one running Meridian, so the
+  install succeeded and the error stayed. The message now gives the command
+  for the right Python by its full path, on a line of its own --
+  `/usr/local/bin/python3 -m pip install paramiko`, the path quoted when it
+  has a space -- and says to connect again afterwards. A `paramiko`
+  installed while Meridian runs is found on the next connect, without a
+  restart. (MC-035)
+- **The install instructions lead with SSH.** The README and the manual's
+  installation page give `pip install "meridian-commander[ssh]"` first, as
+  the install to use, and describe plain `pip install meridian-commander` as
+  local and FTP only; the manual gains *Adding SSH support later*.
+  `paramiko` stays optional: a plain install still needs nothing beyond the
+  standard library, and the `ssh` and `sftp` extras are unchanged. A test
+  now fails if `paramiko` is ever listed outside those extras. (MC-035)
+
 ## [1.29.0] — 2026-11-24
 
 ### Added
@@ -1482,6 +1504,7 @@ version, so not every version is published or tagged, and the link of one
 that never is points at nothing; its section above still says what changed.
 -->
 
+[1.30.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.29.0...v1.30.0
 [1.29.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.28.0...v1.29.0
 [1.28.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.27.0...v1.28.0
 [1.27.0]: https://github.com/MartinGallagher-code/meridian_commander/compare/v1.26.0...v1.27.0
