@@ -1081,7 +1081,8 @@ def test_a_system_with_no_resolvable_user_falls_back_to_root(tmp_path,
     assert res["username"] == "root"
 
 
-def test_connecting_without_paramiko_explains_what_to_install(monkeypatch):
+def _without_paramiko(monkeypatch):
+    """Make every ``import paramiko`` fail, as on a machine that lacks it."""
     import builtins
 
     real_import = builtins.__import__
@@ -1092,8 +1093,109 @@ def test_connecting_without_paramiko_explains_what_to_install(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", no_paramiko)
-    with pytest.raises(FileSystemError, match="pip install paramiko"):
+
+
+def _missing_paramiko_lines(monkeypatch):
+    """Connect with no paramiko, and give the message's lines."""
+    _without_paramiko(monkeypatch)
+    with pytest.raises(FileSystemError) as failure:
         _open_ssh_client("web1", "deploy", None, 22)
+    return str(failure.value).split("\n")
+
+
+def test_connecting_without_paramiko_explains_what_to_install(monkeypatch):
+    import shlex
+    import sys
+
+    lines = _missing_paramiko_lines(monkeypatch)
+    command = f"  {shlex.quote(sys.executable)} -m pip install paramiko"
+    # The exact command for the Python that runs Meridian, on its own line:
+    # a bare "pip" is often another Python's, and installs where it is not
+    # seen.
+    assert command in lines
+    assert "optional 'paramiko' package" in lines[0]
+    assert "connect again" in lines[-1] and "restart Meridian" in lines[-1]
+    # The dialog clips and never wraps, and adds 6 columns of frame: every
+    # line but the command has to fit 74 for an 80-column terminal.
+    for line in lines:
+        if line != command:
+            assert len(line) <= 74, line
+
+
+def test_the_install_command_quotes_a_python_path_with_spaces(monkeypatch):
+    monkeypatch.setattr(fsmod.sys, "executable",
+                        "/Applications/My Python/bin/python3")
+    lines = _missing_paramiko_lines(monkeypatch)
+    # Pasted into a shell, an unquoted path would split at the space.
+    assert ("  '/Applications/My Python/bin/python3' -m pip install paramiko"
+            in lines)
+
+
+def test_the_install_command_falls_back_when_python_cannot_say(monkeypatch):
+    """An embedded interpreter can leave sys.executable empty."""
+    monkeypatch.setattr(fsmod.sys, "executable", "")
+    lines = _missing_paramiko_lines(monkeypatch)
+    assert "  python3 -m pip install paramiko" in lines
+
+
+def test_paramiko_installed_while_running_is_found_on_the_next_connect(
+        monkeypatch, tmp_path):
+    """The import system caches what each sys.path directory held, so a
+    package installed since startup can stay unseen until
+    importlib.invalidate_caches() runs: the connect after the install has to
+    get past the import without a restart."""
+    import builtins
+    import importlib
+    import types
+
+    real_import = builtins.__import__
+    real_invalidate = importlib.invalidate_caches
+    #: on_disk: pip has installed it.  seen: the import system knows it.
+    state = {"on_disk": False, "seen": False, "invalidated": 0}
+    fake_paramiko = types.ModuleType("paramiko")
+
+    def cached_import(name, *args, **kwargs):
+        if name == "paramiko":
+            if not state["seen"]:
+                raise ImportError("No module named 'paramiko'")
+            return fake_paramiko
+        return real_import(name, *args, **kwargs)
+
+    def invalidate_caches():
+        state["invalidated"] += 1
+        state["seen"] = state["on_disk"]
+        real_invalidate()
+
+    def fake_connect(res, password, sock):
+        return _FakeClient()
+
+    monkeypatch.setattr(builtins, "__import__", cached_import)
+    monkeypatch.setattr(fsmod.importlib, "invalidate_caches", invalidate_caches)
+    monkeypatch.setattr(fsmod, "_connect_resolved", fake_connect)
+    config = str(tmp_path / "absent")
+
+    with pytest.raises(FileSystemError, match="-m pip install paramiko"):
+        _open_ssh_client("web1", "deploy", None, 22, config_path=config)
+
+    state["on_disk"] = True      # the command run in another terminal
+    client = _open_ssh_client("web1", "deploy", None, 22, config_path=config)
+    assert isinstance(client, _FakeClient)
+    assert state["invalidated"] == 2
+
+
+def test_paramiko_already_imported_skips_the_cache_refresh(monkeypatch,
+                                                          tmp_path):
+    """The refresh is only for a failed import: a machine with paramiko
+    pays nothing for it on every connect."""
+    def refresh():
+        raise AssertionError("caches invalidated with paramiko present")
+
+    monkeypatch.setattr(fsmod.importlib, "invalidate_caches", refresh)
+    monkeypatch.setattr(fsmod, "_connect_resolved",
+                        lambda res, password, sock: _FakeClient())
+    client = _open_ssh_client("web1", "deploy", None, 22,
+                              config_path=str(tmp_path / "absent"))
+    assert isinstance(client, _FakeClient)
 
 
 # -- permissions and links (MC-011) -------------------------------------------

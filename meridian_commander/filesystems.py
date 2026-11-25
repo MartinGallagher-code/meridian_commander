@@ -24,10 +24,13 @@ from __future__ import annotations
 
 import abc
 import contextlib
+import importlib
 import os
 import posixpath
+import shlex
 import shutil
 import stat as stat_mod
+import sys
 from dataclasses import dataclass
 
 
@@ -754,6 +757,54 @@ def _open_jump_sock(spec: str, target_host: str, target_port: int,
         raise
 
 
+def _missing_paramiko_message() -> str:
+    """Say how to install paramiko for the Python that is running Meridian.
+
+    The command names ``sys.executable`` rather than a bare ``pip``: the
+    ``pip`` on the PATH often belongs to another Python (Homebrew beside the
+    system one, pyenv, a venv), so ``pip install paramiko`` succeeds and the
+    error stays.  ``<this python> -m pip`` cannot miss.  It installs paramiko
+    on its own rather than ``meridian-commander[ssh]``, which could replace a
+    checkout or an editable install with the PyPI release, and has no
+    brackets for zsh to choke on.
+
+    The dialog that shows this clips long lines and never wraps them, so the
+    breaks are written here: every line but the command fits 74 columns (80
+    less the dialog's frame), and the command, whose length is the path's,
+    has a line of its own.
+    """
+    python = shlex.quote(sys.executable or "python3")
+    return (
+        "SSH and SFTP need the optional 'paramiko' package,\n"
+        "which is not installed for the Python that runs Meridian.\n"
+        "Install it with:\n"
+        f"  {python} -m pip install paramiko\n"
+        "then connect again (restart Meridian if this comes back)."
+    )
+
+
+def _import_paramiko():
+    """Import paramiko, or raise :class:`FileSystemError` saying how to.
+
+    A failed import is tried once more after ``importlib.invalidate_caches()``,
+    so a paramiko installed while Meridian runs -- the command the message
+    gives, run in another terminal -- is found on the next connect without a
+    restart.  The import system caches what each ``sys.path`` directory held,
+    and a package added since may not be seen without that.  A per-user
+    site-packages that did not exist at startup is not on ``sys.path`` at
+    all; that is what the message's "restart Meridian" is for.
+    """
+    try:
+        import paramiko
+    except ImportError:
+        importlib.invalidate_caches()
+        try:
+            import paramiko
+        except ImportError as exc:
+            raise FileSystemError(_missing_paramiko_message()) from exc
+    return paramiko
+
+
 def _open_ssh_client(
     host: str,
     username: str | None,
@@ -775,13 +826,7 @@ def _open_ssh_client(
     a hop's password mid-connection).  Raises :class:`FileSystemError` on any
     failure.
     """
-    try:
-        import paramiko
-    except ImportError as exc:
-        raise FileSystemError(
-            "SSH/SFTP support requires the 'paramiko' package "
-            "(pip install paramiko)."
-        ) from exc
+    paramiko = _import_paramiko()
 
     if _depth > _MAX_JUMPS:
         raise FileSystemError(

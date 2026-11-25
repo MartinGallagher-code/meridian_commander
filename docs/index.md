@@ -26,8 +26,8 @@ to a remote location, **Tab** to switch panes, and **F10** to quit.
 
 ## This manual
 
-- **[Installation](installation.md)** — the extras, pipx, and what to do when
-  `meridian` is "command not found".
+- **[Installation](installation.md)** — the extras, pipx, adding SSH support
+  later, and what to do when `meridian` is "command not found".
 - **[Usage](usage.md)** — the complete guide: connecting to a remote location,
   presets, the archive and document browsers, images, PDFs, and the full
   **key-binding reference**.

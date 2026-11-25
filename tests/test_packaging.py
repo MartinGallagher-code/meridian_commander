@@ -147,3 +147,33 @@ def test_the_two_versions_agree():
     declared = re.search(r'(?m)^version = "([^"]+)"$', text)
     assert declared, "no version in pyproject.toml"
     assert declared.group(1) == __version__
+
+
+# -- paramiko stays optional (MC-035) ------------------------------------------
+
+def test_paramiko_is_only_ever_an_extra():
+    """SSH support is an extra, never a requirement: the owner's decision.
+
+    A plain ``pip install meridian-commander`` stays on the standard library
+    (paramiko brings cryptography, bcrypt and pynacl, which are compiled),
+    and ``[ssh]``, or ``[sftp]``, its alias, adds paramiko. This reads the
+    installed metadata, which is what pip acts on, rather than
+    pyproject.toml, which Python 3.9 has no tomllib to parse.
+    """
+    from importlib import metadata
+
+    try:
+        requires = metadata.requires("meridian-commander") or []
+    except metadata.PackageNotFoundError:
+        pytest.skip("meridian-commander is not installed (pip install -e .)")
+    paramiko_extras = set()
+    for line in requires:
+        spec, _, marker = line.partition(";")
+        name = re.match(r"\s*([A-Za-z0-9._-]+)", spec).group(1)
+        extra = re.fullmatch(r"""\s*extra\s*==\s*["']([^"']+)["']\s*""",
+                             marker)
+        # The README promises no required dependencies at all.
+        assert extra, f"required outside an extra: {line!r}"
+        if name.lower() == "paramiko":
+            paramiko_extras.add(extra.group(1))
+    assert paramiko_extras == {"ssh", "sftp", "dev"}

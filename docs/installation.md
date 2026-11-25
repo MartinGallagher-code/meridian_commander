@@ -5,10 +5,12 @@ macOS; on Windows it runs under WSL). The core runs on the standard library
 alone — the optional extras add remote access and faster data crunching.
 
 ```bash
-pip install meridian-commander
-
-# with SFTP/SSH support (remote panes, in-pane remote terminal, SSH plug-ins)
+# the install to use: local, FTP, and SFTP/SSH (remote panes, the in-pane
+# remote terminal, the SSH plug-ins)
 pip install "meridian-commander[ssh]"
+
+# local and FTP only, on the standard library alone
+pip install meridian-commander
 
 # optional: pandas acceleration for the data plug-ins' group-by on large files
 pip install "meridian-commander[data]"
@@ -16,6 +18,9 @@ pip install "meridian-commander[data]"
 # or from a checkout
 pip install ".[ssh]"
 ```
+
+Keep the quotes: zsh, the macOS default shell, answers an unquoted `[ssh]`
+with "no matches found".
 
 This installs the `meridian-commander` command and its short alias
 `meridian`.
@@ -27,6 +32,31 @@ problem below entirely:
 ```bash
 pipx install "meridian-commander[ssh]"
 ```
+
+## Adding SSH support later
+
+Installed without `[ssh]`? The first SFTP or SSH connection, or SSH plug-in,
+says that the optional `paramiko` package is missing, and gives the command
+that installs it for the Python running Meridian, by its full path:
+
+```
+SSH and SFTP need the optional 'paramiko' package,
+which is not installed for the Python that runs Meridian.
+Install it with:
+  /usr/local/bin/python3 -m pip install paramiko
+then connect again (restart Meridian if this comes back).
+```
+
+Run that command in another terminal, then connect again: Meridian finds the
+new package without a restart. Restart it if the message comes back, which
+happens when pip had to create a per-user directory that did not exist when
+Meridian started.
+
+The full path is the point. A bare `pip` often belongs to a different Python
+from the one running `meridian` (Homebrew beside the system Python, pyenv, a
+virtualenv), so `pip install paramiko` succeeds and the message stays. If pip
+refuses the command because the environment is "externally managed" (see
+below), install Meridian with pipx instead, as above.
 
 ## If `meridian` is "command not found" after installing
 
